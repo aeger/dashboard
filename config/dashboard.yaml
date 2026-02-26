@@ -1,0 +1,43 @@
+site:
+  title: "AZ-Lab Home"
+  family_name: "Cook Family"
+
+weather:
+  latitude: 33.4484
+  longitude: -112.0740
+  location: "Phoenix, AZ"
+  units: imperial
+
+family:
+  photo_interval_seconds: 8
+  quick_links:
+    - { name: "Netflix", url: "https://netflix.com", icon: "netflix", color: "#E50914" }
+    - { name: "Disney+", url: "https://disneyplus.com", icon: "disney", color: "#113CCF" }
+    - { name: "YouTube", url: "https://youtube.com", icon: "youtube", color: "#FF0000" }
+    - { name: "Hulu", url: "https://hulu.com", icon: "hulu", color: "#1CE783" }
+    - { name: "Max", url: "https://max.com", icon: "max", color: "#002BE7" }
+    - { name: "Apple TV+", url: "https://tv.apple.com", icon: "appletv", color: "#000000" }
+    - { name: "Peacock", url: "https://peacocktv.com", icon: "peacock", color: "#000000" }
+    - { name: "Prime Video", url: "https://primevideo.com", icon: "prime", color: "#00A8E1" }
+  news_feeds:
+    - { url: "https://feeds.bbci.co.uk/news/rss.xml", name: "BBC News" }
+    - { url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", name: "NYT" }
+
+lab:
+  prometheus_url: "http://192.168.1.181:9090"
+  adguard_url: "http://192.168.99.2"
+  portainer_url: "http://192.168.1.181:9000"
+  hosts:
+    - { name: "MS-01", node_exporter_instance: "192.168.1.181:9100" }
+    - { name: "Beelink", node_exporter_instance: "192.168.1.253:9100" }
+  quick_links:
+    - { name: "Proxmox", url: "https://192.168.1.181:8006", icon: "proxmox" }
+    - { name: "Portainer", url: "http://192.168.1.181:9000", icon: "portainer" }
+    - { name: "Grafana", url: "https://grafana.az-lab.dev", icon: "grafana" }
+    - { name: "Traefik", url: "https://traefik.az-lab.dev", icon: "traefik" }
+    - { name: "AdGuard", url: "http://192.168.99.2", icon: "adguard" }
+    - { name: "Uptime Kuma", url: "https://uptime.az-lab.dev", icon: "uptime-kuma" }
+    - { name: "Immich", url: "https://photos.az-lab.dev", icon: "immich" }
+  tech_news_feeds:
+    - { url: "https://www.reddit.com/r/homelab/.rss", name: "r/homelab" }
+    - { url: "https://www.reddit.com/r/selfhosted/.rss", name: "r/selfhosted" }

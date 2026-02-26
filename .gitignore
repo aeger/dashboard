@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Dashboard data (production state — mount as volume)
+/data/
+
+# Credentials
+credentials.json
+token.json
