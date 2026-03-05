@@ -24,14 +24,14 @@ family:
     - { url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", name: "NYT" }
 
 lab:
-  prometheus_url: "http://proxmox.az-lab.dev"
+  prometheus_url: "http://192.168.1.181:9090"
   adguard_url: "http://192.168.99.2"
   portainer_url: "http://192.168.1.181:9000"
   hosts:
     - { name: "MS-01", node_exporter_instance: "192.168.1.181:9100" }
     - { name: "Beelink", node_exporter_instance: "192.168.1.253:9100" }
   quick_links:
-    - { name: "Proxmox", url: "https://192.168.1.181:8006", icon: "proxmox" }
+    - { name: "Proxmox", url: "https://proxmox.az-lab.dev:8006", icon: "proxmox" }
     - { name: "Portainer", url: "http://192.168.1.181:9000", icon: "portainer" }
     - { name: "Grafana", url: "https://grafana.az-lab.dev", icon: "grafana" }
     - { name: "Traefik", url: "https://traefik.az-lab.dev", icon: "traefik" }
