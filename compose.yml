@@ -80,6 +80,7 @@ services:
       - "traefik.http.routers.immich.tls=true"
       - "traefik.http.routers.immich.middlewares=lan-allow@file"
       - "traefik.http.services.immich.loadbalancer.server.port=2283"
+      - "traefik.docker.network=proxy"
 
   immich-machine-learning:
     image: ghcr.io/immich-app/immich-machine-learning:release

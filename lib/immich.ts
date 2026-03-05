@@ -10,19 +10,25 @@ export async function fetchRandomPhotos(count = 20): Promise<ImmichPhoto[]> {
   if (!baseUrl || !apiKey) return []
 
   try {
-    const res = await fetch(`${baseUrl}/api/assets/random?count=${count}&type=IMAGE`, {
-      headers: { 'x-api-key': apiKey },
-      next: { revalidate: 300 },
+    const res = await fetch(`${baseUrl}/api/search/random`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ count }),
     })
 
     if (!res.ok) return []
 
     const assets = await res.json()
 
-    return (assets as { id: string }[]).map((asset) => ({
-      id: asset.id,
-      url: `${baseUrl}/api/assets/${asset.id}/thumbnail?size=preview`,
-    }))
+    return (assets as { id: string; type: string }[])
+      .filter((a) => a.type === 'IMAGE')
+      .map((asset) => ({
+        id: asset.id,
+        url: `/api/photos/proxy?id=${asset.id}`,
+      }))
   } catch {
     return []
   }
