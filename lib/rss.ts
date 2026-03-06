@@ -7,7 +7,13 @@ export interface RssItem {
   source: string
 }
 
-const parser = new Parser({ timeout: 8000 })
+const parser = new Parser({
+  timeout: 10000,
+  headers: {
+    'User-Agent': 'AZ-Lab-Dashboard/1.0 (RSS Reader)',
+    'Accept': 'application/rss+xml, application/xml, text/xml',
+  },
+})
 
 export async function fetchRssFeeds(feeds: { url: string; name: string }[], limit = 10): Promise<RssItem[]> {
   const results = await Promise.allSettled(
@@ -29,7 +35,6 @@ export async function fetchRssFeeds(feeds: { url: string; name: string }[], limi
     }
   }
 
-  // Sort by date descending
   return items
     .filter((i) => i.title && i.link)
     .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
