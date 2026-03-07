@@ -1,36 +1,161 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AZ-Lab Home Dashboard
 
-## Getting Started
+A self-hosted family and homelab dashboard built with Next.js, designed to run behind Traefik on a Podman-based infrastructure.
 
-First, run the development server:
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss)
+
+## Overview
+
+Two-view dashboard serving both family and homelab needs:
+
+- **Family View** (`/`) — Clock, weather, Google Calendar, Immich photo slideshow, news feeds, quick links, and a message banner
+- **Lab View** (`/lab`) — Service monitoring, host metrics, container management, network/DNS stats, and tech news
+
+## Features
+
+### Family View
+- **Google Calendar** — Full CRUD with multi-calendar support, recurring events, month grid with event dots, and agenda view
+- **Photo Slideshow** — Rotating photos from Immich with proxy support
+- **Weather** — Current conditions and forecast via Open-Meteo (no API key needed)
+- **News** — RSS feeds with Reddit JSON API support, file-based caching, and feed management UI
+- **Message Banner** — Configurable announcement banner with severity levels (info, success, warning, alert)
+- **Quick Links** — Configurable shortcuts to frequently used services
+
+### Lab View
+- **Service Status** — Real-time monitoring via Uptime Kuma
+- **Host Metrics** — CPU, RAM, and disk usage from Prometheus/node_exporter
+- **Container List** — Running containers from Portainer
+- **Network Stats** — DNS query stats and blocking info from AdGuard Home
+- **RustDesk** — Remote desktop status via TCP probe
+- **Tech News** — Curated RSS feeds for homelab/self-hosted content
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Framework | Next.js 16 (App Router, standalone output) |
+| UI | React 19, Tailwind CSS 4 |
+| Language | TypeScript 5 |
+| Container | Podman (rootless), multi-stage Dockerfile |
+| Reverse Proxy | Traefik |
+| Config | YAML (volume-mounted) |
+
+## Integrations
+
+| Service | Purpose | Auth |
+|---------|---------|------|
+| Google Calendar | Calendar events CRUD | Service account (JWT) |
+| Immich | Photo slideshow | API key |
+| Uptime Kuma | Service monitoring | Unauthenticated (internal) |
+| Prometheus | Host metrics | Unauthenticated (internal) |
+| Portainer | Container management | API key |
+| AdGuard Home | DNS/network stats | Username/password |
+| RustDesk | Remote desktop status | TCP probe |
+| Open-Meteo | Weather data | No auth needed |
+
+## Quick Start
+
+### Prerequisites
+- Podman with `podman-compose`
+- Traefik reverse proxy (or adapt for your setup)
+- Services you want to integrate (Immich, Uptime Kuma, etc.)
+
+### 1. Configure
+
+Copy and edit the config file:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp config/dashboard.yaml.example config/dashboard.yaml
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a `.env` file with your secrets:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+IMMICH_URL=http://immich-server:2283
+IMMICH_API_KEY=your-key
+UPTIME_KUMA_URL=http://uptime-kuma:3001
+PROMETHEUS_URL=http://prometheus:9090
+PORTAINER_URL=http://portainer:9000
+PORTAINER_API_KEY=your-key
+ADGUARD_URL=http://your-adguard-ip
+ADGUARD_USERNAME=admin
+ADGUARD_PASSWORD=your-password
+GOOGLE_SERVICE_ACCOUNT_KEY=base64-encoded-json
+GOOGLE_CALENDAR_IDS=calendar1@gmail.com,calendar2@gmail.com
+ADMIN_SECRET=your-admin-secret
+RUSTDESK_HOST=your-rustdesk-host
+RUSTDESK_KEY=your-key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 2. Deploy
 
-## Learn More
+```bash
+podman compose build dashboard
+podman compose up -d dashboard
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Access
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The dashboard will be available at your configured domain (e.g., `https://home.your-domain.dev`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project Structure
 
-## Deploy on Vercel
+```
+app/
+├── page.tsx                    # Family view (/)
+├── lab/page.tsx                # Lab view (/lab)
+└── api/                        # API routes
+    ├── calendar/               # Google Calendar CRUD
+    ├── containers/             # Portainer containers
+    ├── dns/                    # AdGuard stats
+    ├── feeds/                  # Feed management
+    ├── message/                # Banner message
+    ├── metrics/                # Prometheus metrics
+    ├── news/                   # RSS news
+    ├── photos/                 # Immich photos
+    ├── rustdesk/               # RustDesk status
+    ├── services/               # Uptime Kuma monitors
+    └── weather/                # Open-Meteo weather
+components/
+├── family/                     # Family view widgets
+│   ├── calendar/               # Calendar sub-components
+│   ├── CalendarWidget.tsx
+│   ├── ClockWidget.tsx
+│   ├── MessageBlock.tsx
+│   ├── NewsWidget.tsx
+│   ├── PhotoSlideshow.tsx
+│   ├── QuickLinks.tsx
+│   └── WeatherWidget.tsx
+├── lab/                        # Lab view widgets
+└── shared/                     # Shared components
+lib/                            # Service integrations
+config/
+└── dashboard.yaml              # Dashboard configuration
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Configuration
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All configuration is in `config/dashboard.yaml` (volume-mounted, read-only). Secrets are passed via environment variables through `compose.yml`.
+
+The config file controls:
+- Weather location and units
+- Quick links for both views
+- News feed sources
+- Prometheus host targets
+- Lab service URLs
+
+## Google Calendar Setup
+
+1. Create a Google Cloud project and enable the Calendar API
+2. Create a service account and download the JSON key
+3. Base64-encode the key: `base64 -w 0 < key.json`
+4. Set `GOOGLE_SERVICE_ACCOUNT_KEY` env var with the encoded value
+5. Share your calendars with the service account email
+6. Set `GOOGLE_CALENDAR_IDS` with comma-separated calendar IDs
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
