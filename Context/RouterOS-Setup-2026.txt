@@ -1,0 +1,215 @@
+[Jeff@MikroTik] > export
+# 2026-02-27 00:36:37 by RouterOS 7.21
+# software id = AIDT-HVMW
+#
+# model = RB5009UPr+S+
+# serial number = HK40AY7X8TT
+/interface bridge
+add name=bridge-lan vlan-filtering=yes
+/interface ethernet
+set [ find default-name=ether1 ] l2mtu=1514 mac-address=00:11:22:33:44:55
+set [ find default-name=ether2 ] l2mtu=1514
+set [ find default-name=ether3 ] l2mtu=1514
+set [ find default-name=ether4 ] l2mtu=1514
+set [ find default-name=ether5 ] l2mtu=1514
+set [ find default-name=ether6 ] l2mtu=1514
+set [ find default-name=ether7 ] l2mtu=1514
+set [ find default-name=ether8 ] l2mtu=1514
+set [ find default-name=sfp-sfpplus1 ] l2mtu=1514
+/interface veth
+add address=192.168.99.2/24 container-mac-address=02:FE:4E:38:22:F3 dhcp=no gateway=\
+    192.168.99.1 gateway6="" mac-address=02:FE:4E:38:22:F2 name=veth-ag
+/interface list
+add name=LAN
+add name=WAN
+/ip pool
+add name=lan-pool ranges=192.168.1.121-192.168.1.254
+/ip dhcp-server
+add address-pool=lan-pool interface=bridge-lan name=server1
+/snmp community
+set [ find default=yes ] disabled=yes name=YourStrongCommunity
+add addresses=10.89.0.0/24,192.168.1.181/32 name=CookFamilyServer
+/container
+add file=usb1/adguardhome.tar interface=veth-ag layer-dir="" logging=yes mountlists=\
+    ag-conf,ag-work name=adguard root-dir=/adguard start-on-boot=yes workdir=\
+    /opt/adguardhome/work
+/container config
+set memory-high=512.0MiB registry-url=https://registry-1.docker.io
+/container mounts
+add dst=/opt/adguardhome/conf list=ag-conf src=/usb1/docker/adguard/conf
+add dst=/opt/adguardhome/work list=ag-work src=/usb1/docker/adguard/work
+/disk
+set usb1 media-interface=*2000010
+/interface bridge port
+add bridge=bridge-lan interface=ether2
+add bridge=bridge-lan interface=ether3
+add bridge=bridge-lan interface=ether4
+add bridge=bridge-lan interface=ether5
+add bridge=bridge-lan interface=ether6
+add bridge=bridge-lan interface=ether7
+add bridge=bridge-lan interface=ether8
+add bridge=bridge-lan interface=sfp-sfpplus1
+add bridge=bridge-lan interface=veth-ag
+/interface detect-internet
+set detect-interface-list=all
+/interface list member
+add interface=bridge-lan list=LAN
+add interface=ether1 list=WAN
+add interface=veth-ag list=LAN
+/ip address
+add address=192.168.1.1/24 interface=bridge-lan network=192.168.1.0
+add address=192.168.99.1/24 interface=bridge-lan network=192.168.99.0
+/ip cloud
+set ddns-enabled=yes ddns-update-interval=59m59s
+/ip dhcp-client
+add interface=ether1 use-peer-dns=no
+/ip dhcp-server lease
+add address=192.168.1.254 client-id=1:24:8a:7:94:79:31 comment=DESKTOP-OFFICEMAIN \
+    mac-address=24:8A:07:94:79:31 server=server1
+add address=192.168.1.253 client-id=1:0:30:93:1d:b:c9 comment=DESKTOP-MINIPC \
+    mac-address=00:30:93:1D:0B:C9 server=server1
+add address=192.168.1.251 comment="Buffalo NAS" mac-address=C4:3C:EA:30:7C:D9 server=\
+    server1
+add address=192.168.1.250 client-id=1:24:8a:7:94:7c:44 comment=DESKTOP-OFFICE2 \
+    mac-address=24:8A:07:94:7C:44 server=server1
+add address=192.168.1.248 client-id=1:4:f4:1c:89:b:f0 comment=CRS309 mac-address=\
+    04:F4:1C:89:0B:F0 server=server1
+add address=192.168.1.247 client-id=ff:76:cf:b8:c7:0:2:0:0:ab:11:6c:ac:f9:de:2f:7b:65:30 \
+    mac-address=0C:EA:14:DB:7E:35 server=server1
+add address=192.168.1.246 client-id=1:84:78:48:ca:83:4f mac-address=84:78:48:CA:83:4F \
+    server=server1
+add address=192.168.1.244 client-id=1:ca:49:d:94:3:84 mac-address=CA:49:0D:94:03:84 \
+    server=server1
+add address=192.168.1.224 mac-address=FC:D7:49:BB:81:F0 server=server1
+add address=192.168.1.204 client-id=1:66:c1:b8:cf:d4:54 mac-address=66:C1:B8:CF:D4:54 \
+    server=server1
+add address=192.168.1.194 client-id=1:8c:30:66:98:4d:22 mac-address=8C:30:66:98:4D:22 \
+    server=server1
+add address=192.168.1.181 comment="MS01 podman01 (svc-podman-01)" mac-address=\
+    BC:24:11:9D:E5:3F
+add address=192.168.1.182 comment="MS01 Proxmox" mac-address=BC:24:11:9D:E5:3A
+add address=192.168.1.193 client-id=1:28:c5:c8:ce:d8:94 mac-address=28:C5:C8:CE:D8:94 \
+    server=server1
+add address=192.168.1.165 client-id=1:98:fa:2e:bc:ad:6b mac-address=98:FA:2E:BC:AD:6B \
+    server=server1
+/ip dhcp-server network
+add address=192.168.1.0/24 dns-server=192.168.99.2 gateway=192.168.1.1
+add address=192.168.99.0/24 dns-server=192.168.99.2 gateway=192.168.99.1
+/ip dns
+set allow-remote-requests=yes servers=1.1.1.1,9.9.9.9
+/ip firewall address-list
+add address=192.168.1.254 list=management
+add address=192.168.1.250 list=management
+add address=192.168.1.253 list=management
+add address=173.245.48.0/20 list=cloudflare
+add address=103.21.244.0/22 list=cloudflare
+add address=103.22.200.0/22 list=cloudflare
+add address=103.31.4.0/22 list=cloudflare
+add address=141.101.64.0/18 list=cloudflare
+add address=108.162.192.0/18 list=cloudflare
+add address=190.93.240.0/20 list=cloudflare
+add address=188.114.96.0/20 list=cloudflare
+add address=197.234.240.0/22 list=cloudflare
+add address=198.41.128.0/17 list=cloudflare
+add address=162.158.0.0/15 list=cloudflare
+add address=104.16.0.0/13 list=cloudflare
+add address=104.24.0.0/14 list=cloudflare
+add address=172.64.0.0/13 list=cloudflare
+add address=131.0.72.0/22 list=cloudflare
+/ip firewall filter
+add action=fasttrack-connection chain=forward comment="Fasttrack established" \
+    connection-state=established,related
+add action=accept chain=forward comment="Allow established/related" connection-state=\
+    established,related
+add action=drop chain=forward comment="Drop invalid" connection-state=invalid
+add action=accept chain=forward comment="Allow WAN -> RustDesk (dstnat TCP ports)" \
+    connection-nat-state=dstnat dst-address=192.168.1.181 dst-port=\
+    21115,21116,21117,21118,21119 in-interface-list=WAN protocol=tcp
+add action=accept chain=forward comment="Allow WAN -> Hytale AMP (dstnat UDP 5520)" \
+    connection-nat-state=dstnat dst-address=192.168.1.130 dst-port=5520 \
+    in-interface-list=WAN protocol=udp
+add action=accept chain=forward comment="Allow LAN out to internet" in-interface-list=\
+    LAN
+add action=accept chain=forward comment=\
+    "Allow Cloudflare -> Traefik (origin 8443 -> 443)" connection-nat-state=dstnat \
+    dst-address=192.168.1.181 dst-port=443 in-interface-list=WAN protocol=tcp \
+    src-address-list=cloudflare
+add action=accept chain=input comment="Allow SNMP from svc-podman-01" dst-port=161 \
+    protocol=udp src-address=192.168.1.181
+add action=drop chain=forward comment="Drop non-Cloudflare -> Traefik" \
+    connection-nat-state=dstnat dst-address=192.168.1.181 dst-port=443 \
+    in-interface-list=WAN protocol=tcp
+add action=drop chain=forward comment="Drop everything else from WAN" in-interface-list=\
+    WAN
+add action=accept chain=input comment="Accept established/related" connection-state=\
+    established,related
+add action=accept chain=input comment="Accept ICMP" limit=5,5:packet protocol=icmp
+add action=accept chain=input comment="WinBox from LAN only" dst-port=8291 protocol=tcp \
+    src-address=192.168.1.0/24
+add action=accept chain=input comment="SSH from management IPs only" dst-port=22 \
+    protocol=tcp src-address-list=management
+add action=drop chain=input comment="Drop everything else to router"
+/ip firewall nat
+add action=accept chain=dstnat comment="Prevent AdGuard DNS loop" dst-address=\
+    192.168.99.2 dst-port=53 protocol=tcp
+add action=accept chain=dstnat comment="Prevent AdGuard DNS loop" dst-address=\
+    192.168.99.2 dst-port=53 protocol=udp
+add action=accept chain=dstnat comment="Exempt AdGuard AND the router from forced DNS" \
+    dst-port=53 protocol=udp src-address=192.168.99.2
+add action=accept chain=dstnat comment="Exempt AdGuard AND the router from forced DNS" \
+    dst-port=53 protocol=tcp src-address=192.168.99.2
+add action=accept chain=dstnat comment="Exempt AdGuard AND the router from forced DNS" \
+    dst-port=53 protocol=udp src-address=192.168.1.1
+add action=accept chain=dstnat comment="Exempt AdGuard AND the router from forced DNS" \
+    dst-port=53 protocol=tcp src-address=192.168.1.1
+add action=dst-nat chain=dstnat comment="Force LAN DNS to AdGuard" dst-address=\
+    !192.168.99.2 dst-port=53 in-interface-list=LAN protocol=udp to-addresses=\
+    192.168.99.2
+add action=dst-nat chain=dstnat comment=\
+    "fallback rule disabled to decrease conntrack load. Force LAN DNS to AdGuard" \
+    disabled=yes dst-address=!192.168.99.2 dst-port=53 in-interface-list=LAN protocol=\
+    tcp to-addresses=192.168.99.2
+add action=dst-nat chain=dstnat comment=\
+    "RustDesk TCP 21115-21119 -> svc-podman-01 (NAT test, ID, relay, ws)" dst-port=\
+    21115-21119 in-interface-list=WAN protocol=tcp to-addresses=192.168.1.181
+add action=dst-nat chain=dstnat comment=\
+    "RustDesk UDP 21116 -> svc-podman-01 (ID/heartbeat)" dst-port=21116 \
+    in-interface-list=WAN protocol=udp to-addresses=192.168.1.181
+add action=dst-nat chain=dstnat comment="Hytale AMP UDP 5520 -> lxc-amp-game-server-01" \
+    dst-port=5520 in-interface-list=WAN protocol=udp to-addresses=192.168.1.130 \
+    to-ports=5520
+add action=dst-nat chain=dstnat comment="Traefik origin 8443 -> svc-podman-01:443" \
+    dst-port=8443 in-interface=ether1 protocol=tcp to-addresses=192.168.1.181 to-ports=\
+    443
+add action=dst-nat chain=dstnat comment="Hairpin dstnat 8443 -> svc-podman-01:443" \
+    dst-port=8443 in-interface=bridge-lan protocol=tcp to-addresses=192.168.1.181 \
+    to-ports=443
+add action=masquerade chain=srcnat comment="Hytale AMP hairpin" dst-address=\
+    192.168.1.130 dst-port=5520 out-interface=bridge-lan protocol=udp src-address=\
+    192.168.1.0/24
+add action=masquerade chain=srcnat comment="Traefik hairpin" dst-address=192.168.1.181 \
+    out-interface=bridge-lan src-address=192.168.1.0/24
+add action=masquerade chain=srcnat comment=Default out-interface=ether1
+/ip service
+set ftp disabled=yes
+set telnet disabled=yes
+set www disabled=yes
+set api-ssl disabled=yes
+/ipv6 dhcp-client
+add interface=ether1 pool-name=/59 request=prefix
+/ipv6 nd
+set [ find default=yes ] advertise-dns=yes
+/snmp
+set contact=AZ-Lab enabled=yes location=Rack trap-community=CookFamilyServer \
+    trap-target=0.0.0.0
+/system clock
+set time-zone-autodetect=no time-zone-name=America/Phoenix
+/system ntp server
+set broadcast-addresses=0.0.0.0 use-local-clock=yes
+/system scheduler
+add interval=1d name=flush-dns-conntrack on-event=\
+    "/ip firewall connection remove [find dst-port=53]" policy=\
+    ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon start-date=\
+    2026-01-28 start-time=03:00:00
+/tool sniffer
+set streaming-server=127.0.0.1:7777

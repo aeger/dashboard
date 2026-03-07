@@ -1,20 +1,18 @@
 import { NextResponse } from 'next/server'
 import { fetchRssFeeds } from '@/lib/rss'
-import { getConfig } from '@/lib/config'
-
-export const revalidate = 900 // 15 min
+import { getCachedNews } from '@/lib/news-cache'
+import { getFeeds } from '@/lib/feeds'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const type = searchParams.get('type') // 'family' or 'lab'
+  const type = searchParams.get('type') === 'lab' ? 'lab' : 'family'
 
-  const config = getConfig()
-  const feeds = type === 'lab' ? config.lab.tech_news_feeds : config.family.news_feeds
+  const feeds = getFeeds(type)
 
   try {
-    const items = await fetchRssFeeds(feeds, 8)
-    return NextResponse.json({ items })
+    const { items, cachedAt } = await getCachedNews(type, () => fetchRssFeeds(feeds, 8))
+    return NextResponse.json({ items, cachedAt })
   } catch {
-    return NextResponse.json({ items: [] })
+    return NextResponse.json({ items: [], cachedAt: null })
   }
 }

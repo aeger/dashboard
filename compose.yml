@@ -17,9 +17,11 @@ services:
       - ADGUARD_URL=${ADGUARD_URL:-}
       - ADGUARD_USERNAME=${ADGUARD_USERNAME:-}
       - ADGUARD_PASSWORD=${ADGUARD_PASSWORD:-}
-      - PORTAINER_URL=${PORTAINER_URL:-}
+      - PORTAINER_URL=${PORTAINER_URL:-http://portainer:9000}
       - PORTAINER_API_KEY=${PORTAINER_API_KEY:-}
       - GOOGLE_CALENDAR_ICAL_URL=${GOOGLE_CALENDAR_ICAL_URL:-}
+      - GOOGLE_SERVICE_ACCOUNT_KEY=${GOOGLE_SERVICE_ACCOUNT_KEY:-}
+      - GOOGLE_CALENDAR_IDS=${GOOGLE_CALENDAR_IDS:-}
       - ADMIN_SECRET=${ADMIN_SECRET:-changeme}
       - RUSTDESK_HOST=${RUSTDESK_HOST:-}
       - RUSTDESK_KEY=${RUSTDESK_KEY:-}
@@ -33,6 +35,7 @@ services:
       - "traefik.http.routers.dashboard.rule=Host(`home.az-lab.dev`)"
       - "traefik.http.routers.dashboard.entrypoints=websecure"
       - "traefik.http.routers.dashboard.tls=true"
+      # TODO: Re-evaluate Authelia SSO for external access (photos, portainer, etc.)
       - "traefik.http.routers.dashboard.middlewares=lan-allow@file"
       - "traefik.http.services.dashboard.loadbalancer.server.port=3000"
 

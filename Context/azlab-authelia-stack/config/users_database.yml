@@ -1,0 +1,7 @@
+users:
+  jeff:
+    displayname: Jeff
+    password: REPLACE_WITH_GENERATED_HASH
+    email: REPLACE_WITH_YOUR_EMAIL
+    groups:
+      - admins

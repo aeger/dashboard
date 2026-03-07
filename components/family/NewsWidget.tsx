@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import FeedEditor from '@/components/shared/FeedEditor'
 
 interface NewsItem {
   title: string
@@ -12,45 +13,77 @@ interface NewsItem {
 export default function NewsWidget() {
   const [items, setItems] = useState<NewsItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [showEditor, setShowEditor] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
-  useEffect(() => {
-    fetch('/api/news?type=family')
-      .then((r) => r.json())
-      .then((d) => setItems(d.items ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+  async function load() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/news?type=family')
+      const d = await res.json()
+      setItems(d.items ?? [])
+    } catch {}
+    setLoading(false)
+  }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-32">
-      <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-    </div>
-  )
-
-  if (items.length === 0) return (
-    <div className="text-zinc-500 text-sm text-center py-8">No news available</div>
-  )
+  useEffect(() => { load() }, [reloadKey])
 
   return (
-    <ul className="space-y-2">
-      {items.slice(0, 8).map((item, i) => (
-        <li key={i}>
-          <a
-            href={item.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block group"
+    <>
+      {showEditor && (
+        <FeedEditor
+          type="family"
+          onClose={() => setShowEditor(false)}
+          onSaved={() => setReloadKey((k) => k + 1)}
+        />
+      )}
+
+      <div>
+        <div className="flex justify-end mb-2 gap-3">
+          <button
+            onClick={() => setShowEditor(true)}
+            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
           >
-            <div className="text-sm text-zinc-200 group-hover:text-white transition-colors line-clamp-2">
-              {item.title}
-            </div>
-            <div className="text-xs text-zinc-500 mt-0.5">
-              {item.source} · {formatDate(item.pubDate)}
-            </div>
-          </a>
-        </li>
-      ))}
-    </ul>
+            edit feeds
+          </button>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors disabled:opacity-40"
+          >
+            refresh
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-zinc-500 text-sm text-center py-8">No news available</div>
+        ) : (
+          <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {items.map((item, i) => (
+              <li key={i}>
+                <a
+                  href={item.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block group"
+                >
+                  <div className="text-sm text-zinc-200 group-hover:text-white transition-colors line-clamp-2">
+                    {item.title}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    {item.source} · {formatDate(item.pubDate)}
+                  </div>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -58,12 +91,9 @@ function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   try {
     const d = new Date(dateStr)
-    const now = new Date()
-    const diff = (now.getTime() - d.getTime()) / 1000 / 60
+    const diff = (Date.now() - d.getTime()) / 1000 / 60
     if (diff < 60) return `${Math.round(diff)}m ago`
     if (diff < 1440) return `${Math.round(diff / 60)}h ago`
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  } catch {
-    return ''
-  }
+  } catch { return '' }
 }

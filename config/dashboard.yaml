@@ -11,14 +11,14 @@ weather:
 family:
   photo_interval_seconds: 8
   quick_links:
+    - { name: "Photos", url: "https://photos.az-lab.dev", icon: "photos", color: "#4250AF" }
+    - { name: "Gmail", url: "https://mail.google.com", icon: "gmail", color: "#EA4335" }
+    - { name: "Prime Video", url: "https://primevideo.com", icon: "prime", color: "#00A8E1" }
+    - { name: "YouTube", url: "https://youtube.com", icon: "youtube", color: "#FF0000" }
     - { name: "Netflix", url: "https://netflix.com", icon: "netflix", color: "#E50914" }
     - { name: "Disney+", url: "https://disneyplus.com", icon: "disney", color: "#113CCF" }
-    - { name: "YouTube", url: "https://youtube.com", icon: "youtube", color: "#FF0000" }
-    - { name: "Hulu", url: "https://hulu.com", icon: "hulu", color: "#1CE783" }
-    - { name: "Max", url: "https://max.com", icon: "max", color: "#002BE7" }
-    - { name: "Apple TV+", url: "https://tv.apple.com", icon: "appletv", color: "#000000" }
-    - { name: "Peacock", url: "https://peacocktv.com", icon: "peacock", color: "#000000" }
-    - { name: "Prime Video", url: "https://primevideo.com", icon: "prime", color: "#00A8E1" }
+    - { name: "AMP", url: "https://games.az-lab.dev", icon: "amp", color: "#2D9CDB" }
+    - { name: "AdGuard", url: "http://192.168.99.2", icon: "adguard", color: "#68BC71" }
   news_feeds:
     - { url: "https://feeds.bbci.co.uk/news/rss.xml", name: "BBC News" }
     - { url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", name: "NYT" }
@@ -31,7 +31,7 @@ lab:
     - { name: "MS-01", node_exporter_instance: "node_exporter:9100" }
   quick_links:
     - { name: "Proxmox", url: "https://proxmox.az-lab.dev:8006", icon: "proxmox" }
-    - { name: "Portainer", url: "http://192.168.1.181:9000", icon: "portainer" }
+    - { name: "Portainer", url: "https://portainer.az-lab.dev", icon: "portainer" }
     - { name: "Grafana", url: "https://grafana.az-lab.dev", icon: "grafana" }
     - { name: "Traefik", url: "https://traefik.az-lab.dev", icon: "traefik" }
     - { name: "AdGuard", url: "http://192.168.99.2", icon: "adguard" }

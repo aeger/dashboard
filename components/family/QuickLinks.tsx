@@ -1,14 +1,14 @@
 import type { QuickLink } from '@/lib/config'
 
 const ICON_EMOJIS: Record<string, string> = {
+  photos: '📷',
+  gmail: '✉️',
   netflix: '🎬',
   disney: '🏰',
   youtube: '▶️',
-  hulu: '📺',
-  max: '🎭',
-  appletv: '🍎',
-  peacock: '🦚',
   prime: '📦',
+  amp: '🎮',
+  adguard: '🛡️',
 }
 
 interface QuickLinksProps {

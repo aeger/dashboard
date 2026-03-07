@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "google-auth-library": "^10.6.1",
     "js-yaml": "^4.1.1",
     "next": "16.1.6",
     "node-ical": "^0.25.3",
@@ -25,6 +26,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   }
 }

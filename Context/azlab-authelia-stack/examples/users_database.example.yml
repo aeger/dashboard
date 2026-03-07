@@ -1,0 +1,7 @@
+users:
+  example:
+    displayname: Example User
+    password: REPLACE_WITH_HASH
+    email: user@example.com
+    groups:
+      - admins

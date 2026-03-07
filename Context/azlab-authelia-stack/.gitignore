@@ -1,0 +1,19 @@
+# Authelia runtime
+data/
+*.sqlite3
+*.db
+
+# Secrets
+.env
+secrets.yml
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak

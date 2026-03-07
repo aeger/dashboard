@@ -19,13 +19,24 @@ export default function FamilyPage() {
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <ClockWidget />
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="Cook Family" className="w-12 h-12 rounded-full" />
+          <ClockWidget />
+        </div>
         <ViewToggle currentView="family" />
       </div>
 
       {/* Message Block */}
       <div className="mb-4">
         <MessageBlock initialMessage={message} />
+      </div>
+
+      {/* Calendar — Star of the show, full width */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+          Family Calendar
+        </h2>
+        <CalendarWidget />
       </div>
 
       {/* Weather + Photos */}
@@ -45,16 +56,10 @@ export default function FamilyPage() {
         <QuickLinks links={config.family.quick_links} />
       </div>
 
-      {/* News + Calendar */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">News</h2>
-          <NewsWidget />
-        </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Calendar — Next 7 Days</h2>
-          <CalendarWidget />
-        </div>
+      {/* News */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">News</h2>
+        <NewsWidget />
       </div>
     </div>
   )

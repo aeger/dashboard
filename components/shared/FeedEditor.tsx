@@ -1,0 +1,381 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+
+interface Feed {
+  url: string
+  name: string
+}
+
+interface FeedEditorProps {
+  type: 'family' | 'lab'
+  onClose: () => void
+  onSaved: () => void
+}
+
+const LS_KEY = 'az_dashboard_secret'
+const SECRET_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+function loadCachedSecret(): string | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (!raw) return null
+    const { s, exp } = JSON.parse(raw)
+    if (Date.now() > exp) { localStorage.removeItem(LS_KEY); return null }
+    return s
+  } catch { return null }
+}
+
+function persistSecret(secret: string) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ s: secret, exp: Date.now() + SECRET_TTL_MS }))
+  } catch {}
+}
+
+function forgetSecret() {
+  try { localStorage.removeItem(LS_KEY) } catch {}
+}
+
+function autoName(url: string): string {
+  try {
+    const reddit = url.match(/reddit\.com\/r\/([^/.?#]+)/i)
+    if (reddit) return `r/${reddit[1]}`
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch { return '' }
+}
+
+function validateUrl(url: string, existing: Feed[]): string {
+  const trimmed = url.trim()
+  if (!trimmed) return 'URL is required'
+  try {
+    const u = new URL(trimmed)
+    if (!['http:', 'https:'].includes(u.protocol)) return 'URL must start with http:// or https://'
+  } catch {
+    return 'Enter a valid URL, e.g. https://example.com/feed.rss'
+  }
+  if (existing.some((f) => f.url === trimmed)) return 'This feed is already in the list'
+  return ''
+}
+
+export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) {
+  const label = type === 'lab' ? 'Tech News' : 'News'
+
+  const [step, setStep] = useState<'loading' | 'auth' | 'edit'>('loading')
+  const [secret, setSecret] = useState('')
+  const [secretRemembered, setSecretRemembered] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+
+  const [feeds, setFeeds] = useState<Feed[]>([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  const [addUrl, setAddUrl] = useState('')
+  const [addName, setAddName] = useState('')
+  const [urlError, setUrlError] = useState('')
+  const [urlDirty, setUrlDirty] = useState(false)
+
+  const urlInputRef = useRef<HTMLInputElement>(null)
+  const secretInputRef = useRef<HTMLInputElement>(null)
+
+  // On mount: check for a cached secret and skip auth if valid
+  useEffect(() => {
+    const cached = loadCachedSecret()
+    if (cached) {
+      setSecret(cached)
+      setSecretRemembered(true)
+      loadFeeds(cached)
+    } else {
+      setStep('auth')
+    }
+  }, [])
+
+  // Focus management
+  useEffect(() => {
+    if (step === 'auth') secretInputRef.current?.focus()
+  }, [step])
+
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  async function loadFeeds(s: string) {
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const res = await fetch(`/api/feeds?type=${type}`)
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      setFeeds(data.feeds ?? [])
+      setStep('edit')
+    } catch {
+      setAuthError('Failed to load feeds — please try again')
+      setStep('auth')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleAuth(e: React.FormEvent) {
+    e.preventDefault()
+    loadFeeds(secret)
+  }
+
+  function handleRemove(index: number) {
+    setFeeds((prev) => prev.filter((_, i) => i !== index))
+    setSaveError('')
+  }
+
+  function handleUrlChange(val: string) {
+    setAddUrl(val)
+    if (urlDirty) setUrlError(validateUrl(val, feeds))
+  }
+
+  function handleUrlBlur() {
+    setUrlDirty(true)
+    const err = validateUrl(addUrl, feeds)
+    setUrlError(err)
+    if (!err && addUrl.trim() && !addName.trim()) {
+      setAddName(autoName(addUrl.trim()))
+    }
+  }
+
+  function handleAddFeed() {
+    setUrlDirty(true)
+    const trimmedUrl = addUrl.trim()
+    const err = validateUrl(trimmedUrl, feeds)
+    if (err) { setUrlError(err); urlInputRef.current?.focus(); return }
+    if (feeds.length >= 15) { setUrlError('Maximum of 15 feeds reached'); return }
+    const name = addName.trim() || autoName(trimmedUrl) || trimmedUrl
+    setFeeds((prev) => [...prev, { url: trimmedUrl, name }])
+    setAddUrl('')
+    setAddName('')
+    setUrlError('')
+    setUrlDirty(false)
+    setSaveError('')
+    urlInputRef.current?.focus()
+  }
+
+  function handleAddKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); handleAddFeed() }
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setSaveError('')
+    try {
+      const res = await fetch('/api/feeds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ type, feeds }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 401) {
+          forgetSecret()
+          setSecretRemembered(false)
+          setSaveError('Incorrect secret — please re-enter')
+          setStep('auth')
+        } else {
+          setSaveError(data.error ?? 'Save failed')
+        }
+        return
+      }
+      persistSecret(secret) // refresh the 24h TTL on every successful save
+      onSaved()
+      onClose()
+    } catch {
+      setSaveError('Save failed — please try again')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleForgetSecret() {
+    forgetSecret()
+    setSecretRemembered(false)
+    setSecret('')
+    setStep('auth')
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      aria-modal="true"
+      role="dialog"
+      aria-label={`Manage ${label} Feeds`}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-white">Manage {label} Feeds</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">Add or remove RSS / Atom feeds</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-500 hover:text-white transition-colors text-xl leading-none p-1 -mr-1 rounded"
+            aria-label="Close"
+          >✕</button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 overflow-y-auto flex-1">
+
+          {/* Loading (checking cached secret) */}
+          {step === 'loading' && (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+            </div>
+          )}
+
+          {/* Auth step */}
+          {step === 'auth' && (
+            <form onSubmit={handleAuth} className="space-y-4">
+              <p className="text-sm text-zinc-400">Enter your admin secret to manage feeds.</p>
+              <input
+                ref={secretInputRef}
+                type="password"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder="Admin secret"
+                autoComplete="current-password"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors"
+              />
+              <p className="text-xs text-zinc-600">Your secret will be remembered for 24 hours.</p>
+              {authError && <p className="text-sm text-red-400">{authError}</p>}
+              <button
+                type="submit"
+                disabled={authLoading || !secret.trim()}
+                className="w-full py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {authLoading ? 'Loading…' : 'Continue'}
+              </button>
+            </form>
+          )}
+
+          {/* Edit step */}
+          {step === 'edit' && (
+            <form onSubmit={handleSave} className="space-y-5">
+
+              {/* Current feeds */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current feeds</span>
+                  <div className="flex items-center gap-3">
+                    {secretRemembered && (
+                      <button
+                        type="button"
+                        onClick={handleForgetSecret}
+                        className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                        title="Clear remembered secret and re-enter"
+                      >
+                        forget secret
+                      </button>
+                    )}
+                    <span className="text-xs text-zinc-600">{feeds.length} / 15</span>
+                  </div>
+                </div>
+
+                {feeds.length === 0 ? (
+                  <div className="text-sm text-zinc-500 italic py-3 text-center border border-dashed border-zinc-800 rounded-lg">
+                    No feeds — add one below
+                  </div>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {feeds.map((feed, i) => (
+                      <li
+                        key={i}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-zinc-200 truncate">{feed.name}</div>
+                          <div className="text-xs text-zinc-500 truncate mt-0.5">{feed.url}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(i)}
+                          disabled={feeds.length <= 1}
+                          title={feeds.length <= 1 ? 'At least one feed is required' : `Remove "${feed.name}"`}
+                          aria-label={`Remove ${feed.name}`}
+                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
+                        >✕</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Add feed */}
+              <div className="border-t border-zinc-800 pt-5">
+                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Add a feed</div>
+                <div className="space-y-2">
+                  <div>
+                    <input
+                      ref={urlInputRef}
+                      type="url"
+                      value={addUrl}
+                      onChange={(e) => handleUrlChange(e.target.value)}
+                      onBlur={handleUrlBlur}
+                      onKeyDown={handleAddKeyDown}
+                      placeholder="https://example.com/feed.rss"
+                      autoComplete="off"
+                      className={`w-full px-3 py-2 rounded-lg bg-zinc-800 border text-sm text-white placeholder-zinc-500 focus:outline-none transition-colors ${
+                        urlError ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-700 focus:border-zinc-500'
+                      }`}
+                    />
+                    {urlError && (
+                      <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
+                        <span aria-hidden>⚠</span> {urlError}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={addName}
+                      onChange={(e) => setAddName(e.target.value)}
+                      onKeyDown={handleAddKeyDown}
+                      placeholder="Display name (auto-filled from URL)"
+                      maxLength={60}
+                      className="flex-1 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddFeed}
+                      disabled={!addUrl.trim() || feeds.length >= 15}
+                      title={feeds.length >= 15 ? 'Maximum 15 feeds reached' : 'Add feed'}
+                      className="px-4 py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium transition-colors disabled:opacity-40 flex-shrink-0"
+                    >+ Add</button>
+                  </div>
+                </div>
+              </div>
+
+              {saveError && <p className="text-sm text-red-400">{saveError}</p>}
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-1 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2 rounded-lg border border-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors"
+                >Cancel</button>
+                <button
+                  type="submit"
+                  disabled={saving || feeds.length === 0}
+                  className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                >{saving ? 'Saving…' : 'Save Changes'}</button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
