@@ -36,7 +36,7 @@ interface EventModalProps {
   onClose: () => void
 }
 
-export type RecurrenceFreq = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+export type RecurrenceFreq = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | 'weekdays' | 'custom'
 
 export interface EventFormData {
   calendarId: string
@@ -48,6 +48,7 @@ export interface EventFormData {
   allDay: boolean
   editAllEvents?: boolean
   recurrence?: RecurrenceFreq
+  customDays?: string[]
 }
 
 function toLocalDate(iso: string): string {
@@ -414,9 +415,38 @@ export default function EventModal({
                     <option value="none">Does not repeat</option>
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 weeks</option>
                     <option value="monthly">Monthly</option>
                     <option value="yearly">Yearly</option>
+                    <option value="weekdays">Weekdays (Mon-Fri)</option>
+                    <option value="custom">Custom days of week...</option>
                   </select>
+                  {form.recurrence === 'custom' && (
+                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                      {(['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const).map((day) => {
+                        const labels: Record<string, string> = { SU: 'Su', MO: 'Mo', TU: 'Tu', WE: 'We', TH: 'Th', FR: 'Fr', SA: 'Sa' }
+                        const selected = (form.customDays || []).includes(day)
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => {
+                              const days = form.customDays || []
+                              const next = selected ? days.filter((d) => d !== day) : [...days, day]
+                              setForm({ ...form, customDays: next })
+                            }}
+                            className={`w-8 h-8 rounded-full text-xs font-medium transition-colors ${
+                              selected
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-500'
+                            }`}
+                          >
+                            {labels[day]}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 

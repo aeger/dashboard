@@ -211,13 +211,18 @@ export default function CalendarWidget() {
 
   // ── Event CRUD ────────────────────────────────────────────────────────────
 
-  const freqToRRule = (freq: RecurrenceFreq | undefined): string[] | undefined => {
+  const freqToRRule = (freq: RecurrenceFreq | undefined, customDays?: string[]): string[] | undefined => {
     if (!freq || freq === 'none') return undefined
     const map: Record<string, string> = {
       daily: 'RRULE:FREQ=DAILY',
       weekly: 'RRULE:FREQ=WEEKLY',
+      biweekly: 'RRULE:FREQ=WEEKLY;INTERVAL=2',
       monthly: 'RRULE:FREQ=MONTHLY',
       yearly: 'RRULE:FREQ=YEARLY',
+      weekdays: 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+    }
+    if (freq === 'custom' && customDays?.length) {
+      return [`RRULE:FREQ=WEEKLY;BYDAY=${customDays.join(',')}`]
     }
     return map[freq] ? [map[freq]] : undefined
   }
@@ -228,7 +233,7 @@ export default function CalendarWidget() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...formData,
-        recurrence: freqToRRule(formData.recurrence),
+        recurrence: freqToRRule(formData.recurrence, formData.customDays),
       }),
     })
     if (!res.ok) throw new Error('Failed to create event')
@@ -238,6 +243,14 @@ export default function CalendarWidget() {
 
   const handleUpdateEvent = async (formData: EventFormData & { editAllEvents?: boolean }) => {
     if (!modalEvent) return
+
+    // When editing a single instance of a recurring event, don't send recurrence
+    // Google Calendar API rejects recurrence changes on individual instances
+    const isEditingSingleInstance = modalEvent.recurringEventId && !formData.editAllEvents
+    const recurrence = isEditingSingleInstance
+      ? undefined
+      : freqToRRule(formData.recurrence, formData.customDays)
+
     const res = await fetch(
       `/api/calendar/${encodeURIComponent(modalEvent.id)}`,
       {
@@ -247,7 +260,7 @@ export default function CalendarWidget() {
           ...formData,
           recurringEventId: modalEvent.recurringEventId,
           editAllEvents: formData.editAllEvents,
-          recurrence: freqToRRule(formData.recurrence),
+          recurrence,
         }),
       },
     )
