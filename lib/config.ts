@@ -43,6 +43,11 @@ export interface DashboardConfig {
     quick_links: QuickLink[]
     tech_news_feeds: NewsFeed[]
   }
+  homeassistant?: {
+    url: string
+    default_dashboard: string
+    dashboards?: { title: string; path: string }[]
+  }
 }
 
 let _config: DashboardConfig | null = null

@@ -121,7 +121,7 @@ export default function CalendarWidget() {
 
   // ── Fetch events ───────────────────────────────────────────────────────────
 
-  const fetchEvents = useCallback(async () => {
+  const fetchEvents = useCallback(async (retries = 2) => {
     if (!configured) return
     const start = new Date(
       currentMonth.getFullYear(),
@@ -138,10 +138,14 @@ export default function CalendarWidget() {
       const res = await fetch(
         `/api/calendar?timeMin=${start.toISOString()}&timeMax=${end.toISOString()}`,
       )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setEvents(data.events || [])
     } catch {
-      // silent
+      if (retries > 0) {
+        await new Promise((r) => setTimeout(r, 1500))
+        return fetchEvents(retries - 1)
+      }
     } finally {
       setLoading(false)
     }
