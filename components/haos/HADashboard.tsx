@@ -17,13 +17,14 @@ const LS_KEY = 'ha_active_dashboard'
 
 export default function HADashboard({ haUrl, defaultDashboard }: HADashboardProps) {
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
-  const [activePath, setActivePath] = useState(() => {
+  const [activePath, setActivePath] = useState(defaultDashboard)
+
+  useEffect(() => {
     try {
-      return localStorage.getItem(LS_KEY) || defaultDashboard
-    } catch {
-      return defaultDashboard
-    }
-  })
+      const stored = localStorage.getItem(LS_KEY)
+      if (stored) setActivePath(stored)
+    } catch {}
+  }, [])
   const [showEditor, setShowEditor] = useState(false)
 
   function selectDashboard(path: string) {
