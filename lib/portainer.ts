@@ -5,6 +5,7 @@ export interface Container {
   state: string
   status: string
   endpoint: string
+  endpointId: number
 }
 
 export async function fetchContainers(): Promise<Container[]> {
@@ -43,6 +44,7 @@ export async function fetchContainers(): Promise<Container[]> {
             state: c.State,
             status: c.Status,
             endpoint: endpoint.Name,
+            endpointId: endpoint.Id,
           })
         }
       } catch {
@@ -53,5 +55,24 @@ export async function fetchContainers(): Promise<Container[]> {
     return containers
   } catch {
     return []
+  }
+}
+
+export type ContainerAction = 'start' | 'stop' | 'restart'
+
+export async function containerAction(endpointId: number, containerId: string, action: ContainerAction): Promise<boolean> {
+  const baseUrl = process.env.PORTAINER_URL
+  const apiKey = process.env.PORTAINER_API_KEY
+
+  if (!baseUrl || !apiKey) return false
+
+  try {
+    const res = await fetch(`${baseUrl}/api/endpoints/${endpointId}/docker/containers/${containerId}/${action}`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey },
+    })
+    return res.ok || res.status === 304
+  } catch {
+    return false
   }
 }

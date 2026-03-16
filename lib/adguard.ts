@@ -2,8 +2,13 @@ export interface AdGuardStats {
   total_dns_queries: number
   blocked_filtering: number
   blocked_percent: number
+  avg_processing_time_ms: number
   top_queried_domains: { name: string; count: number }[]
+  top_blocked_domains: { name: string; count: number }[]
   top_clients: { name: string; count: number }[]
+  protection_enabled: boolean
+  num_filter_lists: number
+  num_rules: number
 }
 
 export async function fetchAdGuardStats(configUrl?: string): Promise<AdGuardStats | null> {
@@ -13,38 +18,53 @@ export async function fetchAdGuardStats(configUrl?: string): Promise<AdGuardStat
 
   if (!baseUrl) return null
 
+  const headers: Record<string, string> = {}
+  if (username && password) {
+    headers['Authorization'] = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
+  }
+
   try {
-    const headers: Record<string, string> = {}
-    if (username && password) {
-      headers['Authorization'] = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
-    }
+    const [statsRes, statusRes, filteringRes] = await Promise.all([
+      fetch(`${baseUrl}/control/stats`, { headers, next: { revalidate: 60 } }),
+      fetch(`${baseUrl}/control/status`, { headers, next: { revalidate: 60 } }),
+      fetch(`${baseUrl}/control/filtering/status`, { headers, next: { revalidate: 300 } }),
+    ])
 
-    const res = await fetch(`${baseUrl}/control/stats`, {
-      headers,
-      next: { revalidate: 60 },
-    })
+    if (!statsRes.ok) return null
 
-    if (!res.ok) return null
+    const stats = await statsRes.json()
+    const status = statusRes.ok ? await statusRes.json() : {}
+    const filtering = filteringRes.ok ? await filteringRes.json() : {}
 
-    const data = await res.json()
-    const total = data.num_dns_queries ?? 0
-    const blocked = data.num_blocked_filtering ?? 0
+    const total = stats.num_dns_queries ?? 0
+    const blocked = stats.num_blocked_filtering ?? 0
+    const avgTime = stats.avg_processing_time ?? 0
+
+    const filterLists = filtering.filters ?? []
+    const numRules = filterLists.reduce((sum: number, f: { rules_count?: number }) => sum + (f.rules_count ?? 0), 0)
 
     return {
       total_dns_queries: total,
       blocked_filtering: blocked,
       blocked_percent: total > 0 ? Math.round((blocked / total) * 100) : 0,
-      top_queried_domains: (data.top_queried_domains ?? []).slice(0, 5).map((d: Record<string, number>) => {
+      avg_processing_time_ms: Math.round(avgTime * 1000),
+      top_queried_domains: (stats.top_queried_domains ?? []).slice(0, 5).map((d: Record<string, number>) => {
         const [name, count] = Object.entries(d)[0]
         return { name, count }
       }),
-      top_clients: (data.top_clients ?? []).slice(0, 5).map((c: Record<string, number>) => {
+      top_blocked_domains: (stats.top_blocked_domains ?? []).slice(0, 5).map((d: Record<string, number>) => {
+        const [name, count] = Object.entries(d)[0]
+        return { name, count }
+      }),
+      top_clients: (stats.top_clients ?? []).slice(0, 5).map((c: Record<string, number>) => {
         const [name, count] = Object.entries(c)[0]
         return { name, count }
       }),
+      protection_enabled: status.protection_enabled ?? false,
+      num_filter_lists: filterLists.length,
+      num_rules: numRules,
     }
   } catch {
     return null
   }
 }
-

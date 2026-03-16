@@ -8,6 +8,7 @@ import QuickLinks from '@/components/family/QuickLinks'
 import NewsWidget from '@/components/family/NewsWidget'
 import CalendarWidget from '@/components/family/CalendarWidget'
 import ViewToggle from '@/components/shared/ViewToggle'
+import AuthIndicator from '@/components/shared/AuthIndicator'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,10 @@ export default function FamilyPage() {
           <img src="/logo.png" alt="Cook Family" className="w-12 h-12 rounded-full" />
           <ClockWidget />
         </div>
-        <ViewToggle currentView="family" />
+        <div className="flex items-center gap-2">
+          <AuthIndicator />
+          <ViewToggle currentView="family" />
+        </div>
       </div>
 
       {/* Message Block */}

@@ -1,5 +1,6 @@
 import { getConfig } from '@/lib/config'
 import ViewToggle from '@/components/shared/ViewToggle'
+import AuthIndicator from '@/components/shared/AuthIndicator'
 import HADashboard from '@/components/haos/HADashboard'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,7 @@ export default function HAOSPage() {
           <h1 className="text-lg font-semibold text-white">Home Assistant</h1>
         </div>
         <div className="flex items-center gap-2">
+          <AuthIndicator />
           <ViewToggle currentView="haos" />
         </div>
       </div>

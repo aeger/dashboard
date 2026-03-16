@@ -7,6 +7,7 @@ import RustDeskWidget from '@/components/lab/RustDeskWidget'
 import TechNews from '@/components/lab/TechNews'
 import LabQuickLinks from '@/components/lab/LabQuickLinks'
 import ViewToggle from '@/components/shared/ViewToggle'
+import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +24,7 @@ export default function LabPage() {
           <p className="text-xs text-zinc-500 mt-0.5">{config.site.title}</p>
         </div>
         <div className="flex items-center gap-2">
+          <AuthIndicator />
           <RefreshButton />
           <ViewToggle currentView="lab" />
         </div>

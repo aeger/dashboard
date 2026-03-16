@@ -7,7 +7,7 @@ import type { Monitor } from '@/lib/uptime-kuma'
 export default function ServiceGrid() {
   const [monitors, setMonitors] = useState<Monitor[]>([])
   const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState(new Date())
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   async function load() {
     try {
@@ -43,7 +43,7 @@ export default function ServiceGrid() {
     <div>
       <div className="flex items-center justify-between mb-2 text-xs text-zinc-500">
         <span>{upCount}/{monitors.length} up</span>
-        <span>Updated {lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+        <span>Updated {lastRefresh?.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
       </div>
       <div className="space-y-1.5">
         {monitors.map((m) => (
