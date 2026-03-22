@@ -1,5 +1,4 @@
 import { getConfig } from '@/lib/config'
-import ServiceGrid from '@/components/lab/ServiceGrid'
 import HostMetrics from '@/components/lab/HostMetrics'
 import ContainerList from '@/components/lab/ContainerList'
 import RustDeskWidget from '@/components/lab/RustDeskWidget'
@@ -10,6 +9,8 @@ import LabMonitor from '@/components/lab/LabMonitor'
 import ViewToggle from '@/components/shared/ViewToggle'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
+import WebTerminal from '@/components/lab/WebTerminal'
+import DiscordChat from '@/components/lab/DiscordChat'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,16 +32,10 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Top row: Service Status + Host Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Service Status</h2>
-          <ServiceGrid />
-        </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Host Metrics</h2>
-          <HostMetrics />
-        </div>
+      {/* Top row: Host Metrics (full width — ring gauges need room) */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Host Metrics</h2>
+        <HostMetrics />
       </div>
 
       {/* Middle row: Containers + AI Task Queue */}
@@ -71,6 +66,18 @@ export default function LabPage() {
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Tech News</h2>
           <TechNews />
         </div>
+      </div>
+
+      {/* Discord Chat Bridge */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Discord Bridge</h2>
+        <DiscordChat />
+      </div>
+
+      {/* Web Terminal */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Web Terminal</h2>
+        <WebTerminal />
       </div>
 
       {/* Quick Links */}

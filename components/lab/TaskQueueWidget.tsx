@@ -88,9 +88,17 @@ function StatusDot({ status }: { status: string }) {
   const color = STATUS_COLOR[status] ?? '#71717a'
   const pulse = status === 'in_progress'
   return (
-    <span className="relative flex-shrink-0 w-2 h-2">
-      {pulse && <span className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping" style={{ background: color }} />}
-      <span className="relative inline-flex rounded-full w-2 h-2" style={{ background: color }} />
+    <span className="relative inline-flex flex-shrink-0 h-2 w-2">
+      {pulse && (
+        <span
+          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60"
+          style={{ background: color }}
+        />
+      )}
+      <span
+        className="relative inline-flex rounded-full h-2 w-2"
+        style={{ background: color }}
+      />
     </span>
   )
 }
