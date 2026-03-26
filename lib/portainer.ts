@@ -18,7 +18,7 @@ export async function fetchContainers(): Promise<Container[]> {
     // Get endpoints first
     const endpointsRes = await fetch(`${baseUrl}/api/endpoints`, {
       headers: { 'X-API-Key': apiKey },
-      next: { revalidate: 60 },
+      cache: 'no-store',
     })
 
     if (!endpointsRes.ok) return []
@@ -28,9 +28,9 @@ export async function fetchContainers(): Promise<Container[]> {
 
     for (const endpoint of endpoints.slice(0, 5)) {
       try {
-        const res = await fetch(`${baseUrl}/api/endpoints/${endpoint.Id}/docker/containers/json?all=false`, {
+        const res = await fetch(`${baseUrl}/api/endpoints/${endpoint.Id}/docker/containers/json?all=true`, {
           headers: { 'X-API-Key': apiKey },
-          next: { revalidate: 60 },
+          cache: 'no-store',
         })
 
         if (!res.ok) continue

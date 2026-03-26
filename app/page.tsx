@@ -7,6 +7,7 @@ import MessageBlock from '@/components/family/MessageBlock'
 import QuickLinks from '@/components/family/QuickLinks'
 import NewsWidget from '@/components/family/NewsWidget'
 import CalendarWidget from '@/components/family/CalendarWidget'
+import GmailWidget from '@/components/family/GmailWidget'
 import ViewToggle from '@/components/shared/ViewToggle'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 
@@ -52,6 +53,12 @@ export default function FamilyPage() {
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden min-h-52">
           <PhotoSlideshow intervalSeconds={config.family.photo_interval_seconds} />
         </div>
+      </div>
+
+      {/* Gmail Inbox */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Inbox</h2>
+        <GmailWidget />
       </div>
 
       {/* Quick Links */}

@@ -26,6 +26,13 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Install ws and ssh2 (not traced by Next.js standalone, needed by custom server.js)
+RUN npm install --prefix /app ws ssh2 --no-save && \
+    chown -R nextjs:nodejs /app/node_modules
+
+# Override the auto-generated standalone server.js with our custom WebSocket server
+COPY --chown=nextjs:nodejs server.js ./server.js
+
 # Config and data dirs will be mounted as volumes
 RUN mkdir -p /app/config /app/data && chown -R nextjs:nodejs /app/config /app/data
 

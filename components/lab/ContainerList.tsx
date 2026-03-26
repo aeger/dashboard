@@ -82,6 +82,16 @@ export default function ContainerList() {
 
   async function handleContainerAction(c: Container, action: string) {
     setActing({ id: c.id, action })
+    // Optimistic state update
+    setContainers((prev) =>
+      prev.map((ct) => {
+        if (ct.id !== c.id) return ct
+        if (action === 'stop') return { ...ct, state: 'exited', status: 'Stopping...' }
+        if (action === 'start') return { ...ct, state: 'running', status: 'Starting...' }
+        if (action === 'restart') return { ...ct, state: 'restarting', status: 'Restarting...' }
+        return ct
+      })
+    )
     try {
       const res = await fetch('/api/containers/action', {
         method: 'POST',
@@ -89,23 +99,47 @@ export default function ContainerList() {
         body: JSON.stringify({ endpointId: c.endpointId, containerId: c.id, action }),
       })
       if (!res.ok) console.error('Container action failed')
-      setTimeout(refresh, 1500)
     } catch (e) {
       console.error('Container action error:', e)
     } finally {
-      setActing(null)
+      // Refresh after a delay to get real state from Portainer
+      setTimeout(() => {
+        refresh()
+        setActing(null)
+      }, 2000)
     }
   }
 
   async function handleUpdateAction(name: string, action: string) {
     setActionLoading(name)
     try {
-      await fetch('/api/containers/updates/action', {
+      const res = await fetch('/api/containers/updates/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ container: name, action }),
       })
-      setTimeout(refreshUpdates, 1000)
+      if (res.ok) {
+        // Optimistic UI update — reflect the new status immediately
+        setUpdates((prev) => ({
+          ...prev,
+          containers: prev.containers.map((c) => {
+            if (c.name !== name) return c
+            if (action === 'update_now') {
+              return { ...c, user_status: 'requested' }
+            } else if (action === 'schedule') {
+              const target = new Date()
+              target.setUTCHours(3, 47, 0, 0)
+              if (target.getTime() <= Date.now()) target.setUTCDate(target.getUTCDate() + 1)
+              return { ...c, user_status: 'scheduled', scheduled_time: target.toISOString() }
+            } else if (action === 'skip') {
+              const reassess = new Date(Date.now() + 30 * 86400000)
+              return { ...c, user_status: 'skipped', skipped_at: new Date().toISOString(), skip_reassess_at: reassess.toISOString() }
+            }
+            return c
+          }),
+        }))
+      }
+      setTimeout(refreshUpdates, 5000)
     } catch (e) {
       console.error('Update action error:', e)
     } finally {
@@ -157,7 +191,7 @@ export default function ContainerList() {
 
       {/* Container list */}
       <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
-        {containers.map((c) => {
+        {[...containers].sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
           const isRunning = c.state === 'running'
           const isBusy = acting?.id === c.id
           const update = updateMap.get(c.name)
@@ -180,6 +214,13 @@ export default function ContainerList() {
                   </div>
                   <div className="text-xs text-zinc-500 truncate">
                     {c.image.split(':')[0].split('/').pop()}
+                    {(() => {
+                      const tag = c.image.split(':')[1]
+                      const skip = ['latest', 'stable', 'release', 'main', 'master', 'edge', 'lts', 'current', undefined]
+                      return tag && !skip.includes(tag)
+                        ? <span className="text-zinc-600 ml-1">{tag}</span>
+                        : null
+                    })()}
                     {hasUpdate && update?.current_version && update?.latest_version && (
                       <span className="text-zinc-600 ml-1">
                         {update.current_version} → {update.latest_version}
@@ -258,6 +299,8 @@ function RiskBadge({ update }: { update: UpdateInfo }) {
   }
 
   if (status === 'completed') {
+    const age = update.completed_at ? Date.now() - new Date(update.completed_at).getTime() : Infinity
+    if (age > 24 * 60 * 60 * 1000) return null // expires after 24h
     return (
       <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 font-medium">
         UPDATED
@@ -335,10 +378,6 @@ function ExpandedPanel({ update, onAction, loading }: {
       {status === 'failed' && update.last_result?.error && (
         <div className="text-xs text-red-400">Failed: {update.last_result.error}</div>
       )}
-      {status === 'scheduled' && update.scheduled_time && (
-        <div className="text-xs text-zinc-400">Scheduled for {new Date(update.scheduled_time).toLocaleString()}</div>
-      )}
-
       {/* Action buttons */}
       {['pending_review', 'failed'].includes(status) && (
         <div className="flex gap-2 pt-1">
@@ -382,6 +421,32 @@ function ExpandedPanel({ update, onAction, loading }: {
           >
             Skip
           </button>
+        </div>
+      )}
+      {status === 'scheduled' && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-xs text-zinc-400">
+            Scheduled for {update.scheduled_time ? new Date(update.scheduled_time).toLocaleString() : '3:47 AM'}
+          </span>
+          <button
+            onClick={() => onAction('update_now')}
+            disabled={loading}
+            className="text-xs px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50"
+          >
+            Update Now
+          </button>
+          <button
+            onClick={() => onAction('skip')}
+            disabled={loading}
+            className="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50"
+          >
+            Skip
+          </button>
+        </div>
+      )}
+      {status === 'requested' && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-xs text-blue-400 animate-pulse">Update queued — processing shortly</span>
         </div>
       )}
       {status === 'skipped' && (

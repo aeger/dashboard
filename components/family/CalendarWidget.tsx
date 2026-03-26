@@ -98,13 +98,21 @@ export default function CalendarWidget() {
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [configured, setConfigured] = useState(true)
+  const [authRequired, setAuthRequired] = useState(false)
   const [showAllCalendars, setShowAllCalendars] = useState(false)
 
   // ── Load calendars ─────────────────────────────────────────────────────────
 
   useEffect(() => {
     fetch('/api/calendar/calendars')
-      .then((r) => r.json())
+      .then((r) => {
+        if (r.status === 401 || r.status === 403) {
+          setAuthRequired(true)
+          setLoading(false)
+          throw new Error('Unauthorized')
+        }
+        return r.json()
+      })
       .then((data) => {
         setConfigured(data.configured !== false)
         const cals: CalendarInfo[] = data.calendars || []
@@ -116,7 +124,9 @@ export default function CalendarWidget() {
           new Set(cals.filter((c) => !disabled.includes(c.id)).map((c) => c.id)),
         )
       })
-      .catch(() => setConfigured(false))
+      .catch((err) => {
+        if (err.message !== 'Unauthorized') setConfigured(false)
+      })
   }, [])
 
   // ── Fetch events ───────────────────────────────────────────────────────────
@@ -138,6 +148,10 @@ export default function CalendarWidget() {
       const res = await fetch(
         `/api/calendar?timeMin=${start.toISOString()}&timeMax=${end.toISOString()}`,
       )
+      if (res.status === 401 || res.status === 403) {
+        setAuthRequired(true)
+        return
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setEvents(data.events || [])
@@ -288,6 +302,22 @@ export default function CalendarWidget() {
     if (!res.ok) throw new Error('Failed to delete event')
     setModalEvent(null)
     fetchEvents()
+  }
+
+  // ── Auth required state ──────────────────────────────────────────────────
+
+  if (authRequired) {
+    return (
+      <div className="text-center py-10">
+        <div className="text-4xl mb-3">&#128274;</div>
+        <h3 className="text-sm font-medium text-zinc-300 mb-2">
+          Sign In Required
+        </h3>
+        <p className="text-xs text-zinc-500">
+          Sign in to view your calendar events.
+        </p>
+      </div>
+    )
   }
 
   // ── Not configured state ──────────────────────────────────────────────────

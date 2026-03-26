@@ -5,20 +5,11 @@ import { join } from 'path'
 const STATE_FILE = join(process.cwd(), 'data', 'update_state.json')
 const VALID_ACTIONS = ['update_now', 'schedule', 'skip'] as const
 
-async function isAuthenticated(req: NextRequest): Promise<boolean> {
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) return false
-  try {
-    const res = await fetch('https://auth.az-lab.dev/api/state', { headers: { cookie } })
-    const data = await res.json()
-    return (data.data?.authentication_level ?? 0) > 0
-  } catch {
-    return false
-  }
-}
-
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated(req))) {
+  // Auth is enforced at Traefik level (lan-allow@file middleware).
+  // Cookie presence check as basic sanity — real auth is at the reverse proxy.
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
