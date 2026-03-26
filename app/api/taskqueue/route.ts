@@ -1,17 +1,37 @@
 import { NextResponse } from 'next/server'
 
-export interface TaskQueueStats {
-  counts: { pending: number; in_progress: number; completed: number; failed: number }
-  recent: Array<{
-    id: string
-    title: string
-    status: string
-    model: string | null
-    created_at: string
-    claimed_at: string | null
-  }>
-  total_24h: number
+export interface TaskItem {
+  id: string
+  title: string
+  description: string | null
+  status: string
+  priority: number
+  source: string | null
+  target: string | null
+  claimed_by: string | null
+  claimed_at: string | null
+  created_at: string
+  updated_at: string
+  tags: string[] | null
+  result: string | null
+  error: string | null
+  blocked_reason: string | null
+  failure_mode: string | null
+  attempt_count: number
 }
+
+export interface TaskQueueData {
+  problems: TaskItem[]
+  waiting: TaskItem[]
+  active: TaskItem[]
+  recent: TaskItem[]
+  summary24h: Record<string, number>
+}
+
+// Keep old export name for any existing imports
+export type TaskQueueStats = TaskQueueData
+
+const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count'
 
 export async function GET() {
   const url = process.env.SUPABASE_URL
@@ -22,49 +42,60 @@ export async function GET() {
     apikey: key,
     Authorization: `Bearer ${key}`,
     'Content-Type': 'application/json',
+    Prefer: 'return=representation',
   }
-  const base = `${url}/rest/v1`
+  const base = `${url}/rest/v1/task_queue`
+  const opts = { headers, cache: 'no-store' as const }
 
   try {
-    // Fetch status counts
-    const countRes = await fetch(
-      `${base}/task_queue?select=status&order=status`,
-      { headers, next: { revalidate: 30 } }
-    )
-    const allTasks: Array<{ status: string }> = countRes.ok ? await countRes.json() : []
+    const [problemsRes, waitingRes, activeRes, recentRes, summary24hRes] = await Promise.all([
+      // Problem flags: failed, escalated, has failure_mode, or multiple attempts
+      fetch(
+        `${base}?select=${SELECT}&or=(status.eq.failed,status.eq.escalated,failure_mode.not.is.null,attempt_count.gte.2)&order=updated_at.desc&limit=20`,
+        opts
+      ),
+      // Waiting: blocked or delegated — show with reason
+      fetch(
+        `${base}?select=${SELECT}&or=(status.eq.blocked,status.eq.delegated)&order=updated_at.desc&limit=10`,
+        opts
+      ),
+      // Active: claimed (running)
+      fetch(
+        `${base}?select=${SELECT}&status=eq.claimed&order=claimed_at.asc`,
+        opts
+      ),
+      // Recent 20 by updated_at
+      fetch(
+        `${base}?select=${SELECT}&order=updated_at.desc&limit=20`,
+        opts
+      ),
+      // Last 24h for summary
+      fetch(
+        `${base}?select=status&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`,
+        opts
+      ),
+    ])
 
-    const counts = { pending: 0, in_progress: 0, completed: 0, failed: 0 }
-    for (const t of allTasks) {
-      const s = t.status as keyof typeof counts
-      if (s in counts) counts[s]++
+    const [problemsRaw, waitingRaw, activeRaw, recentRaw, summary24hRaw]: [TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>] = await Promise.all([
+      problemsRes.ok ? problemsRes.json() : [],
+      waitingRes.ok ? waitingRes.json() : [],
+      activeRes.ok ? activeRes.json() : [],
+      recentRes.ok ? recentRes.json() : [],
+      summary24hRes.ok ? summary24hRes.json() : [],
+    ])
+
+    const summary24h: Record<string, number> = {}
+    for (const { status } of summary24hRaw) {
+      summary24h[status] = (summary24h[status] ?? 0) + 1
     }
 
-    // Fetch recent tasks (last 8)
-    const recentRes = await fetch(
-      `${base}/task_queue?select=id,title,status,context,created_at,claimed_at&order=created_at.desc&limit=8`,
-      { headers, next: { revalidate: 30 } }
-    )
-    const recentRaw: Array<{ id: string; title: string; status: string; context: Record<string, unknown> | null; created_at: string; claimed_at: string | null }> =
-      recentRes.ok ? await recentRes.json() : []
-
-    const recent = recentRaw.map((t) => ({
-      id: t.id,
-      title: t.title,
-      status: t.status,
-      model: (t.context?.model as string) ?? null,
-      created_at: t.created_at,
-      claimed_at: t.claimed_at,
-    }))
-
-    // Count tasks from last 24h
-    const since = new Date(Date.now() - 86400000).toISOString()
-    const since24Res = await fetch(
-      `${base}/task_queue?select=id&created_at=gte.${since}`,
-      { headers, next: { revalidate: 30 } }
-    )
-    const total_24h = since24Res.ok ? ((await since24Res.json()) as unknown[]).length : 0
-
-    return NextResponse.json({ counts, recent, total_24h })
+    return NextResponse.json({
+      problems: problemsRaw,
+      waiting: waitingRaw,
+      active: activeRaw,
+      recent: recentRaw,
+      summary24h,
+    } satisfies TaskQueueData)
   } catch {
     return NextResponse.json({ error: 'Failed to fetch task queue' }, { status: 500 })
   }
