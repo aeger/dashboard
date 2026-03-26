@@ -86,7 +86,7 @@ export default function AgentTerminalWidget({ agent = 'wren' }: Props) {
         sinceRef.current = data.rows[data.rows.length - 1].created_at
       }
       setConnected(true)
-      pollRef.current = setInterval(poll, 2000)
+      pollRef.current = setInterval(poll, 5000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Connection failed')
     }
