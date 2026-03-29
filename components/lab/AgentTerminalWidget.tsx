@@ -48,58 +48,54 @@ export default function AgentTerminalWidget({ agent = 'wren' }: Props) {
   const [connected, setConnected] = useState(false)
   const [rows, setRows] = useState<ActivityRow[]>([])
   const [error, setError] = useState<string | null>(null)
-  const sinceRef = useRef<string | null>(null)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const esRef = useRef<EventSource | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
 
-  const poll = useCallback(async () => {
-    try {
-      const url = `/api/agent-activity?agent=${agent}&limit=50${sinceRef.current ? `&since=${encodeURIComponent(sinceRef.current)}` : ''}`
-      const res = await fetch(url)
-      if (!res.ok) return
-      const data = await res.json()
-      if (data.rows?.length > 0) {
-        setRows((prev) => {
-          const combined = sinceRef.current ? [...prev, ...data.rows] : data.rows
-          // Cap at 500 lines
-          return combined.slice(-500)
-        })
-        sinceRef.current = data.rows[data.rows.length - 1].created_at
-      }
-    } catch {
-      // silently ignore poll errors
-    }
-  }, [agent])
-
-  const connect = useCallback(async () => {
-    setError(null)
-    setRows([])
-    sinceRef.current = null
-    // Initial load
-    try {
-      const res = await fetch(`/api/agent-activity?agent=${agent}&limit=50`)
-      if (!res.ok) throw new Error('Failed to connect')
-      const data = await res.json()
-      setRows(data.rows ?? [])
-      if (data.rows?.length > 0) {
-        sinceRef.current = data.rows[data.rows.length - 1].created_at
-      }
-      setConnected(true)
-      pollRef.current = setInterval(poll, 5000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Connection failed')
-    }
-  }, [agent, poll])
-
   const disconnect = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current)
-    pollRef.current = null
+    esRef.current?.close()
+    esRef.current = null
     setConnected(false)
   }, [])
 
+  const connect = useCallback(() => {
+    setError(null)
+    setRows([])
+    esRef.current?.close()
+
+    const es = new EventSource(`/api/agent-activity/stream?agent=${agent}`)
+    esRef.current = es
+
+    es.onmessage = (e) => {
+      try {
+        const { rows: newRows, type } = JSON.parse(e.data)
+        if (!Array.isArray(newRows)) return
+        if (type === 'init') {
+          setRows(newRows)
+          setConnected(true)
+        } else {
+          setRows((prev) => [...prev, ...newRows].slice(-500))
+        }
+      } catch {
+        // ignore malformed events
+      }
+    }
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) {
+        setConnected(false)
+        setError('Stream disconnected — reconnecting...')
+        esRef.current = null
+        // Auto-reconnect after 3s
+        setTimeout(() => {
+          if (!esRef.current) connect()
+        }, 3000)
+      }
+    }
+  }, [agent])
+
   useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    return () => { esRef.current?.close() }
   }, [])
 
   // Auto-scroll to bottom when new rows arrive
@@ -131,7 +127,7 @@ export default function AgentTerminalWidget({ agent = 'wren' }: Props) {
         <div className="flex items-center gap-2">
           {connected && (
             <button
-              onClick={() => { setRows([]); sinceRef.current = null }}
+              onClick={() => { setRows([]) }}
               className="text-[10px] text-zinc-600 hover:text-zinc-400 px-1.5 py-0.5 rounded transition-colors"
             >
               clear
@@ -158,9 +154,13 @@ export default function AgentTerminalWidget({ agent = 'wren' }: Props) {
       >
         {!connected ? (
           <div className="flex flex-col items-center justify-center h-32 gap-3">
-            <div className="text-zinc-700 text-[11px] font-mono">
-              <span className="text-zinc-600">$</span> connect to observe {agent}
-            </div>
+            {error ? (
+              <div className="text-red-400 text-[11px]">{error}</div>
+            ) : (
+              <div className="text-zinc-700 text-[11px] font-mono">
+                <span className="text-zinc-600">$</span> connect to observe {agent}
+              </div>
+            )}
             <button
               onClick={connect}
               className="text-[11px] font-medium px-4 py-1.5 rounded bg-blue-900/50 text-blue-300 hover:bg-blue-800/60 border border-blue-800/50 transition-colors"
@@ -168,8 +168,6 @@ export default function AgentTerminalWidget({ agent = 'wren' }: Props) {
               Connect
             </button>
           </div>
-        ) : error ? (
-          <div className="flex items-center justify-center h-32 text-red-400 text-[11px]">{error}</div>
         ) : rows.length === 0 ? (
           <div className="flex items-center justify-center h-32">
             <span className="text-zinc-700 text-[11px] font-mono animate-pulse">waiting for activity...</span>
