@@ -54,9 +54,9 @@ export async function GET() {
         `${base}?select=${SELECT}&or=(status.eq.failed,status.eq.escalated,failure_mode.not.is.null,attempt_count.gte.2)&order=updated_at.desc&limit=20`,
         opts
       ),
-      // Waiting: blocked or delegated — show with reason
+      // Waiting: blocked, delegated, or pending_eval (needs Iris review)
       fetch(
-        `${base}?select=${SELECT}&or=(status.eq.blocked,status.eq.delegated)&order=updated_at.desc&limit=10`,
+        `${base}?select=${SELECT}&or=(status.eq.blocked,status.eq.delegated,status.eq.pending_eval)&order=updated_at.desc&limit=10`,
         opts
       ),
       // Active: claimed (running)

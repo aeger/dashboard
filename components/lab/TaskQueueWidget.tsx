@@ -6,25 +6,27 @@ import type { TaskQueueData, TaskItem } from '@/app/api/taskqueue/route'
 // ── colours ──────────────────────────────────────────────────────────────────
 
 const STATUS_BG: Record<string, string> = {
-  pending:     'bg-zinc-700 text-zinc-300',
-  claimed:     'bg-blue-900/60 text-blue-300',
-  completed:   'bg-green-900/60 text-green-300',
-  failed:      'bg-red-900/60 text-red-300',
-  escalated:   'bg-orange-900/60 text-orange-300',
-  blocked:     'bg-amber-900/60 text-amber-300',
-  delegated:   'bg-purple-900/60 text-purple-300',
-  expired:     'bg-zinc-800 text-zinc-500',
+  pending:      'bg-zinc-700 text-zinc-300',
+  claimed:      'bg-blue-900/60 text-blue-300',
+  completed:    'bg-green-900/60 text-green-300',
+  failed:       'bg-red-900/60 text-red-300',
+  escalated:    'bg-orange-900/60 text-orange-300',
+  blocked:      'bg-amber-900/60 text-amber-300',
+  delegated:    'bg-purple-900/60 text-purple-300',
+  pending_eval: 'bg-indigo-900/60 text-indigo-300',
+  expired:      'bg-zinc-800 text-zinc-500',
 }
 
 const STATUS_DOT: Record<string, string> = {
-  pending:     'bg-zinc-500',
-  claimed:     'bg-blue-400',
-  completed:   'bg-green-400',
-  failed:      'bg-red-400',
-  escalated:   'bg-orange-400',
-  blocked:     'bg-amber-400',
-  delegated:   'bg-purple-400',
-  expired:     'bg-zinc-600',
+  pending:      'bg-zinc-500',
+  claimed:      'bg-blue-400',
+  completed:    'bg-green-400',
+  failed:       'bg-red-400',
+  escalated:    'bg-orange-400',
+  blocked:      'bg-amber-400',
+  delegated:    'bg-purple-400',
+  pending_eval: 'bg-indigo-400',
+  expired:      'bg-zinc-600',
 }
 
 const PRIORITY_LABEL: Record<number, { label: string; cls: string }> = {
@@ -91,6 +93,37 @@ function AgentFlow({ source, target }: { source: string | null; target: string |
   )
 }
 
+function FlagButton({ task }: { task: TaskItem }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
+
+  async function flag(e: React.MouseEvent) {
+    e.stopPropagation()
+    setState('loading')
+    try {
+      const res = await fetch('/api/taskqueue/flag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: task.id, taskTitle: task.title, taskStatus: task.status }),
+      })
+      setState(res.ok ? 'done' : 'idle')
+    } catch {
+      setState('idle')
+    }
+  }
+
+  if (state === 'done') return <span className="text-[10px] text-indigo-400 flex-shrink-0">🚩 queued</span>
+  return (
+    <button
+      onClick={flag}
+      disabled={state === 'loading'}
+      className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-indigo-900/50 text-zinc-600 hover:text-indigo-400 disabled:opacity-50 transition-colors flex-shrink-0"
+      title="Ask Wren to examine and resolve this task"
+    >
+      {state === 'loading' ? '…' : '🚩 flag'}
+    </button>
+  )
+}
+
 function ProblemBanner({ task }: { task: TaskItem }) {
   const isError = task.status === 'failed' || task.status === 'escalated'
   const banner = isError
@@ -115,7 +148,10 @@ function ProblemBanner({ task }: { task: TaskItem }) {
             </div>
           )}
         </div>
-        <span className="text-zinc-600 flex-shrink-0 text-[10px]">{timeAgo(task.updated_at)}</span>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <span className="text-zinc-600 text-[10px]">{timeAgo(task.updated_at)}</span>
+          <FlagButton task={task} />
+        </div>
       </div>
     </div>
   )
@@ -123,7 +159,10 @@ function ProblemBanner({ task }: { task: TaskItem }) {
 
 function WaitingBanner({ task }: { task: TaskItem }) {
   const isBlocked = task.status === 'blocked'
-  const reason = task.blocked_reason ?? task.description ?? null
+  const isPendingEval = task.status === 'pending_eval'
+  const reason = isPendingEval
+    ? 'Completed — waiting for Iris/Cowork to evaluate result'
+    : task.blocked_reason ?? task.description ?? null
   const age = timeAgo(task.created_at)
 
   return (
@@ -147,6 +186,7 @@ function WaitingBanner({ task }: { task: TaskItem }) {
         <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
           <AgentFlow source={task.source} target={task.target} />
           <span className="text-zinc-600 text-[10px]">{age}</span>
+          <FlagButton task={task} />
         </div>
       </div>
     </div>
@@ -193,6 +233,9 @@ function RecentRow({ task }: { task: TaskItem }) {
         )}
         <span className="text-[10px] text-zinc-600 flex-shrink-0 group-hover:text-zinc-500">
           {timeAgo(task.updated_at)}
+        </span>
+        <span className="hidden group-hover:inline">
+          <FlagButton task={task} />
         </span>
         {hasPreview && (
           <span className="text-[10px] text-zinc-700 flex-shrink-0">{expanded ? '▲' : '▼'}</span>
