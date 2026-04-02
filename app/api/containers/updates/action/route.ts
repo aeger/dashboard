@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
 const STATE_FILE = join(process.cwd(), 'data', 'update_state.json')
-const VALID_ACTIONS = ['update_now', 'schedule', 'skip'] as const
+const VALID_ACTIONS = ['update_now', 'schedule', 'skip', 'ignore'] as const
 
 export async function POST(req: NextRequest) {
   // Auth is enforced at Traefik level (lan-allow@file middleware).
@@ -46,6 +46,9 @@ export async function POST(req: NextRequest) {
       entry.status = 'skipped'
       entry.skipped_at = now
       entry.skip_reassess_at = reassess.toISOString()
+    } else if (action === 'ignore') {
+      entry.status = 'ignored'
+      entry.ignored_at = now
     }
 
     state.containers[container] = entry

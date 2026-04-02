@@ -54,6 +54,16 @@ export default function ContainerList() {
   const [acting, setActing] = useState<ActionState>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [rebuilding, setRebuilding] = useState<string | null>(null)
+  const [stackUpdating, setStackUpdating] = useState<string | null>(null)
+
+  // Stack definitions (mirrors server-side)
+  const STACKS: Record<string, { label: string; containers: string[] }> = {
+    immich:     { label: 'Immich',      containers: ['immich-server', 'immich-machine-learning', 'immich-redis', 'immich-postgres'] },
+    monitoring: { label: 'Monitoring',  containers: ['prometheus', 'grafana', 'node_exporter', 'cadvisor', 'blackbox', 'snmp_exporter', 'podman_exporter'] },
+    rustdesk:   { label: 'RustDesk',    containers: ['hbbs', 'hbbr'] },
+    dashboard:  { label: 'Dashboard',   containers: ['az-dashboard', 'uptime-kuma'] },
+  }
 
   const refresh = useCallback(() => {
     fetch('/api/containers')
@@ -110,6 +120,42 @@ export default function ContainerList() {
     }
   }
 
+  async function handleStackUpdate(stackName: string) {
+    setStackUpdating(stackName)
+    try {
+      await fetch('/api/containers/stack-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stackName }),
+      })
+    } catch (e) {
+      console.error('Stack update error:', e)
+    } finally {
+      setTimeout(() => {
+        refresh()
+        setStackUpdating(null)
+      }, 4000)
+    }
+  }
+
+  async function handleRebuild(name: string) {
+    setRebuilding(name)
+    try {
+      await fetch('/api/containers/rebuild', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ containerName: name }),
+      })
+    } catch (e) {
+      console.error('Rebuild error:', e)
+    } finally {
+      setTimeout(() => {
+        refresh()
+        setRebuilding(null)
+      }, 3000)
+    }
+  }
+
   async function handleUpdateAction(name: string, action: string) {
     setActionLoading(name)
     try {
@@ -134,6 +180,8 @@ export default function ContainerList() {
             } else if (action === 'skip') {
               const reassess = new Date(Date.now() + 30 * 86400000)
               return { ...c, user_status: 'skipped', skipped_at: new Date().toISOString(), skip_reassess_at: reassess.toISOString() }
+            } else if (action === 'ignore') {
+              return { ...c, user_status: 'ignored' }
             }
             return c
           }),
@@ -163,8 +211,39 @@ export default function ContainerList() {
   const skippedCount = updates.containers.filter((u) => u.user_status === 'skipped').length
   const totalUpdates = (updates.updates_available ?? 0)
 
+  // Find stacks with pending updates (exclude ignored)
+  const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').map((u) => u.name))
+  const stacksWithUpdates = Object.entries(STACKS).filter(([, def]) =>
+    def.containers.some((c) => updateNames.has(c))
+  )
+
   return (
     <div className="space-y-2">
+      {/* Stack updates */}
+      {stacksWithUpdates.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] text-zinc-600 uppercase tracking-wider px-1">Stack Updates</div>
+          {stacksWithUpdates.map(([stackName, def]) => {
+            const affected = def.containers.filter((c) => updateNames.has(c))
+            const isBusy = stackUpdating === stackName
+            return (
+              <div key={stackName} className="flex items-center justify-between bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2">
+                <div>
+                  <span className="text-xs font-medium text-amber-300">{def.label}</span>
+                  <span className="text-[10px] text-zinc-500 ml-2">{affected.join(', ')}</span>
+                </div>
+                <button
+                  onClick={() => handleStackUpdate(stackName)}
+                  disabled={isBusy}
+                  className="text-[10px] px-2.5 py-1 bg-amber-700/40 hover:bg-amber-600/50 disabled:opacity-50 text-amber-200 rounded transition-colors border border-amber-600/30"
+                >
+                  {isBusy ? '⟳ Updating…' : '↑ Update Stack'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {/* Summary bar */}
       {updates.checked_at && (
         <div className="flex items-center justify-between text-xs px-1">
@@ -194,9 +273,10 @@ export default function ContainerList() {
         {[...containers].sort((a, b) => a.name.localeCompare(b.name)).map((c) => {
           const isRunning = c.state === 'running'
           const isBusy = acting?.id === c.id
+          const isRebuilding = rebuilding === c.name
           const update = updateMap.get(c.name)
           const isExpanded = expanded === c.name
-          const hasUpdate = update?.has_update ?? false
+          const hasUpdate = (update?.has_update ?? false) && update?.user_status !== 'ignored'
 
           return (
             <div key={c.id}>
@@ -205,7 +285,7 @@ export default function ContainerList() {
                 className={`flex items-center justify-between py-1.5 px-2 rounded-lg transition-colors cursor-pointer ${
                   isExpanded ? 'bg-zinc-800/70' : 'bg-zinc-800/40 hover:bg-zinc-800/70'
                 }`}
-                onClick={() => hasUpdate ? setExpanded(isExpanded ? null : c.name) : undefined}
+                onClick={() => setExpanded(isExpanded ? null : c.name)}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -221,9 +301,11 @@ export default function ContainerList() {
                         ? <span className="text-zinc-600 ml-1">{tag}</span>
                         : null
                     })()}
-                    {hasUpdate && update?.current_version && update?.latest_version && (
+                    {update?.current_version && (
                       <span className="text-zinc-600 ml-1">
-                        {update.current_version} → {update.latest_version}
+                        {hasUpdate && update.latest_version && update.current_version !== update.latest_version
+                          ? `${update.current_version} → ${update.latest_version}`
+                          : update.current_version}
                       </span>
                     )}
                   </div>
@@ -232,19 +314,27 @@ export default function ContainerList() {
                   <span className="text-xs text-zinc-600 mr-1">{c.endpoint}</span>
                   {isRunning ? (
                     <>
-                      <ActionBtn label="Restart" icon="↻" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'restart') }} disabled={isBusy} title="Restart" />
-                      <ActionBtn label="Stop" icon="■" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'stop') }} disabled={isBusy} color="text-red-400 hover:bg-red-500/20" title="Stop" />
+                      <ActionBtn label="Restart" icon="↻" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'restart') }} disabled={isBusy || isRebuilding} title="Restart" />
+                      <ActionBtn label="Stop" icon="■" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'stop') }} disabled={isBusy || isRebuilding} color="text-red-400 hover:bg-red-500/20" title="Stop" />
                     </>
                   ) : (
-                    <ActionBtn label="Start" icon="▶" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'start') }} disabled={isBusy} color="text-green-400 hover:bg-green-500/20" title="Start" />
+                    <ActionBtn label="Start" icon="▶" onClick={(e) => { e.stopPropagation(); handleContainerAction(c, 'start') }} disabled={isBusy || isRebuilding} color="text-green-400 hover:bg-green-500/20" title="Start" />
                   )}
-                  {isBusy && <div className="w-3.5 h-3.5 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin" />}
+                  <ActionBtn
+                    label="Pull"
+                    icon={isRebuilding ? '…' : '⇓'}
+                    onClick={(e) => { e.stopPropagation(); handleRebuild(c.name) }}
+                    disabled={isBusy || isRebuilding}
+                    color="text-sky-400 hover:bg-sky-500/20"
+                    title="Pull latest image & recreate"
+                  />
+                  {(isBusy || isRebuilding) && <div className="w-3.5 h-3.5 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin" />}
                   <StatusBadge status={c.state} />
                 </div>
               </div>
 
               {/* Expanded detail panel */}
-              {isExpanded && hasUpdate && update && (
+              {isExpanded && update && (
                 <ExpandedPanel
                   update={update}
                   onAction={(action) => handleUpdateAction(c.name, action)}
@@ -297,6 +387,8 @@ function RiskBadge({ update }: { update: UpdateInfo }) {
       </span>
     )
   }
+
+  if (status === 'ignored') return null
 
   if (status === 'completed') {
     const age = update.completed_at ? Date.now() - new Date(update.completed_at).getTime() : Infinity
@@ -380,7 +472,7 @@ function ExpandedPanel({ update, onAction, loading }: {
       )}
       {/* Action buttons */}
       {['pending_review', 'failed'].includes(status) && (
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 pt-1 flex-wrap">
           <button
             onClick={() => onAction('update_now')}
             disabled={loading}
@@ -401,6 +493,13 @@ function ExpandedPanel({ update, onAction, loading }: {
             className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors"
           >
             Skip 30d
+          </button>
+          <button
+            onClick={() => onAction('ignore')}
+            disabled={loading}
+            className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-600 hover:text-zinc-400 disabled:opacity-50 transition-colors"
+          >
+            Ignore
           </button>
         </div>
       )}
