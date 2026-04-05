@@ -16,7 +16,7 @@ function ProgressBar({ value, status }: { value: number; status: string }) {
   const color = status === 'completed' ? 'bg-green-500' :
                 status === 'blocked'   ? 'bg-amber-500' :
                 status === 'paused'    ? 'bg-yellow-500' :
-                'bg-blue-500'
+                'progress-purple'
   return (
     <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
       <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${value}%` }} />
@@ -124,7 +124,7 @@ export default function GoalMilestoneWidget() {
               onClick={() => setActiveIdx(i)}
               className={`px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap transition-colors -mb-px border-b-2 flex-shrink-0 ${
                 i === activeIdx
-                  ? 'text-zinc-100 border-blue-500'
+                  ? 'text-zinc-100 border-purple-400'
                   : 'text-zinc-500 border-transparent hover:text-zinc-300'
               }`}
             >

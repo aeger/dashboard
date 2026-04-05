@@ -58,7 +58,7 @@ function LevelBadge({ level }: { level: string }) {
 function ProgressBar({ value, status }: { value: number; status: string }) {
   const color = status === 'completed' ? 'bg-green-500' :
                 status === 'blocked'   ? 'bg-amber-500' :
-                status === 'paused'    ? 'bg-yellow-500' : 'bg-blue-500'
+                status === 'paused'    ? 'bg-yellow-500' : 'progress-purple'
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">

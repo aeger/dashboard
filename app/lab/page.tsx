@@ -17,17 +17,24 @@ import ProxiesWidget from '@/components/lab/ProxiesWidget'
 
 export const dynamic = 'force-dynamic'
 
+// Shared card classes — zinc base + lift on hover
+const card = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
+const cardPurple = 'relative card-lift bg-zinc-900/50 rounded-xl p-4'
+  + ' border border-purple-900/30'
+  + ' shadow-[inset_0_0_40px_rgba(109,40,217,0.04)]'
+
 export default function LabPage() {
   const config = getConfig()
 
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
       <AgentHealthBanner />
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-white">AZ-Lab Dashboard</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">{config.site.title}</p>
+          <h1 className="text-xl font-semibold text-white tracking-tight">AZ-Lab</h1>
+          <p className="text-xs text-zinc-600 mt-0.5">svc-podman-01 · 192.168.1.181</p>
         </div>
         <div className="flex items-center gap-2">
           <AuthIndicator />
@@ -36,70 +43,70 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Top row: Host Metrics (full width — ring gauges need room) */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Host Metrics</h2>
+      {/* Host Metrics */}
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Host Metrics</h2>
         <HostMetrics />
       </div>
 
-      {/* Goals / Big Picture widget */}
-      <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-xl p-4 mb-4" style={{ borderColor: 'rgb(88 28 135 / 0.3)' }}>
+      {/* Goals — purple accent card */}
+      <div className={`${cardPurple} mb-4`}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-semibold text-purple-400/80 uppercase tracking-wider">Goals & Milestones</h2>
+          <h2 className="text-[10px] font-semibold text-purple-400/70 uppercase tracking-widest">Goals & Milestones</h2>
         </div>
         <GoalMilestoneWidget />
       </div>
 
-      {/* Middle row: Containers + AI Task Queue */}
+      {/* Containers + Task Queue */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Containers</h2>
+        <div className={card}>
+          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Containers</h2>
           <ContainerList />
         </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">AI Task Queue</h2>
+        <div className={`${card} flex flex-col`}>
+          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">AI Task Queue</h2>
           <TaskQueueWidget />
         </div>
       </div>
 
-      {/* Full-width Lab Monitor: Services | WAN & Network | DNS */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Lab Monitor</h2>
+      {/* Lab Monitor */}
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Lab Monitor</h2>
         <LabMonitor />
       </div>
 
       {/* Security */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Security Posture</h2>
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Security Posture</h2>
         <SecurityWidget />
       </div>
 
-      {/* Bottom row: RustDesk + Tech News */}
+      {/* RustDesk + Tech News */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">RustDesk</h2>
+        <div className={card}>
+          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">RustDesk</h2>
           <RustDeskWidget />
         </div>
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Tech News</h2>
+        <div className={card}>
+          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Tech News</h2>
           <TechNews />
         </div>
       </div>
 
-      {/* Terminal Hub — Discord / Agent Terminal / Web Terminal */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
+      {/* Terminal Hub */}
+      <div className={`${card} mb-4`}>
         <TerminalHub />
       </div>
 
-      {/* Traefik Proxy Manager */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Proxy Manager</h2>
+      {/* Proxy Manager */}
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Proxy Manager</h2>
         <ProxiesWidget />
       </div>
 
       {/* Quick Links */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Lab Quick Links</h2>
+      <div className={card}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Quick Links</h2>
         <LabQuickLinks links={config.lab.quick_links} />
       </div>
     </div>

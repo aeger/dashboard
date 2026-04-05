@@ -3,6 +3,15 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Purple accent — used for highlights without taking over */
+  --accent-purple: #a78bfa;
+  --accent-purple-dim: rgba(167,139,250,0.12);
+  --accent-purple-border: rgba(167,139,250,0.2);
+
+  /* Card lift effect */
+  --card-shadow-idle: 0 1px 3px rgba(0,0,0,0.4);
+  --card-shadow-hover: 0 8px 28px rgba(0,0,0,0.5), 0 0 0 1px rgba(167,139,250,0.15);
 }
 
 @theme inline {
@@ -14,13 +23,93 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    --background: #09090b;
     --foreground: #ededed;
   }
 }
 
+/* ── Base ──────────────────────────────────────────────────────────── */
 body {
-  background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+
+  /* Zinc base with very subtle purple warmth in the bg */
+  background-color: #09090b;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(109,40,217,0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(109,40,217,0.06) 0%, transparent 55%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* ── Card lift + glass hover ───────────────────────────────────────── */
+
+/*
+  Apply .card-interactive to any card you want the lift on.
+  Works alongside Tailwind classes — just add it to the element.
+  Alternatively, the [data-card] selector below catches all
+  border/bg-zinc-900 cards automatically via the CSS attribute hook.
+*/
+.card-lift {
+  box-shadow: var(--card-shadow-idle);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--card-shadow-hover);
+  border-color: rgba(167,139,250,0.25) !important;
+}
+
+/* Subtle glass sheen on top edge of card */
+.card-lift::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.04) 0%,
+    transparent 50%
+  );
+  pointer-events: none;
+}
+
+/* ── Purple accent utilities ───────────────────────────────────────── */
+.accent-purple { color: var(--accent-purple); }
+.bg-accent-purple-dim { background: var(--accent-purple-dim); }
+.border-accent-purple { border-color: var(--accent-purple-border); }
+
+/* Progress bars — purple variant */
+.progress-purple {
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+}
+
+/* Active tab underline — purple */
+.tab-active-purple {
+  border-bottom-color: var(--accent-purple) !important;
+  color: var(--accent-purple) !important;
+}
+
+/* ── Scrollbars — minimal ──────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167,139,250,0.2) transparent;
+}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(167,139,250,0.2);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(167,139,250,0.4); }
+
+/* ── Selection color ───────────────────────────────────────────────── */
+::selection {
+  background: rgba(167,139,250,0.3);
+  color: #fff;
 }
