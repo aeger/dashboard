@@ -7,7 +7,6 @@ import LabQuickLinks from '@/components/lab/LabQuickLinks'
 import TaskQueueWidget from '@/components/lab/TaskQueueWidget'
 import GoalMilestoneWidget from '@/components/lab/GoalMilestoneWidget'
 import LabMonitor from '@/components/lab/LabMonitor'
-import ViewToggle from '@/components/shared/ViewToggle'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
 import SecurityWidget from '@/components/lab/SecurityWidget'
@@ -30,17 +29,10 @@ export default function LabPage() {
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
       <AgentHealthBanner />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-white tracking-tight">AZ-Lab</h1>
-          <p className="text-xs text-zinc-600 mt-0.5">svc-podman-01 · 192.168.1.181</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <AuthIndicator />
-          <RefreshButton />
-          <ViewToggle currentView="lab" />
-        </div>
+      {/* Page action bar */}
+      <div className="flex items-center justify-end gap-2 mb-4">
+        <AuthIndicator />
+        <RefreshButton />
       </div>
 
       {/* Host Metrics */}
