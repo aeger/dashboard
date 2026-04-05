@@ -1,99 +1,331 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import type { RustDeskRemote } from '@/app/api/rustdesk/remotes/route'
 
-interface RustDeskDevice {
-  id: string
-  name: string
-  icon?: string
-}
+// ── Types ───────────────────────────────────────────────────────────────────
 
 interface RustDeskStatus {
   configured: boolean
   hbbs?: boolean
   hbbr?: boolean
   host?: string
-  key?: string
-  devices?: RustDeskDevice[]
 }
 
-export default function RustDeskWidget() {
-  const [status, setStatus] = useState<RustDeskStatus | null>(null)
-  const [quickId, setQuickId] = useState('')
-  const [showQuick, setShowQuick] = useState(false)
-  const [copied, setCopied] = useState<string | null>(null)
+type Tab = 'list' | 'create' | 'edit'
 
-  useEffect(() => {
-    fetch('/api/rustdesk')
-      .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => {})
-  }, [])
+const EMPTY_FORM = { peerId: '', name: '', password: '', group: '', note: '' }
 
-  function handleConnect(peerId: string) {
-    if (!status?.host) return
-    window.open(`rustdesk://connection/new/${peerId}`, '_self')
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+        active ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function Field({
+  label, value, onChange, placeholder, type = 'text',
+}: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string
+}) {
+  return (
+    <div>
+      <label className="block text-xs text-zinc-500 mb-1">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-1.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
+      />
+    </div>
+  )
+}
+
+// ── Remote form ─────────────────────────────────────────────────────────────
+
+function RemoteForm({
+  initial,
+  isEdit,
+  onSave,
+  onCancel,
+}: {
+  initial: typeof EMPTY_FORM & { id?: string }
+  isEdit: boolean
+  onSave: (r: RustDeskRemote) => void
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState(initial)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  function set(key: keyof typeof EMPTY_FORM, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  function copyId(id: string) {
-    navigator.clipboard.writeText(id).then(() => {
-      setCopied(id)
+  async function handleSubmit() {
+    setError('')
+    setSaving(true)
+    try {
+      const url = isEdit ? `/api/rustdesk/remotes/${initial.id}` : '/api/rustdesk/remotes'
+      const method = isEdit ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Save failed'); return }
+      onSave(data)
+    } catch {
+      setError('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Peer ID (numeric)" value={form.peerId} onChange={(v) => set('peerId', v)} placeholder="123456789" />
+        <Field label="Name" value={form.name} onChange={(v) => set('name', v)} placeholder="My Desktop" />
+        <Field label="Password (optional)" value={form.password} onChange={(v) => set('password', v)} type="password" placeholder="saved password" />
+        <Field label="Group / Tag (optional)" value={form.group} onChange={(v) => set('group', v)} placeholder="home, work…" />
+        <div className="sm:col-span-2">
+          <Field label="Note (optional)" value={form.note} onChange={(v) => set('note', v)} placeholder="short description" />
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="px-4 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-md transition-colors"
+        >
+          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Remote'}
+        </button>
+        <button onClick={onCancel} className="px-4 py-1.5 text-xs font-medium text-zinc-400 hover:text-white transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Remote list ─────────────────────────────────────────────────────────────
+
+function RemoteList({
+  remotes,
+  onEdit,
+  onDelete,
+  onConnect,
+}: {
+  remotes: RustDeskRemote[]
+  onEdit: (r: RustDeskRemote) => void
+  onDelete: (id: string) => void
+  onConnect: (peerId: string) => void
+}) {
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+
+  async function handleDelete(id: string) {
+    setDeleting(id)
+    try {
+      await fetch(`/api/rustdesk/remotes/${id}`, { method: 'DELETE' })
+      onDelete(id)
+    } finally {
+      setDeleting(null)
+      setConfirmId(null)
+    }
+  }
+
+  function copyId(peerId: string) {
+    navigator.clipboard.writeText(peerId).then(() => {
+      setCopied(peerId)
       setTimeout(() => setCopied(null), 1500)
     })
   }
 
-  if (!status) return (
-    <div className="flex items-center justify-center h-16">
-      <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-    </div>
-  )
-
-  if (!status.configured) return (
-    <div className="text-zinc-500 text-sm text-center py-4">RustDesk not configured</div>
-  )
-
-  const serverUp = status.hbbs && status.hbbr
-  const devices = status.devices ?? []
+  if (remotes.length === 0) {
+    return <p className="text-xs text-zinc-600 py-3">No saved remotes. Add one to get started.</p>
+  }
 
   return (
     <div className="space-y-2">
-      {/* Server status bar */}
-      <div className="flex items-center justify-between text-xs px-1">
-        <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-1 ${serverUp ? 'text-emerald-400' : 'text-red-400'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${serverUp ? 'bg-emerald-400' : 'bg-red-400'}`} />
-            {serverUp ? 'Server Online' : 'Server Issue'}
-          </div>
-          {!serverUp && (
-            <div className="flex gap-1.5">
-              <span className={status.hbbs ? 'text-emerald-400' : 'text-red-400'}>hbbs</span>
-              <span className={status.hbbr ? 'text-emerald-400' : 'text-red-400'}>hbbr</span>
+      {remotes.map((r) => (
+        <div key={r.id} className="flex items-start justify-between gap-3 bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-white">{r.name}</span>
+              {r.group && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-400">{r.group}</span>
+              )}
+              {r.password && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-800/50">
+                  pw saved
+                </span>
+              )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-zinc-600">{status.host}</span>
-          <button
-            onClick={() => setShowQuick(!showQuick)}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors"
-            title="Quick connect by ID"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-      </div>
+            <button
+              onClick={() => copyId(r.peerId)}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors font-mono mt-0.5"
+              title="Copy Peer ID"
+            >
+              {copied === r.peerId ? 'Copied!' : `ID: ${r.peerId}`}
+            </button>
+            {r.note && <div className="text-xs text-zinc-600 truncate mt-0.5">{r.note}</div>}
+          </div>
 
-      {/* Quick connect */}
+          <div className="flex gap-1.5 flex-shrink-0 items-center">
+            {confirmId === r.id ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => handleDelete(r.id)}
+                  disabled={deleting === r.id}
+                  className="text-[10px] px-2 py-1 bg-red-700 hover:bg-red-600 text-white rounded transition-colors disabled:opacity-50"
+                >
+                  {deleting === r.id ? '…' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setConfirmId(null)}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => onConnect(r.peerId)}
+                  className="text-[10px] px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded transition-colors"
+                  title="Connect"
+                >
+                  Connect
+                </button>
+                <button
+                  onClick={() => onEdit(r)}
+                  className="text-[10px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded transition-colors"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setConfirmId(r.id)}
+                  className="text-[10px] px-2 py-1 bg-zinc-800 hover:bg-red-900/60 text-zinc-400 hover:text-red-300 rounded transition-colors border border-zinc-700"
+                >
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Main widget ─────────────────────────────────────────────────────────────
+
+export default function RustDeskWidget() {
+  const [tab, setTab] = useState<Tab>('list')
+  const [remotes, setRemotes] = useState<RustDeskRemote[]>([])
+  const [status, setStatus] = useState<RustDeskStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [editTarget, setEditTarget] = useState<RustDeskRemote | null>(null)
+  const [quickId, setQuickId] = useState('')
+  const [showQuick, setShowQuick] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [statusRes, remotesRes] = await Promise.all([
+        fetch('/api/rustdesk'),
+        fetch('/api/rustdesk/remotes'),
+      ])
+      if (statusRes.ok) setStatus(await statusRes.json())
+      if (remotesRes.ok) setRemotes(await remotesRes.json())
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  function handleConnect(peerId: string) {
+    window.open(`rustdesk://connection/new/${peerId}`, '_self')
+  }
+
+  function handleEdit(r: RustDeskRemote) {
+    setEditTarget(r)
+    setTab('edit')
+  }
+
+  function handleDelete(id: string) {
+    setRemotes((prev) => prev.filter((r) => r.id !== id))
+  }
+
+  function handleSaved(r: RustDeskRemote) {
+    setRemotes((prev) => {
+      const idx = prev.findIndex((x) => x.id === r.id)
+      if (idx >= 0) { const next = [...prev]; next[idx] = r; return next }
+      return [...prev, r].sort((a, b) => a.name.localeCompare(b.name))
+    })
+    setEditTarget(null)
+    setTab('list')
+  }
+
+  const serverUp = status?.hbbs && status?.hbbr
+
+  return (
+    <div>
+      {/* Server status bar */}
+      {status?.configured !== false && (
+        <div className="flex items-center justify-between text-xs px-1 mb-3">
+          <div className={`flex items-center gap-1.5 ${serverUp ? 'text-emerald-400' : 'text-red-400'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${serverUp ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            {serverUp ? 'Server Online' : status ? 'Server Issue' : 'Checking…'}
+            {status && !serverUp && (
+              <span className="text-zinc-500 ml-1">
+                {!status.hbbs && 'hbbs↓'} {!status.hbbr && 'hbbr↓'}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {status?.host && <span className="text-zinc-600">{status.host}</span>}
+            <button
+              onClick={() => setShowQuick(!showQuick)}
+              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              title="Quick connect by ID"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick connect input */}
       {showQuick && (
-        <div className="flex gap-2 px-1">
+        <div className="flex gap-2 mb-3">
           <input
             type="text"
             value={quickId}
             onChange={(e) => setQuickId(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && quickId.trim() && handleConnect(quickId.trim())}
-            placeholder="Enter Peer ID"
+            placeholder="Enter Peer ID to connect"
             className="flex-1 px-2.5 py-1 rounded bg-zinc-800 border border-zinc-700 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
             autoFocus
           />
@@ -107,63 +339,61 @@ export default function RustDeskWidget() {
         </div>
       )}
 
-      {/* Device list */}
-      {devices.length > 0 && (
-        <div className="space-y-0.5">
-          {devices.map((device) => (
-            <div
-              key={device.id}
-              className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-zinc-800/40 hover:bg-zinc-800/70 transition-colors group"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <DeviceIcon type={device.icon} />
-                <div className="min-w-0">
-                  <div className="text-sm text-zinc-200 truncate">{device.name}</div>
-                  <button
-                    onClick={() => copyId(device.id)}
-                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors font-mono"
-                    title="Copy ID"
-                  >
-                    {copied === device.id ? 'Copied!' : `ID: ${device.id}`}
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={() => handleConnect(device.id)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs transition-colors"
-                title={`Connect to ${device.name}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
-                  <path d="M2 3.5A1.5 1.5 0 013.5 2h9A1.5 1.5 0 0114 3.5v3.009a7.006 7.006 0 00-1-.417V3.5a.5.5 0 00-.5-.5h-9a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h3.083A7.026 7.026 0 006 11H3.5A1.5 1.5 0 012 9.5v-6z" />
-                  <path d="M12 16a4 4 0 100-8 4 4 0 000 8zm-.75-5.25a.75.75 0 011.5 0v.75h.75a.75.75 0 010 1.5h-.75v.75a.75.75 0 01-1.5 0v-.75h-.75a.75.75 0 010-1.5h.75v-.75z" />
-                </svg>
-                Connect
-              </button>
-            </div>
-          ))}
+      {/* Tab bar */}
+      <div className="flex gap-0.5 border-b border-zinc-800 mb-4 pb-1">
+        <TabBtn active={tab === 'list'} onClick={() => { setTab('list'); setEditTarget(null) }}>
+          Remotes ({remotes.length})
+        </TabBtn>
+        <TabBtn active={tab === 'create'} onClick={() => { setTab('create'); setEditTarget(null) }}>
+          + New
+        </TabBtn>
+        {tab === 'edit' && editTarget && (
+          <TabBtn active={true} onClick={() => {}}>
+            Editing: {editTarget.name}
+          </TabBtn>
+        )}
+        <div className="ml-auto">
+          <button
+            onClick={load}
+            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors px-2 py-1"
+            title="Refresh"
+          >
+            ↺
+          </button>
         </div>
+      </div>
+
+      {/* Content */}
+      {tab === 'list' && (
+        loading ? (
+          <p className="text-xs text-zinc-600">Loading…</p>
+        ) : (
+          <RemoteList
+            remotes={remotes}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onConnect={handleConnect}
+          />
+        )
       )}
 
-      {devices.length === 0 && (
-        <div className="text-zinc-500 text-xs text-center py-3">No devices configured</div>
+      {tab === 'create' && (
+        <RemoteForm
+          initial={{ ...EMPTY_FORM }}
+          isEdit={false}
+          onSave={handleSaved}
+          onCancel={() => setTab('list')}
+        />
+      )}
+
+      {tab === 'edit' && editTarget && (
+        <RemoteForm
+          initial={{ ...EMPTY_FORM, ...editTarget, password: editTarget.password ?? '', group: editTarget.group ?? '', note: editTarget.note ?? '' }}
+          isEdit={true}
+          onSave={handleSaved}
+          onCancel={() => { setTab('list'); setEditTarget(null) }}
+        />
       )}
     </div>
-  )
-}
-
-function DeviceIcon({ type }: { type?: string }) {
-  if (type === 'server') {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-zinc-500 flex-shrink-0">
-        <path d="M4.632 3.533A2 2 0 016.577 2h6.846a2 2 0 011.945 1.533l1.976 8.234A3.489 3.489 0 0016 11.5H4c-.476 0-.93.095-1.344.267l1.976-8.234z" />
-        <path fillRule="evenodd" d="M4 13a2 2 0 100 4h12a2 2 0 100-4H4zm11.24 2a.75.75 0 01.75-.75H16a.75.75 0 01.75.75v.01a.75.75 0 01-.75.75h-.01a.75.75 0 01-.75-.75V15zm-2.25-.75a.75.75 0 00-.75.75v.01c0 .414.336.75.75.75H13a.75.75 0 00.75-.75V15a.75.75 0 00-.75-.75h-.01z" clipRule="evenodd" />
-      </svg>
-    )
-  }
-  // Desktop
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-zinc-500 flex-shrink-0">
-      <path fillRule="evenodd" d="M2 4.25A2.25 2.25 0 014.25 2h11.5A2.25 2.25 0 0118 4.25v8.5A2.25 2.25 0 0115.75 15h-3.105a3.501 3.501 0 001.1 1.677A.75.75 0 0113.26 18H6.74a.75.75 0 01-.484-1.323A3.501 3.501 0 007.355 15H4.25A2.25 2.25 0 012 12.75v-8.5zm1.5 0a.75.75 0 01.75-.75h11.5a.75.75 0 01.75.75v7.5a.75.75 0 01-.75.75H4.25a.75.75 0 01-.75-.75v-7.5z" clipRule="evenodd" />
-    </svg>
   )
 }

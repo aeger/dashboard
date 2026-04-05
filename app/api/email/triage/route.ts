@@ -11,11 +11,6 @@ export async function POST(req: NextRequest) {
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
-    const { taskId, taskTitle, taskStatus } = await req.json()
-    if (!taskId || typeof taskId !== 'string') {
-      return NextResponse.json({ error: 'Invalid taskId' }, { status: 400 })
-    }
-
     const headers = {
       apikey: key,
       Authorization: `Bearer ${key}`,
@@ -23,16 +18,15 @@ export async function POST(req: NextRequest) {
       Prefer: 'return=representation',
     }
 
-    // Queue a new claude-code task to examine and resolve the stuck task
     const body = JSON.stringify({
-      title: `Examine and resolve stuck task: ${taskTitle ?? taskId}`,
-      description: `Task ${taskId} (status: ${taskStatus ?? 'unknown'}) appears stalled or needs attention. Examine it, determine the correct next action, and execute it. If it was pending_eval, evaluate the result and mark completed or failed. If blocked, investigate and unblock. If failed, diagnose and retry or escalate.`,
+      title: 'Run email triage now',
+      description: 'Manual trigger from dashboard. Run the hourly-email-triage task immediately: check inbox, archive junk, surface important items, and post a summary to Discord.',
       status: 'pending',
-      target: 'claude-code',
-      priority: 1,
+      target: 'iris',
+      priority: 2,
       source: 'dashboard',
-      tags: ['flagged', 'maintenance'],
-      context: { flagged_task_id: taskId, flagged_status: taskStatus },
+      tags: ['email-triage', 'manual-trigger'],
+      context: { trigger_id: 'hourly-email-triage', triggered_at: new Date().toISOString() },
     })
 
     const res = await fetch(`${url}/rest/v1/task_queue`, {
@@ -47,7 +41,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [created] = await res.json()
-    return NextResponse.json({ success: true, newTaskId: created?.id })
+    return NextResponse.json({ success: true, taskId: created?.id, queuedAt: new Date().toISOString() })
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }

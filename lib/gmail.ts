@@ -1,6 +1,32 @@
+import fs from 'fs'
+import path from 'path'
+
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1'
+const TOKEN_FILE = '/app/data/gmail_refresh_token.txt'
+
+export class GmailAuthError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'GmailAuthError'
+  }
+}
 
 let _cachedToken: { token: string; expires: number } | null = null
+
+export function clearTokenCache() {
+  _cachedToken = null
+}
+
+function getRefreshToken(): string {
+  // File-based token takes precedence over env var (written by OAuth callback)
+  try {
+    const token = fs.readFileSync(TOKEN_FILE, 'utf8').trim()
+    if (token) return token
+  } catch {
+    // File doesn't exist yet — fall through to env var
+  }
+  return process.env.GMAIL_REFRESH_TOKEN || ''
+}
 
 async function getAccessToken(): Promise<string> {
   if (_cachedToken && Date.now() < _cachedToken.expires) {
@@ -9,10 +35,10 @@ async function getAccessToken(): Promise<string> {
 
   const clientId = process.env.GMAIL_CLIENT_ID
   const clientSecret = process.env.GMAIL_CLIENT_SECRET
-  const refreshToken = process.env.GMAIL_REFRESH_TOKEN
+  const refreshToken = getRefreshToken()
 
   if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('Gmail OAuth credentials not configured')
+    throw new GmailAuthError('Gmail OAuth credentials not configured')
   }
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -27,7 +53,8 @@ async function getAccessToken(): Promise<string> {
   })
 
   if (!res.ok) {
-    throw new Error(`Token refresh failed: ${res.status}`)
+    _cachedToken = null
+    throw new GmailAuthError(`Token refresh failed: ${res.status}`)
   }
 
   const data = await res.json()
@@ -36,6 +63,13 @@ async function getAccessToken(): Promise<string> {
     expires: Date.now() + (data.expires_in - 60) * 1000,
   }
   return _cachedToken.token
+}
+
+export function saveRefreshToken(token: string) {
+  const dir = path.dirname(TOKEN_FILE)
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(TOKEN_FILE, token, 'utf8')
+  _cachedToken = null
 }
 
 async function apiGet(path: string, params?: Record<string, string | string[]>) {

@@ -182,6 +182,8 @@ export default function ContainerList() {
               return { ...c, user_status: 'skipped', skipped_at: new Date().toISOString(), skip_reassess_at: reassess.toISOString() }
             } else if (action === 'ignore') {
               return { ...c, user_status: 'ignored' }
+            } else if (action === 'unignore') {
+              return { ...c, user_status: 'pending_review' }
             }
             return c
           }),
@@ -205,11 +207,12 @@ export default function ContainerList() {
     <div className="text-zinc-500 text-sm text-center py-6">Portainer not configured</div>
   )
 
-  // Count by status
-  const autoCount = updates.containers.filter((u) => u.user_status === 'auto_approved').length
-  const reviewCount = updates.containers.filter((u) => u.user_status === 'pending_review').length
-  const skippedCount = updates.containers.filter((u) => u.user_status === 'skipped').length
-  const totalUpdates = (updates.updates_available ?? 0)
+  // Count by status — exclude ignored from all counts
+  const activeUpdates = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored')
+  const autoCount = activeUpdates.filter((u) => u.user_status === 'auto_approved').length
+  const reviewCount = activeUpdates.filter((u) => u.user_status === 'pending_review').length
+  const skippedCount = activeUpdates.filter((u) => u.user_status === 'skipped').length
+  const totalUpdates = activeUpdates.length
 
   // Find stacks with pending updates (exclude ignored)
   const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').map((u) => u.name))
@@ -546,6 +549,18 @@ function ExpandedPanel({ update, onAction, loading }: {
       {status === 'requested' && (
         <div className="flex items-center gap-2 pt-1">
           <span className="text-xs text-blue-400 animate-pulse">Update queued — processing shortly</span>
+        </div>
+      )}
+      {status === 'ignored' && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-xs text-zinc-500">Update ignored</span>
+          <button
+            onClick={() => onAction('unignore')}
+            disabled={loading}
+            className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors"
+          >
+            Unignore
+          </button>
         </div>
       )}
       {status === 'skipped' && (

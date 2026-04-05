@@ -87,17 +87,28 @@ export default function SecurityWidget() {
   const [noData, setNoData] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all')
+  const [scanning, setScanning] = useState(false)
+
+  const load = () =>
+    fetch('/api/security')
+      .then((r) => {
+        if (r.status === 404) { setNoData(true); return null }
+        return r.json()
+      })
+      .then((d) => { if (d && !d.error) { setData(d); setNoData(false) } })
+      .catch(() => {})
+
+  async function triggerScan() {
+    setScanning(true)
+    try {
+      await fetch('/api/security/scan', { method: 'POST' })
+      await load()
+    } finally {
+      setScanning(false)
+    }
+  }
 
   useEffect(() => {
-    const load = () =>
-      fetch('/api/security')
-        .then((r) => {
-          if (r.status === 404) { setNoData(true); return null }
-          return r.json()
-        })
-        .then((d) => { if (d && !d.error) setData(d) })
-        .catch(() => {})
-
     load().finally(() => setLoading(false))
     const id = setInterval(load, 5 * 60 * 1000)
     return () => clearInterval(id)
@@ -110,12 +121,15 @@ export default function SecurityWidget() {
   )
 
   if (noData || !data) return (
-    <div className="text-center py-6 space-y-2">
-      <div className="text-2xl">🔒</div>
+    <div className="text-center py-6 space-y-3">
       <div className="text-zinc-500 text-sm">No scan data yet</div>
-      <div className="text-zinc-600 text-xs font-mono">
-        Run: python3 ~/azlab/services/dashboard/security-check.py
-      </div>
+      <button
+        onClick={triggerScan}
+        disabled={scanning}
+        className="px-4 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-md transition-colors"
+      >
+        {scanning ? 'Scanning…' : 'Run First Scan'}
+      </button>
     </div>
   )
 
@@ -133,6 +147,7 @@ export default function SecurityWidget() {
       {/* Score + severity counts */}
       <div className="flex items-center gap-4">
         <ScoreGauge score={data.score} />
+        <div className="flex-1" />
 
         <div className="flex-1 space-y-1.5">
           {(['critical', 'warning', 'info'] as const).map((sev) => {
@@ -154,7 +169,16 @@ export default function SecurityWidget() {
               </button>
             )
           })}
-          <div className="text-[10px] text-zinc-700 pl-1 pt-0.5">Scanned {timeAgo(data.scanned_at)}</div>
+          <div className="flex items-center gap-2 pl-1 pt-0.5">
+            <span className="text-[10px] text-zinc-700">Scanned {timeAgo(data.scanned_at)}</span>
+            <button
+              onClick={triggerScan}
+              disabled={scanning}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-50 transition-colors"
+            >
+              {scanning ? '⟳ scanning…' : '⟳ rescan'}
+            </button>
+          </div>
         </div>
       </div>
 

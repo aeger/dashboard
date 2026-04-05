@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { listInbox, isConfigured } from '@/lib/gmail'
+import { listInbox, isConfigured, GmailAuthError } from '@/lib/gmail'
 
 export async function GET(req: NextRequest) {
   // Check Authelia session
@@ -31,6 +31,12 @@ export async function GET(req: NextRequest) {
     const messages = await listInbox(max)
     return NextResponse.json({ messages, configured: true, authenticated: true })
   } catch (error) {
+    if (error instanceof GmailAuthError) {
+      return NextResponse.json(
+        { messages: [], reauth_required: true, configured: true, authenticated: true },
+        { status: 200 },
+      )
+    }
     console.error('Gmail fetch error:', error)
     return NextResponse.json(
       { messages: [], error: 'Failed to fetch mail', configured: true, authenticated: true },

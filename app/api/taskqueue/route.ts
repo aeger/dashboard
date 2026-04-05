@@ -49,9 +49,9 @@ export async function GET() {
 
   try {
     const [problemsRes, waitingRes, activeRes, recentRes, summary24hRes] = await Promise.all([
-      // Problem flags: failed, escalated, has failure_mode, or multiple attempts
+      // Problem flags: failed or escalated (exclude completed/expired)
       fetch(
-        `${base}?select=${SELECT}&or=(status.eq.failed,status.eq.escalated,failure_mode.not.is.null,attempt_count.gte.2)&order=updated_at.desc&limit=20`,
+        `${base}?select=${SELECT}&or=(status.eq.failed,status.eq.escalated)&order=updated_at.desc&limit=20`,
         opts
       ),
       // Waiting: blocked, delegated, or pending_eval (needs Iris review)

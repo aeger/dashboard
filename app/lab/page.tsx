@@ -6,14 +6,14 @@ import TechNews from '@/components/lab/TechNews'
 import LabQuickLinks from '@/components/lab/LabQuickLinks'
 import TaskQueueWidget from '@/components/lab/TaskQueueWidget'
 import GoalMilestoneWidget from '@/components/lab/GoalMilestoneWidget'
-import AgentTerminalWidget from '@/components/lab/AgentTerminalWidget'
 import LabMonitor from '@/components/lab/LabMonitor'
 import ViewToggle from '@/components/shared/ViewToggle'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
-import WebTerminal from '@/components/lab/WebTerminal'
-import DiscordChat from '@/components/lab/DiscordChat'
 import SecurityWidget from '@/components/lab/SecurityWidget'
+import AgentHealthBanner from '@/components/shared/AgentHealthBanner'
+import TerminalHub from '@/components/lab/TerminalHub'
+import ProxiesWidget from '@/components/lab/ProxiesWidget'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +22,7 @@ export default function LabPage() {
 
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
+      <AgentHealthBanner />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -85,22 +86,15 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Discord Chat Bridge */}
+      {/* Terminal Hub — Discord / Agent Terminal / Web Terminal */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Discord Bridge</h2>
-        <DiscordChat />
+        <TerminalHub />
       </div>
 
-      {/* Agent Terminal (Wren live activity) */}
+      {/* Traefik Proxy Manager */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Agent Terminal — Wren</h2>
-        <AgentTerminalWidget agent="wren" />
-      </div>
-
-      {/* Web Terminal */}
-      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 mb-4">
-        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Web Terminal</h2>
-        <WebTerminal />
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Proxy Manager</h2>
+        <ProxiesWidget />
       </div>
 
       {/* Quick Links */}

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-
-const execFileAsync = promisify(execFile)
+import { sshExec } from '@/lib/ssh-exec'
 
 // Stack = one compose directory that contains multiple dependent services
 export const STACK_DEFINITIONS: Record<string, { path: string; containers: string[]; label: string }> = {
@@ -60,26 +57,12 @@ export async function POST(req: NextRequest) {
 
     const composePath = stack.path
 
-    // Pull all images in the stack
+    // Pull all images and recreate stack via SSH to host
     try {
-      await execFileAsync('podman-compose', ['pull'], {
-        cwd: composePath,
-        timeout: 300_000,
-      })
+      await sshExec(`cd ${composePath} && podman-compose pull && podman-compose up -d`, 480_000)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return NextResponse.json({ error: `Pull failed: ${msg}` }, { status: 500 })
-    }
-
-    // Recreate stack — compose handles dependency ordering
-    try {
-      await execFileAsync('podman-compose', ['up', '-d'], {
-        cwd: composePath,
-        timeout: 180_000,
-      })
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      return NextResponse.json({ error: `Stack up failed: ${msg}` }, { status: 500 })
+      return NextResponse.json({ error: `Stack update failed: ${msg}` }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, stack: stackName, containers: stack.containers })

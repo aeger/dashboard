@@ -13,8 +13,14 @@ interface GmailMessage {
 }
 
 interface GmailState {
-  status: 'loading' | 'unauthenticated' | 'ready' | 'error'
+  status: 'loading' | 'unauthenticated' | 'reauth' | 'ready' | 'error'
   messages: GmailMessage[]
+}
+
+interface TriageState {
+  status: 'idle' | 'running' | 'queued' | 'error'
+  lastRun?: string
+  taskId?: string
 }
 
 const AUTH_LOGIN_URL = 'https://auth.az-lab.dev/?rd=https://home.az-lab.dev'
@@ -22,6 +28,22 @@ const REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes
 
 export default function GmailWidget() {
   const [state, setState] = useState<GmailState>({ status: 'loading', messages: [] })
+  const [triage, setTriage] = useState<TriageState>({ status: 'idle' })
+
+  async function runTriage() {
+    setTriage({ status: 'running' })
+    try {
+      const res = await fetch('/api/email/triage', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setTriage({ status: 'queued', lastRun: data.queuedAt, taskId: data.taskId })
+      } else {
+        setTriage({ status: 'error' })
+      }
+    } catch {
+      setTriage({ status: 'error' })
+    }
+  }
 
   async function load() {
     try {
@@ -30,6 +52,11 @@ export default function GmailWidget() {
 
       if (!data.authenticated) {
         setState({ status: 'unauthenticated', messages: [] })
+        return
+      }
+
+      if (data.reauth_required) {
+        setState({ status: 'reauth', messages: [] })
         return
       }
 
@@ -50,40 +77,121 @@ export default function GmailWidget() {
     return () => clearInterval(timer)
   }, [])
 
+  function TriageButton() {
+    const isRunning = triage.status === 'running'
+    const isQueued = triage.status === 'queued'
+    const isError = triage.status === 'error'
+
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={runTriage}
+          disabled={isRunning || isQueued}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-all ${
+            isQueued
+              ? 'bg-green-900/40 border-green-700/50 text-green-400 cursor-default'
+              : isError
+              ? 'bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50'
+              : isRunning
+              ? 'bg-zinc-800 border-zinc-700 text-zinc-400 cursor-wait'
+              : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-300 hover:text-white'
+          }`}
+        >
+          {isRunning ? (
+            <>
+              <span className="w-3 h-3 border border-zinc-500 border-t-zinc-300 rounded-full animate-spin" />
+              Running…
+            </>
+          ) : isQueued ? (
+            <>&#10003; Queued</>
+          ) : isError ? (
+            <>&#x26A0; Error</>
+          ) : (
+            <>&#9654; Run Triage</>
+          )}
+        </button>
+        {isQueued && triage.lastRun && (
+          <span className="text-xs text-zinc-600">
+            {formatDate(triage.lastRun)}
+          </span>
+        )}
+      </div>
+    )
+  }
+
   if (state.status === 'loading') {
     return (
-      <div className="flex items-center justify-center h-32">
-        <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+      <div>
+        <div className="flex justify-end mb-2">
+          <TriageButton />
+        </div>
+        <div className="flex items-center justify-center h-32">
+          <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+        </div>
       </div>
     )
   }
 
   if (state.status === 'unauthenticated') {
     return (
-      <div className="flex flex-col items-center justify-center py-8 gap-3">
-        <div className="text-zinc-500 text-sm">Sign in to view your inbox</div>
-        <a
-          href={AUTH_LOGIN_URL}
-          className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm text-zinc-300 hover:text-white transition-all"
-        >
-          Sign in
-        </a>
+      <div>
+        <div className="flex justify-end mb-2">
+          <TriageButton />
+        </div>
+        <div className="flex flex-col items-center justify-center py-8 gap-3">
+          <div className="text-zinc-500 text-sm">Sign in to view your inbox</div>
+          <a
+            href={AUTH_LOGIN_URL}
+            className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm text-zinc-300 hover:text-white transition-all"
+          >
+            Sign in
+          </a>
+        </div>
+      </div>
+    )
+  }
+
+  if (state.status === 'reauth') {
+    return (
+      <div>
+        <div className="flex justify-end mb-2">
+          <TriageButton />
+        </div>
+        <div className="flex flex-col items-center justify-center py-8 gap-3">
+          <div className="text-zinc-500 text-sm text-center">Gmail token expired</div>
+          <a
+            href="/api/gmail/auth"
+            className="px-4 py-2 rounded-lg bg-blue-900/50 hover:bg-blue-800/60 border border-blue-700/50 text-sm text-blue-300 hover:text-blue-100 transition-all"
+          >
+            Re-authorize Gmail
+          </a>
+        </div>
       </div>
     )
   }
 
   if (state.status === 'error') {
     return (
-      <div className="text-zinc-500 text-sm text-center py-8">
-        Unable to load mail
+      <div>
+        <div className="flex justify-end mb-2">
+          <TriageButton />
+        </div>
+        <div className="text-zinc-500 text-sm text-center py-8">
+          Unable to load mail
+        </div>
       </div>
     )
   }
 
   if (state.messages.length === 0) {
     return (
-      <div className="text-zinc-500 text-sm text-center py-8">
-        Inbox zero — nice work
+      <div>
+        <div className="flex justify-end mb-2">
+          <TriageButton />
+        </div>
+        <div className="text-zinc-500 text-sm text-center py-8">
+          Inbox zero — nice work
+        </div>
       </div>
     )
   }
@@ -93,17 +201,22 @@ export default function GmailWidget() {
   return (
     <div>
       <div className="flex justify-between items-center mb-2">
-        {unreadCount > 0 && (
-          <span className="text-xs text-blue-400">
-            {unreadCount} unread
-          </span>
-        )}
-        <button
-          onClick={load}
-          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors ml-auto"
-        >
-          refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <span className="text-xs text-blue-400">
+              {unreadCount} unread
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <TriageButton />
+          <button
+            onClick={load}
+            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+          >
+            refresh
+          </button>
+        </div>
       </div>
 
       <ul className="space-y-1.5 max-h-72 overflow-y-auto pr-1">

@@ -8,6 +8,10 @@ const ICON_EMOJIS: Record<string, string> = {
   adguard: '🛡️',
   'uptime-kuma': '💓',
   immich: '📷',
+  calibre: '📚',
+  audiobookshelf: '🎧',
+  changedetect: '👁️',
+  shelfmark: '🔖',
 }
 
 interface LabQuickLinksProps {
