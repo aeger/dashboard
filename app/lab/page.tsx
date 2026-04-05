@@ -20,8 +20,8 @@ export const dynamic = 'force-dynamic'
 // Shared card classes — zinc base + lift on hover
 const card = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
 const cardPurple = 'relative card-lift bg-zinc-900/50 rounded-xl p-4'
-  + ' border border-purple-900/30'
-  + ' shadow-[inset_0_0_40px_rgba(109,40,217,0.04)]'
+  + ' border border-purple-700/40'
+  + ' shadow-[inset_0_0_60px_rgba(109,40,217,0.08),0_0_0_1px_rgba(167,139,250,0.08)]'
 
 export default function LabPage() {
   const config = getConfig()

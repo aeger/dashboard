@@ -36,36 +36,34 @@ body {
   /* Zinc base with very subtle purple warmth in the bg */
   background-color: #09090b;
   background-image:
-    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(109,40,217,0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(109,40,217,0.06) 0%, transparent 55%);
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(109,40,217,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(109,40,217,0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 30% at 50% 50%, rgba(88,28,135,0.04) 0%, transparent 70%);
   background-attachment: fixed;
   min-height: 100vh;
 }
 
 /* ── Card lift + glass hover ───────────────────────────────────────── */
-
-/*
-  Apply .card-interactive to any card you want the lift on.
-  Works alongside Tailwind classes — just add it to the element.
-  Alternatively, the [data-card] selector below catches all
-  border/bg-zinc-900 cards automatically via the CSS attribute hook.
-*/
 .card-lift {
   box-shadow: var(--card-shadow-idle);
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease,
-    background-color 0.2s ease;
+    transform 0.22s ease,
+    box-shadow 0.22s ease,
+    border-color 0.22s ease,
+    background-color 0.22s ease;
 }
 
 .card-lift:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--card-shadow-hover);
-  border-color: rgba(167,139,250,0.25) !important;
+  transform: translateY(-4px);
+  box-shadow:
+    0 12px 36px rgba(0,0,0,0.6),
+    0 0 0 1px rgba(167,139,250,0.45),
+    0 0 24px rgba(109,40,217,0.12);
+  border-color: rgba(167,139,250,0.45) !important;
+  background-color: rgba(30,22,45,0.65) !important;
 }
 
-/* Subtle glass sheen on top edge of card */
+/* Glass sheen — top-left highlight, stronger on hover */
 .card-lift::before {
   content: '';
   position: absolute;
@@ -73,10 +71,23 @@ body {
   border-radius: inherit;
   background: linear-gradient(
     135deg,
-    rgba(255,255,255,0.04) 0%,
-    transparent 50%
+    rgba(255,255,255,0.055) 0%,
+    rgba(167,139,250,0.03) 40%,
+    transparent 60%
   );
+  transition: opacity 0.22s ease;
+  opacity: 0.6;
   pointer-events: none;
+}
+
+.card-lift:hover::before {
+  opacity: 1;
+  background: linear-gradient(
+    135deg,
+    rgba(255,255,255,0.08) 0%,
+    rgba(167,139,250,0.06) 40%,
+    transparent 65%
+  );
 }
 
 /* ── Purple accent utilities ───────────────────────────────────────── */
