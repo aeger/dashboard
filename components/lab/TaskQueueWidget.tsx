@@ -6,27 +6,47 @@ import type { TaskQueueData, TaskItem } from '@/app/api/taskqueue/route'
 // ── colours ──────────────────────────────────────────────────────────────────
 
 const STATUS_BG: Record<string, string> = {
-  pending:      'bg-zinc-700 text-zinc-300',
-  claimed:      'bg-blue-900/60 text-blue-300',
-  completed:    'bg-green-900/60 text-green-300',
-  failed:       'bg-red-900/60 text-red-300',
-  escalated:    'bg-orange-900/60 text-orange-300',
-  blocked:      'bg-amber-900/60 text-amber-300',
-  delegated:    'bg-purple-900/60 text-purple-300',
-  pending_eval: 'bg-indigo-900/60 text-indigo-300',
-  expired:      'bg-zinc-800 text-zinc-500',
+  // JeffLoop new statuses
+  pending_jeff_action: 'bg-rose-900/60 text-rose-200',
+  review_needed:       'bg-orange-900/60 text-orange-200',
+  in_progress_jeff:    'bg-cyan-900/60 text-cyan-200',
+  in_progress_agent:   'bg-blue-900/60 text-blue-200',
+  backlog:             'bg-zinc-800 text-zinc-400',
+  ready:               'bg-zinc-700 text-zinc-300',
+  cancelled:           'bg-zinc-800/40 text-zinc-500',
+  archived:            'bg-zinc-900/40 text-zinc-600',
+  // Legacy
+  pending:             'bg-zinc-700 text-zinc-300',
+  claimed:             'bg-blue-900/60 text-blue-300',
+  completed:           'bg-green-900/60 text-green-300',
+  failed:              'bg-red-900/60 text-red-300',
+  escalated:           'bg-orange-900/60 text-orange-300',
+  blocked:             'bg-amber-900/60 text-amber-300',
+  delegated:           'bg-purple-900/60 text-purple-300',
+  pending_eval:        'bg-indigo-900/60 text-indigo-300',
+  expired:             'bg-zinc-800 text-zinc-500',
 }
 
 const STATUS_DOT: Record<string, string> = {
-  pending:      'bg-zinc-500',
-  claimed:      'bg-blue-400',
-  completed:    'bg-green-400',
-  failed:       'bg-red-400',
-  escalated:    'bg-orange-400',
-  blocked:      'bg-amber-400',
-  delegated:    'bg-purple-400',
-  pending_eval: 'bg-indigo-400',
-  expired:      'bg-zinc-600',
+  // JeffLoop new statuses
+  pending_jeff_action: 'bg-rose-400',
+  review_needed:       'bg-orange-400',
+  in_progress_jeff:    'bg-cyan-400',
+  in_progress_agent:   'bg-blue-400',
+  backlog:             'bg-zinc-600',
+  ready:               'bg-zinc-400',
+  cancelled:           'bg-zinc-700',
+  archived:            'bg-zinc-800',
+  // Legacy
+  pending:             'bg-zinc-500',
+  claimed:             'bg-blue-400',
+  completed:           'bg-green-400',
+  failed:              'bg-red-400',
+  escalated:           'bg-orange-400',
+  blocked:             'bg-amber-400',
+  delegated:           'bg-purple-400',
+  pending_eval:        'bg-indigo-400',
+  expired:             'bg-zinc-600',
 }
 
 const PRIORITY_LABEL: Record<number, { label: string; cls: string }> = {
@@ -125,17 +145,22 @@ function FlagButton({ task }: { task: TaskItem }) {
 }
 
 function ProblemBanner({ task }: { task: TaskItem }) {
+  const isJeffAction = task.status === 'pending_jeff_action'
+  const isReview = task.status === 'review_needed'
   const isError = task.status === 'failed' || task.status === 'escalated'
-  const banner = isError
+  const banner = isJeffAction || isReview
+    ? 'border-rose-800 bg-rose-950/40'
+    : isError
     ? 'border-red-800 bg-red-950/40'
     : 'border-yellow-800 bg-yellow-950/30'
-  const detail = task.error ?? task.failure_mode ?? (task.attempt_count >= 2 ? `${task.attempt_count} attempts` : null)
+  const ctx = (task.context ?? {}) as Record<string, unknown>
+  const detail = ctx.context_summary as string ?? task.error ?? task.failure_mode ?? (task.attempt_count >= 2 ? `${task.attempt_count} attempts` : null)
 
   return (
     <div className={`rounded-lg border px-3 py-2 text-xs ${banner}`}>
       <div className="flex items-start gap-2">
-        <span className={`mt-0.5 text-[10px] font-bold flex-shrink-0 ${isError ? 'text-red-400' : 'text-yellow-400'}`}>
-          {isError ? '✗' : '!'}
+        <span className={`mt-0.5 text-[10px] font-bold flex-shrink-0 ${isJeffAction || isReview ? 'text-rose-400' : isError ? 'text-red-400' : 'text-yellow-400'}`}>
+          {isJeffAction ? '⚡' : isReview ? '👁' : isError ? '✗' : '!'}
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -252,13 +277,17 @@ function RecentRow({ task }: { task: TaskItem }) {
 
 function SummaryBar({ summary }: { summary: Record<string, number> }) {
   const items = [
-    { key: 'completed',  label: 'done',      cls: 'text-green-400' },
-    { key: 'failed',     label: 'failed',    cls: 'text-red-400' },
-    { key: 'escalated',  label: 'escalated', cls: 'text-orange-400' },
-    { key: 'claimed',    label: 'active',    cls: 'text-blue-400' },
-    { key: 'blocked',    label: 'blocked',   cls: 'text-amber-400' },
-    { key: 'delegated',  label: 'delegated', cls: 'text-purple-400' },
-    { key: 'pending',    label: 'pending',   cls: 'text-zinc-400' },
+    { key: 'completed',           label: 'done',       cls: 'text-green-400' },
+    { key: 'pending_jeff_action', label: 'needs jeff', cls: 'text-rose-400' },
+    { key: 'review_needed',       label: 'review',     cls: 'text-orange-400' },
+    { key: 'failed',              label: 'failed',     cls: 'text-red-400' },
+    { key: 'escalated',           label: 'escalated',  cls: 'text-orange-400' },
+    { key: 'claimed',             label: 'active',     cls: 'text-blue-400' },
+    { key: 'in_progress_agent',   label: 'agent',      cls: 'text-blue-400' },
+    { key: 'in_progress_jeff',    label: 'jeff',       cls: 'text-cyan-400' },
+    { key: 'blocked',             label: 'blocked',    cls: 'text-amber-400' },
+    { key: 'pending',             label: 'pending',    cls: 'text-zinc-400' },
+    { key: 'ready',               label: 'ready',      cls: 'text-zinc-400' },
   ]
   const total = Object.values(summary).reduce((s, v) => s + v, 0)
 

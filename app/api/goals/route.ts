@@ -6,7 +6,7 @@ export interface Goal {
   title: string
   description: string | null
   level: 'vision' | 'strategy' | 'milestone' | 'objective'
-  status: 'active' | 'completed' | 'paused' | 'planned' | 'blocked'
+  status: 'active' | 'completed' | 'paused' | 'planned' | 'blocked' | 'archived'
   priority: number
   target_date: string | null
   completed_at: string | null
@@ -16,10 +16,13 @@ export interface Goal {
   sort_order: number
   created_at: string
   updated_at: string
+  implementation_prompt: string | null
+  last_queued_at: string | null
+  auto_queue: boolean
   children?: Goal[]
 }
 
-const SELECT = 'id,parent_id,title,description,level,status,priority,target_date,completed_at,progress,tags,notes,sort_order,created_at,updated_at'
+const SELECT = 'id,parent_id,title,description,level,status,priority,target_date,completed_at,progress,tags,notes,sort_order,created_at,updated_at,implementation_prompt,last_queued_at,auto_queue'
 
 function buildTree(flat: Goal[]): Goal[] {
   const map = new Map<string, Goal>()
@@ -122,7 +125,7 @@ export async function PUT(req: Request) {
     const { id, ...fields } = body
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const allowed = ['title', 'description', 'status', 'priority', 'target_date', 'progress', 'notes', 'tags', 'sort_order', 'completed_at']
+    const allowed = ['title', 'description', 'status', 'priority', 'target_date', 'progress', 'notes', 'tags', 'sort_order', 'completed_at', 'implementation_prompt', 'auto_queue', 'last_queued_at']
     const patch: Record<string, unknown> = {}
     for (const k of allowed) {
       if (k in fields) patch[k] = fields[k]

@@ -63,7 +63,7 @@ function nodeMatchesSearch(goal: Goal, text: string): boolean {
 
 // ── filter bar ─────────────────────────────────────────────────────────────────
 
-const ALL_STATUSES = ['active', 'planned', 'paused', 'blocked', 'completed'] as const
+const ALL_STATUSES = ['active', 'planned', 'paused', 'blocked', 'completed', 'archived'] as const
 const ALL_LEVELS   = ['vision', 'strategy', 'milestone', 'objective'] as const
 
 const STATUS_PILL: Record<string, { on: string; border: string; dim: string }> = {
@@ -72,6 +72,7 @@ const STATUS_PILL: Record<string, { on: string; border: string; dim: string }> =
   paused:    { on: '#fbbf24', border: 'rgba(251,191,36,0.4)',   dim: 'rgba(251,191,36,0.07)'   },
   blocked:   { on: '#fb923c', border: 'rgba(251,146,60,0.4)',   dim: 'rgba(251,146,60,0.07)'   },
   completed: { on: '#4ade80', border: 'rgba(74,222,128,0.4)',   dim: 'rgba(74,222,128,0.07)'   },
+  archived:  { on: '#52525b', border: 'rgba(82,82,91,0.4)',     dim: 'rgba(82,82,91,0.07)'     },
 }
 const LEVEL_PILL: Record<string, { on: string; border: string; dim: string }> = {
   vision:    { on: '#c084fc', border: 'rgba(192,132,252,0.4)',  dim: 'rgba(192,132,252,0.07)'  },
@@ -408,7 +409,7 @@ function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   )
 }
 
-function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '' }: GoalCardProps) {
+function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void }) {
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
@@ -417,6 +418,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
   const [showSchedule, setShowSchedule] = useState(false)
   const [triggering, setTriggering] = useState(false)
   const [flagging, setFlagging] = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null)
 
   async function handleTrigger() {
@@ -443,6 +445,22 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
     } finally {
       setFlagging(false)
     }
+  }
+
+  async function handleArchive() {
+    setArchiving(true)
+    try {
+      await fetch(`/api/goals/${goal.id}/archive`, { method: 'POST' })
+      onArchive?.(goal.id)
+    } catch { /* noop */ } finally { setArchiving(false) }
+  }
+
+  async function handleRestore() {
+    setArchiving(true)
+    try {
+      await fetch(`/api/goals/${goal.id}/restore`, { method: 'POST' })
+      onRestore?.(goal.id)
+    } catch { /* noop */ } finally { setArchiving(false) }
   }
 
   const LEVEL_STRIPE: Record<string, string> = {
@@ -566,6 +584,28 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
               'bg-red-900/40 text-red-300 border-red-800/40'
             }`}>{triggerMsg}</span>
           ) : null}
+
+          {/* Archive / Restore / Export */}
+          <div className="ml-auto flex items-center gap-1.5">
+            <a
+              href={`/api/goals/${goal.id}/export?format=json`}
+              download
+              className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600"
+            >↓</a>
+            {goal.status === 'archived' ? (
+              <button
+                onClick={handleRestore}
+                disabled={archiving}
+                className="text-[10px] px-2 py-0.5 rounded border border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/40 disabled:opacity-50"
+              >{archiving ? '…' : 'Restore'}</button>
+            ) : (
+              <button
+                onClick={handleArchive}
+                disabled={archiving}
+                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-400 disabled:opacity-50"
+              >{archiving ? '…' : 'Archive'}</button>
+            )}
+          </div>
         </div>
 
         {showSchedule && (
@@ -1171,6 +1211,170 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
   )
 }
 
+// ── Vision Health Widget ───────────────────────────────────────────────────────
+
+function VisionHealth({ flat }: { flat: Goal[] }) {
+  const [taskData, setTaskData] = useState<{ jeff_urgent?: unknown[] } | null>(null)
+  const [open, setOpen] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/taskqueue').then(r => r.json()).then(d => setTaskData(d)).catch(() => {})
+  }, [])
+
+  const needsJeff = (taskData?.jeff_urgent as Array<{ title: string; id: string }> | undefined) ?? []
+  const blocked = flat.filter(g => g.status === 'blocked' && g.level !== 'vision')
+  const completedLast7 = flat.filter(g => {
+    if (g.status !== 'completed' || !g.completed_at) return false
+    return Date.now() - new Date(g.completed_at).getTime() < 7 * 86400000
+  })
+  const driftAlerts = flat.filter(g => {
+    const auto = g.progress
+    const manual = g.progress
+    return Math.abs(auto - manual) > 20
+  })
+
+  const metrics = [
+    {
+      label: 'Needs Jeff',
+      value: needsJeff.length,
+      cls: needsJeff.length > 0 ? 'text-rose-400' : 'text-zinc-500',
+      bgCls: needsJeff.length > 0 ? 'bg-rose-950/30 border-rose-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
+      desc: needsJeff.length > 0 ? `${needsJeff.length} task${needsJeff.length !== 1 ? 's' : ''} pending action` : 'All clear',
+    },
+    {
+      label: 'Blocked Goals',
+      value: blocked.length,
+      cls: blocked.length > 0 ? 'text-amber-400' : 'text-zinc-500',
+      bgCls: blocked.length > 0 ? 'bg-amber-950/30 border-amber-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
+      desc: blocked.length > 0 ? blocked.slice(0, 2).map(g => g.title.slice(0, 25)).join(', ') : 'No blockers',
+    },
+    {
+      label: 'Velocity (7d)',
+      value: completedLast7.length,
+      cls: completedLast7.length > 0 ? 'text-emerald-400' : 'text-zinc-500',
+      bgCls: 'bg-zinc-900/30 border-zinc-800/40',
+      desc: `${completedLast7.length} goal${completedLast7.length !== 1 ? 's' : ''} completed this week`,
+    },
+    {
+      label: 'Active Goals',
+      value: flat.filter(g => g.status === 'active').length,
+      cls: 'text-blue-400',
+      bgCls: 'bg-zinc-900/30 border-zinc-800/40',
+      desc: `${flat.filter(g => g.level === 'objective' && g.status === 'active').length} objectives in progress`,
+    },
+  ]
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 mb-2 group"
+      >
+        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 group-hover:text-zinc-400">Vision Health</span>
+        {needsJeff.length > 0 && (
+          <span className="px-1.5 py-0.5 rounded-full bg-rose-900/50 text-rose-300 text-[10px] font-bold animate-pulse">
+            {needsJeff.length} need action
+          </span>
+        )}
+        <span className="ml-auto text-zinc-700 text-[10px]">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          {metrics.map(m => (
+            <div key={m.label} className={`rounded-xl border p-3 ${m.bgCls}`}>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">{m.label}</div>
+              <div className={`text-2xl font-bold tabular-nums ${m.cls}`}>{m.value}</div>
+              <div className="text-[10px] text-zinc-600 mt-0.5 truncate" title={m.desc}>{m.desc}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {open && needsJeff.length > 0 && (
+        <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3 mb-3">
+          <div className="text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-2">⚡ Pending Jeff Actions</div>
+          <div className="space-y-1">
+            {(needsJeff as Array<{ id: string; title: string }>).slice(0, 5).map(t => (
+              <div key={t.id} className="flex items-center gap-2 text-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse flex-shrink-0" />
+                <span className="text-zinc-300 truncate flex-1">{t.title}</span>
+                <span className="text-zinc-600 font-mono text-[10px]">{t.id.slice(0, 8)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Goals Archive Section ──────────────────────────────────────────────────────
+
+function GoalsArchiveSection({ onRestore }: { onRestore: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [loading, setLoading] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/goals/archived')
+      if (res.ok) { const d = await res.json(); setGoals(d.goals ?? []) }
+    } catch { /* noop */ } finally { setLoading(false) }
+  }
+
+  useEffect(() => { if (open) load() }, [open])
+
+  async function restore(id: string) {
+    await fetch(`/api/goals/${id}/restore`, { method: 'POST' }).catch(() => {})
+    await load()
+    onRestore()
+  }
+
+  const LEVEL_COLOR: Record<string, string> = {
+    vision: 'text-purple-400', strategy: 'text-indigo-400',
+    milestone: 'text-blue-400', objective: 'text-zinc-400',
+  }
+
+  return (
+    <div className="border border-zinc-800/50 rounded-xl overflow-hidden mt-4">
+      <button
+        onClick={() => { setOpen(o => !o); if (!open) load() }}
+        className="w-full flex items-center gap-2 px-4 py-2.5 bg-zinc-900/60 hover:bg-zinc-800/40 transition-colors"
+      >
+        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Archived Goals</span>
+        {goals.length > 0 && <span className="text-[10px] text-zinc-600">{goals.length}</span>}
+        <span className="ml-auto text-zinc-700 text-[10px]">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="p-3">
+          {loading ? (
+            <div className="flex justify-center py-4">
+              <div className="w-4 h-4 border-2 border-zinc-700 border-t-zinc-400 rounded-full animate-spin" />
+            </div>
+          ) : goals.length === 0 ? (
+            <p className="text-xs text-zinc-600 text-center py-4">No archived goals</p>
+          ) : (
+            <div className="space-y-1.5">
+              {goals.map(g => (
+                <div key={g.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-900/40 border border-zinc-800/40">
+                  <span className={`text-[10px] font-semibold uppercase ${LEVEL_COLOR[g.level] ?? 'text-zinc-500'}`}>{g.level}</span>
+                  <span className="text-xs text-zinc-400 flex-1 truncate">{g.title}</span>
+                  <a href={`/api/goals/${g.id}/export?format=json`} download
+                     className="text-[10px] text-zinc-600 hover:text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-800">↓</a>
+                  <button
+                    onClick={() => restore(g.id)}
+                    className="text-[10px] px-2 py-0.5 rounded border border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/40"
+                  >Restore</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── page ───────────────────────────────────────────────────────────────────────
 
 export default function GoalsPage() {
@@ -1328,6 +1532,19 @@ export default function GoalsPage() {
     if (!res.ok) throw new Error('Failed to flag')
   }
 
+  function handleGoalArchived(id: string) {
+    setFlat(prev => prev.filter(g => g.id !== id))
+    setGoals(prev => prev.filter(g => g.id !== id))
+  }
+
+  function handleGoalRestored() {
+    // Reload from server to get updated state
+    fetch('/api/goals').then(r => r.json()).then(d => {
+      if (d.flat) setFlat(d.flat)
+      if (d.goals) setGoals(d.goals)
+    }).catch(() => {})
+  }
+
   function handleGoalCreated() {
     window.location.reload()
   }
@@ -1389,6 +1606,9 @@ export default function GoalsPage() {
         </div>
       ) : (
         <>
+          {/* Vision Health */}
+          <VisionHealth flat={flat} />
+
           {/* Calendar section */}
           <div className="mb-6">
             <SectionHeader
@@ -1459,6 +1679,8 @@ export default function GoalsPage() {
                       filterStatuses={filterStatuses}
                       filterLevels={filterLevels}
                       searchText={searchText}
+                      onArchive={handleGoalArchived}
+                      onRestore={handleGoalRestored}
                     />
                   ))}
                 </div>
@@ -1467,6 +1689,9 @@ export default function GoalsPage() {
           </div>
         </>
       )}
+
+      {/* Archived goals section */}
+      <GoalsArchiveSection onRestore={handleGoalRestored} />
 
       {showAddPanel && (
         <AddGoalPanel

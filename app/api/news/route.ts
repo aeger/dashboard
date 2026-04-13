@@ -13,8 +13,8 @@ export async function GET(request: Request) {
     const familyFeeds = getFeeds('family')
 
     const [labResult, familyResult] = await Promise.all([
-      getCachedNews('lab', () => fetchRssFeeds(labFeeds, 8, 'lab')),
-      getCachedNews('family', () => fetchRssFeeds(familyFeeds, 8, 'family')),
+      getCachedNews('lab', () => fetchRssFeeds(labFeeds, 25, 'lab')),
+      getCachedNews('family', () => fetchRssFeeds(familyFeeds, 25, 'family')),
     ])
 
     const items = [
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   const feeds = getFeeds(type)
 
   try {
-    const { items, cachedAt } = await getCachedNews(type, () => fetchRssFeeds(feeds, 8, type))
+    const { items, cachedAt } = await getCachedNews(type, () => fetchRssFeeds(feeds, 25, type))
     return NextResponse.json({ items, cachedAt })
   } catch {
     return NextResponse.json({ items: [], cachedAt: null })

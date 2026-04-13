@@ -144,13 +144,13 @@ export async function GET(req: NextRequest) {
 
   const result: ArticleCache = {
     url,
-    title: article.title,
-    byline: article.byline,
+    title: article.title ?? '',
+    byline: article.byline ?? null,
     content,
-    textContent: article.textContent,
-    readingTime: estimateReadingTime(article.textContent),
-    excerpt: article.excerpt,
-    siteName: article.siteName,
+    textContent: article.textContent ?? '',
+    readingTime: estimateReadingTime(article.textContent ?? ''),
+    excerpt: article.excerpt ?? null,
+    siteName: article.siteName ?? null,
     cachedAt: new Date().toISOString(),
   }
 

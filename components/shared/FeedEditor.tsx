@@ -10,8 +10,10 @@ interface Feed {
 interface FeedHealth {
   ok: boolean
   checkedAt: string
+  lastSuccess?: string
   itemCount?: number
   error?: string
+  fetchDurationMs?: number
 }
 
 interface TestResult {
@@ -317,20 +319,39 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     setStep('auth')
   }
 
+  function formatAge(iso: string): string {
+    const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+    if (mins < 60) return `${mins}m ago`
+    if (mins < 1440) return `${Math.round(mins / 60)}h ago`
+    return `${Math.round(mins / 1440)}d ago`
+  }
+
   function HealthDot({ url }: { url: string }) {
     const h = health[url]
     if (!h) return <span className="w-2 h-2 rounded-full bg-zinc-700 flex-shrink-0" title="Never checked" />
-    if (h.ok)
+
+    if (h.ok) {
+      const slow = h.fetchDurationMs !== undefined && h.fetchDurationMs > 5000
       return (
         <span
-          className="w-2 h-2 rounded-full bg-emerald-500/80 flex-shrink-0"
-          title={`OK · ${h.itemCount ?? '?'} items · ${new Date(h.checkedAt).toLocaleTimeString()}`}
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${slow ? 'bg-yellow-400/80' : 'bg-emerald-500/80'}`}
+          title={[
+            slow ? `Slow (${(h.fetchDurationMs! / 1000).toFixed(1)}s)` : `OK`,
+            `${h.itemCount ?? '?'} items`,
+            `checked ${formatAge(h.checkedAt)}`,
+          ].join(' · ')}
         />
       )
+    }
+
+    // Failed — show how long it's been dead
+    const lastOkText = h.lastSuccess
+      ? `last ok ${formatAge(h.lastSuccess)}`
+      : 'never succeeded'
     return (
       <span
         className="w-2 h-2 rounded-full bg-red-500/80 flex-shrink-0"
-        title={`Failed: ${h.error ?? 'unknown error'}`}
+        title={`Failed: ${h.error ?? 'unknown error'} · ${lastOkText}`}
       />
     )
   }
@@ -398,6 +419,51 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
 
           {step === 'edit' && (
             <form onSubmit={handleSave} className="space-y-5">
+
+              {/* Dead / slow feed warnings */}
+              {(() => {
+                const deadFeeds = feeds.filter((f) => {
+                  const h = health[f.url]
+                  if (!h) return false
+                  if (h.ok) return false
+                  // Consider dead if failed and hasn't succeeded in 2+ hours (or never)
+                  if (!h.lastSuccess) return true
+                  const ageH = (Date.now() - new Date(h.lastSuccess).getTime()) / 3600000
+                  return ageH >= 2
+                })
+                const slowFeeds = feeds.filter((f) => {
+                  const h = health[f.url]
+                  return h?.ok && h.fetchDurationMs !== undefined && h.fetchDurationMs > 5000
+                })
+                if (deadFeeds.length === 0 && slowFeeds.length === 0) return null
+                return (
+                  <div className="rounded-lg px-3 py-2.5 border bg-red-500/5 border-red-500/20 text-xs space-y-1 mb-1">
+                    {deadFeeds.length > 0 && (
+                      <div className="text-red-400">
+                        <span className="font-semibold">Dead: </span>
+                        {deadFeeds.map((f) => {
+                          const h = health[f.url]
+                          const since = h?.lastSuccess ? ` (last ok ${formatAge(h.lastSuccess)})` : ' (never succeeded)'
+                          return (
+                            <span key={f.url} className="mr-2">{f.name}{since}</span>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {slowFeeds.length > 0 && (
+                      <div className="text-yellow-400">
+                        <span className="font-semibold">Slow (&gt;5s): </span>
+                        {slowFeeds.map((f) => {
+                          const ms = health[f.url]?.fetchDurationMs ?? 0
+                          return (
+                            <span key={f.url} className="mr-2">{f.name} ({(ms / 1000).toFixed(1)}s)</span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Current feeds */}
               <div>

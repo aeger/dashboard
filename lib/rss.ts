@@ -113,11 +113,33 @@ async function fetchRedditJson(
     })
 }
 
+// Normalize a URL to a canonical fingerprint for deduplication.
+// Strips tracking params, normalizes scheme to https, removes trailing slash.
+export function urlFingerprint(url: string): string {
+  try {
+    const u = new URL(url)
+    const trackingParams = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
+      'fbclid', 'gclid', 'gclsrc', 'mc_eid', 'yclid', 'msclkid', '_ga', 'ref', 'source',
+    ]
+    for (const p of trackingParams) u.searchParams.delete(p)
+    u.hostname = u.hostname.toLowerCase()
+    if (u.protocol === 'http:') u.protocol = 'https:'
+    if (u.pathname.length > 1 && u.pathname.endsWith('/')) {
+      u.pathname = u.pathname.slice(0, -1)
+    }
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 async function fetchOneFeed(
   feed: { url: string; name: string },
   limit: number,
   feedType?: 'lab' | 'family'
 ): Promise<RssItem[]> {
+  const t0 = Date.now()
   try {
     let items: RssItem[]
     if (isRedditUrl(feed.url)) {
@@ -134,10 +156,10 @@ async function fetchOneFeed(
         feedType,
       }))
     }
-    recordFeedResult(feed.url, true, items.length)
+    recordFeedResult(feed.url, true, items.length, undefined, Date.now() - t0)
     return items
   } catch (err) {
-    recordFeedResult(feed.url, false, undefined, String(err).replace(/^Error:\s*/, '').slice(0, 120))
+    recordFeedResult(feed.url, false, undefined, String(err).replace(/^Error:\s*/, '').slice(0, 120), Date.now() - t0)
     throw err
   }
 }
@@ -156,14 +178,15 @@ export async function fetchRssFeeds(
     }
   }
 
-  // Deduplicate by link (keep first occurrence after sort)
+  // Deduplicate by URL fingerprint (strips tracking params, normalizes scheme/trailing slash)
   const seen = new Set<string>()
   return items
     .filter((i) => i.title && i.link)
     .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
     .filter((i) => {
-      if (seen.has(i.link)) return false
-      seen.add(i.link)
+      const fp = urlFingerprint(i.link)
+      if (seen.has(fp)) return false
+      seen.add(fp)
       return true
     })
     .slice(0, limit * feeds.length)
