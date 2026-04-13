@@ -102,6 +102,7 @@ const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string;
     { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   failed: [
+    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
     { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
     { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
@@ -346,7 +347,9 @@ function DetailPanel({ task: initialTask, onClose, onRefresh }: {
           onRefresh()
         }
       }
-    } catch { /* noop */ } finally { setActionBusy(null) }
+    } catch (err) {
+      console.error('doAction failed:', err)
+    } finally { setActionBusy(null) }
   }
 
   function saveNotes(notes: string, summary: string) {

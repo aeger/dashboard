@@ -18,7 +18,7 @@ const TRANSITIONS: Record<string, string[]> = {
   // Legacy status compat
   pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed'],
   claimed:              ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed'],
-  failed:               ['ready', 'cancelled', 'pending_jeff_action'],
+  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent'],
   escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled'],
   delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready'],
   pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled'],
