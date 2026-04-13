@@ -466,6 +466,9 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           <div className="flex items-center gap-2 flex-wrap">
             <LevelBadge level={goal.level} />
             <StatusBadge status={goal.status} />
+            {goal.target_date && goal.status !== 'completed' && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-900/40 text-sky-300 border border-sky-800/40 uppercase tracking-wide" title={`Scheduled: ${goal.target_date}`}>Scheduled</span>
+            )}
             {goal.priority === 0 && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-red-900/50 text-red-300 uppercase tracking-wide">Critical</span>
             )}
