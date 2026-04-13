@@ -111,3 +111,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to create goal' }, { status: 500 })
   }
 }
+
+export async function PUT(req: Request) {
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_ANON_KEY
+  if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
+
+  try {
+    const body = await req.json()
+    const { id, ...fields } = body
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+    const allowed = ['title', 'description', 'status', 'priority', 'target_date', 'progress', 'notes', 'tags', 'sort_order', 'completed_at']
+    const patch: Record<string, unknown> = {}
+    for (const k of allowed) {
+      if (k in fields) patch[k] = fields[k]
+    }
+    if (!Object.keys(patch).length) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+
+    const res = await fetch(`${url}/rest/v1/goals?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(patch),
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      return NextResponse.json({ error: 'Failed to update goal', detail: err }, { status: 500 })
+    }
+
+    const updated = await res.json()
+    return NextResponse.json({ goal: Array.isArray(updated) ? updated[0] : updated })
+  } catch {
+    return NextResponse.json({ error: 'Failed to update goal' }, { status: 500 })
+  }
+}

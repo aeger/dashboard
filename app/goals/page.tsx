@@ -285,11 +285,12 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
       const startDt = new Date(`${date}T${time}:00`)
       const endDt = new Date(startDt.getTime() + 60 * 60 * 1000)
 
+      // Write to almty1@gmail.com — service account needs edit access on that calendar
       const res = await fetch('/api/calendar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          calendarId: 'primary',
+          calendarId: 'almty1@gmail.com',
           title: goal.title,
           description: goal.description ?? `Goal: ${goal.title}`,
           start: startDt.toISOString(),
@@ -298,6 +299,12 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
         }),
       })
       if (res.ok) {
+        // Persist target_date in the goal so it survives a page refresh
+        await fetch('/api/goals', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: goal.id, target_date: date, status: 'planned' }),
+        }).catch(() => {/* non-fatal */})
         setResult(`Scheduled for ${startDt.toLocaleDateString()} at ${startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
       } else {
         const data = await res.json()
