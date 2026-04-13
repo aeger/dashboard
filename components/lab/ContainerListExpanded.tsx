@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import StatusBadge from '@/components/shared/StatusBadge'
 import type { Container } from '@/lib/portainer'
 
@@ -29,6 +29,13 @@ interface UpdateState {
   policy?: { auto_risk_threshold?: string }
 }
 
+interface ContainerMetrics {
+  name: string
+  cpu_percent: number
+  mem_mb: number
+  mem_limit_mb: number
+}
+
 const RISK_COLORS: Record<string, string> = {
   patch:   'bg-green-500/20 text-green-400',
   rebuild: 'bg-green-500/20 text-green-400',
@@ -53,7 +60,6 @@ const STACKS: Record<string, { label: string; containers: string[] }> = {
 }
 
 function extractUptime(statusStr: string): string {
-  // Portainer returns e.g. "Up 3 days", "Up 2 hours", "Exited (0) 5 minutes ago"
   const m = statusStr.match(/^Up (.+)$/)
   return m ? m[1] : ''
 }
@@ -66,6 +72,14 @@ function formatTimeAgo(iso: string): string {
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
+}
+
+function MiniBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(100, pct)}%` }} />
+    </div>
+  )
 }
 
 function HealthBar({ running, total }: { running: number; total: number }) {
@@ -120,9 +134,10 @@ function ActionBtn({ label, icon, onClick, disabled, color }: {
   )
 }
 
-function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, onUpdateAction }: {
+function ContainerRow({ c, update, metrics, acting, rebuilding, actionLoading, onAction, onUpdateAction }: {
   c: Container
   update?: UpdateInfo
+  metrics?: ContainerMetrics
   acting: { id: string; action: string } | null
   rebuilding: string | null
   actionLoading: string | null
@@ -136,12 +151,16 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
   const hasUpdate = (update?.has_update ?? false) && update?.user_status !== 'ignored'
   const uptime = extractUptime(c.status)
 
+  const cpuPct = metrics?.cpu_percent ?? 0
+  const memPct = metrics && metrics.mem_limit_mb > 0 ? (metrics.mem_mb / metrics.mem_limit_mb) * 100 : 0
+  const cpuColor = cpuPct > 80 ? 'bg-red-500' : cpuPct > 50 ? 'bg-amber-500' : 'bg-sky-500'
+  const memColor = memPct > 80 ? 'bg-red-500' : memPct > 50 ? 'bg-amber-500' : 'bg-purple-500'
+
   return (
     <div className="rounded-lg border border-zinc-800/60 overflow-hidden">
-      {/* Main row */}
       <div
         className={`grid items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${showDetail ? 'bg-zinc-800/60' : 'bg-zinc-900/40 hover:bg-zinc-800/50'}`}
-        style={{ gridTemplateColumns: '1fr auto auto auto' }}
+        style={{ gridTemplateColumns: '1fr auto auto auto auto' }}
         onClick={() => setShowDetail(!showDetail)}
       >
         {/* Name + image */}
@@ -163,13 +182,26 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
           </div>
         </div>
 
+        {/* CPU / mem mini bars */}
+        {isRunning && metrics ? (
+          <div className="flex flex-col gap-1 min-w-[80px]" title={`CPU: ${cpuPct.toFixed(1)}%  Mem: ${metrics.mem_mb.toFixed(0)}MB`}>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-zinc-700 w-6">CPU</span>
+              <MiniBar pct={cpuPct} color={cpuColor} />
+              <span className="text-[9px] text-zinc-600 tabular-nums w-8 text-right">{cpuPct.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-zinc-700 w-6">MEM</span>
+              <MiniBar pct={memPct} color={memColor} />
+              <span className="text-[9px] text-zinc-600 tabular-nums w-8 text-right">{metrics.mem_mb.toFixed(0)}M</span>
+            </div>
+          </div>
+        ) : <div className="min-w-[80px]" />}
+
         {/* Uptime */}
         <div className="text-xs text-zinc-600 tabular-nums text-right min-w-[80px]">
           {uptime || <span className="text-zinc-700">—</span>}
         </div>
-
-        {/* Endpoint */}
-        <div className="text-[10px] text-zinc-700 min-w-[60px] text-right">{c.endpoint}</div>
 
         {/* Status + actions */}
         <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -191,12 +223,14 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
           />
           {(isBusy || isRebuilding) && <div className="w-3.5 h-3.5 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin" />}
         </div>
+
+        {/* Chevron */}
+        <div className="text-zinc-700 text-xs select-none">{showDetail ? '▲' : '▼'}</div>
       </div>
 
       {/* Detail panel */}
       {showDetail && (
         <div className="px-4 py-3 bg-zinc-800/40 border-t border-zinc-800/60 space-y-3">
-          {/* Image info always shown */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Image</div>
@@ -217,17 +251,17 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
                 <div className="text-xs text-zinc-300">{uptime}</div>
               </div>
             )}
-            <div>
-              <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Endpoint</div>
-              <div className="text-xs text-zinc-400">{c.endpoint}</div>
-            </div>
+            {metrics && isRunning && (
+              <div>
+                <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Resources</div>
+                <div className="text-xs text-zinc-400">CPU {cpuPct.toFixed(1)}% · {metrics.mem_mb.toFixed(0)} MB{metrics.mem_limit_mb > 0 ? ` / ${metrics.mem_limit_mb.toFixed(0)} MB` : ''}</div>
+              </div>
+            )}
           </div>
 
-          {/* Update section — only if update data exists */}
           {update ? (
             update.has_update ? (
               <div className="border-t border-zinc-700/50 pt-3 space-y-2">
-                {/* Version diff */}
                 {(update.current_version || update.latest_version) && (
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-[10px] text-zinc-600 uppercase tracking-wider w-16">Version</span>
@@ -243,8 +277,6 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
                     )}
                   </div>
                 )}
-
-                {/* Changelog */}
                 {update.changelog_summary && (
                   <div>
                     <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Changelog</div>
@@ -256,8 +288,6 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
                     Full release notes ↗
                   </a>
                 )}
-
-                {/* Status-specific messages */}
                 {update.user_status === 'completed' && update.completed_at && (
                   <p className="text-xs text-green-400">Updated {formatTimeAgo(update.completed_at)}</p>
                 )}
@@ -271,12 +301,8 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
                   <p className="text-xs text-zinc-400">Scheduled for {new Date(update.scheduled_time).toLocaleString()}</p>
                 )}
                 {update.user_status === 'skipped' && update.skip_reassess_at && (
-                  <p className="text-xs text-zinc-500">
-                    Skipped — reassess {new Date(update.skip_reassess_at).toLocaleDateString()}
-                  </p>
+                  <p className="text-xs text-zinc-500">Skipped — reassess {new Date(update.skip_reassess_at).toLocaleDateString()}</p>
                 )}
-
-                {/* Action buttons */}
                 <div className="flex gap-2 pt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                   {['pending_review', 'failed'].includes(update.user_status) && (<>
                     <button onClick={() => onUpdateAction(c.name, 'update_now')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors">Update Now</button>
@@ -326,11 +352,17 @@ function ContainerRow({ c, update, acting, rebuilding, actionLoading, onAction, 
 export default function ContainerListExpanded() {
   const [containers, setContainers] = useState<Container[]>([])
   const [updates, setUpdates] = useState<UpdateState>({ checked_at: null, containers: [] })
+  const [metrics, setMetrics] = useState<ContainerMetrics[]>([])
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState<{ id: string; action: string } | null>(null)
   const [rebuilding, setRebuilding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [stackUpdating, setStackUpdating] = useState<string | null>(null)
+  const [rollingRestart, setRollingRestart] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  // collapsed state: undefined = auto, true = collapsed, false = expanded
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const initializedRef = useRef(false)
 
   const refresh = useCallback(() => {
     fetch('/api/containers').then((r) => r.json()).then((d) => setContainers(d.containers ?? [])).catch(() => {})
@@ -340,14 +372,24 @@ export default function ContainerListExpanded() {
     fetch('/api/containers/updates/state').then((r) => r.json()).then((d) => setUpdates(d)).catch(() => {})
   }, [])
 
+  const refreshMetrics = useCallback(() => {
+    fetch('/api/containers/metrics').then((r) => r.json()).then((d) => setMetrics(d.metrics ?? [])).catch(() => {})
+  }, [])
+
   useEffect(() => {
-    refresh(); refreshUpdates(); setLoading(false)
+    Promise.all([
+      fetch('/api/containers').then((r) => r.json()).then((d) => setContainers(d.containers ?? [])),
+      fetch('/api/containers/updates/state').then((r) => r.json()).then((d) => setUpdates(d)),
+      fetch('/api/containers/metrics').then((r) => r.json()).then((d) => setMetrics(d.metrics ?? [])),
+    ]).finally(() => setLoading(false))
     const i1 = setInterval(refresh, 60000)
     const i2 = setInterval(refreshUpdates, 30000)
-    return () => { clearInterval(i1); clearInterval(i2) }
-  }, [refresh, refreshUpdates])
+    const i3 = setInterval(refreshMetrics, 15000)
+    return () => { clearInterval(i1); clearInterval(i2); clearInterval(i3) }
+  }, [refresh, refreshUpdates, refreshMetrics])
 
   const updateMap = new Map(updates.containers.map((u) => [u.name, u]))
+  const metricsMap = new Map(metrics.map((m) => [m.name, m]))
 
   async function handleAction(c: Container, action: string) {
     if (action === 'rebuild') {
@@ -381,6 +423,36 @@ export default function ContainerListExpanded() {
     setTimeout(() => { refresh(); setStackUpdating(null) }, 4000)
   }
 
+  // Group action: restart/stop/start all containers in a stack
+  async function handleGroupAction(groupContainers: Container[], action: string) {
+    for (const c of groupContainers) {
+      if (action === 'stop' && c.state !== 'running') continue
+      if (action === 'start' && c.state === 'running') continue
+      await fetch('/api/containers/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpointId: c.endpointId, containerId: c.id, action }),
+      }).catch(() => {})
+    }
+    setTimeout(refresh, 2500)
+  }
+
+  // Rolling restart: restart each container in sequence with 3s delay
+  async function handleRollingRestart(groupKey: string, groupContainers: Container[]) {
+    setRollingRestart(groupKey)
+    const running = groupContainers.filter((c) => c.state === 'running')
+    for (const c of running) {
+      await fetch('/api/containers/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpointId: c.endpointId, containerId: c.id, action: 'restart' }),
+      }).catch(() => {})
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+    setRollingRestart(null)
+    refresh()
+  }
+
   if (loading) return <div className="flex items-center justify-center h-24"><div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" /></div>
   if (containers.length === 0) return <div className="text-zinc-500 text-sm text-center py-12">Portainer not configured</div>
 
@@ -389,7 +461,7 @@ export default function ContainerListExpanded() {
 
   // Build groups
   const assignedNames = new Set(Object.values(STACKS).flatMap((s) => s.containers))
-  const groups: Array<{ key: string; label: string; items: Container[] }> = [
+  const allGroups: Array<{ key: string; label: string; items: Container[] }> = [
     ...Object.entries(STACKS).map(([key, def]) => ({
       key,
       label: def.label,
@@ -402,7 +474,25 @@ export default function ContainerListExpanded() {
     },
   ].filter((g) => g.items.length > 0)
 
-  // Summary counts
+  // Apply search filter
+  const searchLower = search.toLowerCase()
+  const groups = searchLower
+    ? allGroups.map((g) => ({ ...g, items: g.items.filter((c) => c.name.toLowerCase().includes(searchLower) || c.image.toLowerCase().includes(searchLower)) })).filter((g) => g.items.length > 0)
+    : allGroups
+
+  // Auto-collapse logic on first data load: collapse healthy all-running stacks with no updates
+  if (!initializedRef.current && containers.length > 0) {
+    initializedRef.current = true
+    const auto: Record<string, boolean> = {}
+    for (const g of allGroups) {
+      const allRunning = g.items.every((c) => c.state === 'running')
+      const hasUpdates = g.items.some((c) => updateNames.has(c.name))
+      auto[g.key] = allRunning && !hasUpdates // collapse healthy groups
+    }
+    // Only set if we haven't set it yet
+    setCollapsed((prev) => Object.keys(prev).length === 0 ? auto : prev)
+  }
+
   const totalRunning = containers.filter((c) => c.state === 'running').length
   const totalStopped = containers.filter((c) => c.state !== 'running').length
   const byRisk = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').reduce<Record<string, number>>((acc, u) => {
@@ -410,6 +500,9 @@ export default function ContainerListExpanded() {
     acc[r] = (acc[r] ?? 0) + 1
     return acc
   }, {})
+
+  const totalCpu = metrics.reduce((s, m) => s + m.cpu_percent, 0)
+  const totalMem = metrics.reduce((s, m) => s + m.mem_mb, 0)
 
   return (
     <div className="space-y-6">
@@ -425,10 +518,44 @@ export default function ContainerListExpanded() {
             <span className="text-xs text-zinc-400">{totalStopped} stopped</span>
           </div>
         )}
+        {metrics.length > 0 && (
+          <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-zinc-800/60 border border-zinc-700/50 text-xs text-zinc-400">
+            <span>CPU <span className="text-zinc-300 font-mono">{totalCpu.toFixed(1)}%</span></span>
+            <span className="text-zinc-700">·</span>
+            <span>MEM <span className="text-zinc-300 font-mono">{totalMem >= 1024 ? `${(totalMem / 1024).toFixed(1)}GB` : `${totalMem.toFixed(0)}MB`}</span></span>
+          </div>
+        )}
         {byRisk.major > 0 && <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/15 text-red-400 border border-red-800/40">{byRisk.major} major update{byRisk.major > 1 ? 's' : ''}</span>}
         {byRisk.minor > 0 && <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-800/40">{byRisk.minor} minor</span>}
         {(byRisk.patch ?? 0) + (byRisk.rebuild ?? 0) > 0 && <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-500/15 text-green-400 border border-green-800/40">{(byRisk.patch ?? 0) + (byRisk.rebuild ?? 0)} patch</span>}
-        {updates.checked_at && <span className="text-[10px] text-zinc-600 ml-auto">updated {formatTimeAgo(updates.checked_at)}</span>}
+        <div className="ml-auto flex items-center gap-2">
+          {updates.checked_at && <span className="text-[10px] text-zinc-600">updated {formatTimeAgo(updates.checked_at)}</span>}
+          <button
+            onClick={() => setCollapsed(Object.fromEntries(allGroups.map((g) => [g.key, true])))}
+            className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 text-zinc-600 hover:text-zinc-400 transition-colors"
+            title="Collapse all"
+          >⊟ All</button>
+          <button
+            onClick={() => setCollapsed(Object.fromEntries(allGroups.map((g) => [g.key, false])))}
+            className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 text-zinc-600 hover:text-zinc-400 transition-colors"
+            title="Expand all"
+          >⊞ All</button>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 text-xs">⌕</span>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter containers…"
+          className="w-full pl-8 pr-4 py-2 bg-zinc-900/60 border border-zinc-800/60 rounded-lg text-xs text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-purple-700/50"
+        />
+        {search && (
+          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 text-xs">✕</button>
+        )}
       </div>
 
       {/* Stack groups */}
@@ -436,40 +563,108 @@ export default function ContainerListExpanded() {
         const stackDef = STACKS[group.key]
         const runningCount = group.items.filter((c) => c.state === 'running').length
         const hasStackUpdate = stackDef && group.items.some((c) => updateNames.has(c.name))
+        const isCollapsed = collapsed[group.key] ?? false
+        const allRunning = group.items.every((c) => c.state === 'running')
+        const anyStopped = group.items.some((c) => c.state !== 'running')
+        const isRolling = rollingRestart === group.key
+
+        // Group CPU/mem aggregate
+        const groupMetrics = group.items.map((c) => metricsMap.get(c.name)).filter(Boolean) as ContainerMetrics[]
+        const groupCpu = groupMetrics.reduce((s, m) => s + m.cpu_percent, 0)
+        const groupMem = groupMetrics.reduce((s, m) => s + m.mem_mb, 0)
 
         return (
           <div key={group.key}>
-            {/* Group header */}
-            <div className="flex items-center justify-between mb-2">
+            {/* Group header — clickable to collapse */}
+            <div
+              className="flex items-center justify-between mb-2 cursor-pointer group/header"
+              onClick={() => setCollapsed((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+            >
               <div className="flex items-center gap-3">
-                <h3 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">{group.label}</h3>
+                <span className="text-zinc-700 text-xs group-hover/header:text-zinc-500 transition-colors select-none">
+                  {isCollapsed ? '▶' : '▼'}
+                </span>
+                <h3 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest group-hover/header:text-zinc-400 transition-colors">
+                  {group.label}
+                </h3>
                 <HealthBar running={runningCount} total={group.items.length} />
+                {groupMetrics.length > 0 && !isCollapsed && (
+                  <span className="text-[10px] text-zinc-700 tabular-nums">CPU {groupCpu.toFixed(1)}% · {groupMem.toFixed(0)}MB</span>
+                )}
               </div>
-              {hasStackUpdate && (
-                <button
-                  onClick={() => handleStackUpdate(group.key)}
-                  disabled={stackUpdating === group.key}
-                  className="text-[10px] px-2.5 py-1 bg-amber-700/40 hover:bg-amber-600/50 disabled:opacity-50 text-amber-200 rounded border border-amber-600/30 transition-colors"
-                >
-                  {stackUpdating === group.key ? '⟳ Updating…' : '↑ Update Stack'}
-                </button>
-              )}
+
+              {/* Group actions — stop propagation so clicking doesn't collapse */}
+              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                {isRolling && (
+                  <span className="text-[10px] text-purple-400 animate-pulse mr-1">↻ Rolling…</span>
+                )}
+                {allRunning && group.items.length > 1 && (
+                  <button
+                    onClick={() => handleRollingRestart(group.key, group.items)}
+                    disabled={isRolling || !!stackUpdating}
+                    className="text-[10px] px-2 py-1 rounded bg-purple-900/30 hover:bg-purple-900/50 disabled:opacity-40 text-purple-300 border border-purple-800/30 transition-colors"
+                    title="Restart containers one at a time with 3s delay"
+                  >
+                    ↻ Rolling
+                  </button>
+                )}
+                {allRunning && (
+                  <button
+                    onClick={() => handleGroupAction(group.items, 'restart')}
+                    disabled={isRolling || !!stackUpdating}
+                    className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 hover:bg-zinc-700/60 disabled:opacity-40 text-zinc-400 border border-zinc-700/40 transition-colors"
+                  >
+                    ↻ All
+                  </button>
+                )}
+                {allRunning && (
+                  <button
+                    onClick={() => handleGroupAction(group.items, 'stop')}
+                    disabled={isRolling || !!stackUpdating}
+                    className="text-[10px] px-2 py-1 rounded bg-red-950/30 hover:bg-red-900/40 disabled:opacity-40 text-red-400 border border-red-800/30 transition-colors"
+                  >
+                    ■ Stop All
+                  </button>
+                )}
+                {anyStopped && (
+                  <button
+                    onClick={() => handleGroupAction(group.items, 'start')}
+                    disabled={isRolling || !!stackUpdating}
+                    className="text-[10px] px-2 py-1 rounded bg-green-950/30 hover:bg-green-900/40 disabled:opacity-40 text-green-400 border border-green-800/30 transition-colors"
+                  >
+                    ▶ Start All
+                  </button>
+                )}
+                {hasStackUpdate && (
+                  <button
+                    onClick={() => handleStackUpdate(group.key)}
+                    disabled={stackUpdating === group.key || isRolling}
+                    className="text-[10px] px-2.5 py-1 bg-amber-700/40 hover:bg-amber-600/50 disabled:opacity-50 text-amber-200 rounded border border-amber-600/30 transition-colors"
+                  >
+                    {stackUpdating === group.key ? '⟳ Updating…' : '↑ Update Stack'}
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              {group.items.map((c) => (
-                <ContainerRow
-                  key={c.id}
-                  c={c}
-                  update={updateMap.get(c.name)}
-                  acting={acting}
-                  rebuilding={rebuilding}
-                  actionLoading={actionLoading}
-                  onAction={handleAction}
-                  onUpdateAction={handleUpdateAction}
-                />
-              ))}
-            </div>
+            {/* Container rows — hidden when collapsed */}
+            {!isCollapsed && (
+              <div className="space-y-1.5">
+                {group.items.map((c) => (
+                  <ContainerRow
+                    key={c.id}
+                    c={c}
+                    update={updateMap.get(c.name)}
+                    metrics={metricsMap.get(c.name)}
+                    acting={acting}
+                    rebuilding={rebuilding}
+                    actionLoading={actionLoading}
+                    onAction={handleAction}
+                    onUpdateAction={handleUpdateAction}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )
       })}

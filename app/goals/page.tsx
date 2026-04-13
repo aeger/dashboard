@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import LabSubNav from '@/components/lab/LabSubNav'
 import type { Goal } from '@/app/api/goals/route'
 
@@ -596,7 +596,14 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
 
 // ── summary table ──────────────────────────────────────────────────────────────
 
-function SummaryTable({ flat }: { flat: Goal[] }) {
+interface SummaryTableProps {
+  flat: Goal[]
+  onClickStatus?: (status: string) => void
+  onClickLevel?: (level: string) => void
+  onClickAll?: () => void
+}
+
+function SummaryTable({ flat, onClickStatus, onClickLevel, onClickAll }: SummaryTableProps) {
   const byStatus = flat.reduce<Record<string, number>>((acc, g) => {
     acc[g.status] = (acc[g.status] ?? 0) + 1
     return acc
@@ -609,21 +616,29 @@ function SummaryTable({ flat }: { flat: Goal[] }) {
     ? Math.round(flat.reduce((s, g) => s + g.progress, 0) / flat.length)
     : 0
 
+  const items: { label: string; value: number | string; color: string; onClick?: () => void; hint?: string }[] = [
+    { label: 'Total Goals', value: flat.length, color: 'text-white', onClick: onClickAll, hint: 'Show all goals' },
+    { label: 'Active', value: byStatus.active ?? 0, color: 'text-blue-400', onClick: () => onClickStatus?.('active'), hint: 'Filter active goals' },
+    { label: 'Completed', value: byStatus.completed ?? 0, color: 'text-green-400', onClick: () => onClickStatus?.('completed'), hint: 'Filter completed goals' },
+    { label: 'Blocked', value: byStatus.blocked ?? 0, color: (byStatus.blocked ?? 0) > 0 ? 'text-amber-400' : 'text-zinc-600', onClick: () => onClickStatus?.('blocked'), hint: 'Filter blocked goals' },
+    { label: 'Avg Progress', value: `${avgProgress}%`, color: 'text-zinc-300' },
+    { label: 'Milestones', value: byLevel.milestone ?? 0, color: 'text-zinc-300', onClick: () => onClickLevel?.('milestone'), hint: 'Filter milestones' },
+    { label: 'Strategies', value: byLevel.strategy ?? 0, color: 'text-indigo-300', onClick: () => onClickLevel?.('strategy'), hint: 'Filter strategies' },
+    { label: 'Vision Items', value: byLevel.vision ?? 0, color: 'text-purple-300', onClick: () => onClickLevel?.('vision'), hint: 'Filter vision items' },
+  ]
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-      {[
-        { label: 'Total Goals', value: flat.length, color: 'text-white' },
-        { label: 'Active', value: byStatus.active ?? 0, color: 'text-blue-400' },
-        { label: 'Completed', value: byStatus.completed ?? 0, color: 'text-green-400' },
-        { label: 'Blocked', value: byStatus.blocked ?? 0, color: (byStatus.blocked ?? 0) > 0 ? 'text-amber-400' : 'text-zinc-600' },
-        { label: 'Avg Progress', value: `${avgProgress}%`, color: 'text-zinc-300' },
-        { label: 'Milestones', value: byLevel.milestone ?? 0, color: 'text-zinc-300' },
-        { label: 'Strategies', value: byLevel.strategy ?? 0, color: 'text-indigo-300' },
-        { label: 'Vision Items', value: byLevel.vision ?? 0, color: 'text-purple-300' },
-      ].map(({ label, value, color }) => (
-        <div key={label} className="card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4 text-center">
+      {items.map(({ label, value, color, onClick, hint }) => (
+        <div
+          key={label}
+          onClick={onClick}
+          title={hint}
+          className={`card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4 text-center ${onClick ? 'cursor-pointer hover:border-zinc-600/70 hover:bg-zinc-800/50 transition-all duration-150 active:scale-95' : ''}`}
+        >
           <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{label}</div>
+          {onClick && <div className="text-[9px] text-zinc-700 mt-0.5">↓ jump to</div>}
         </div>
       ))}
     </div>
@@ -1040,6 +1055,7 @@ export default function GoalsPage() {
 
   // section collapse state
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const hierarchyRef = useRef<HTMLDivElement>(null)
 
   function toggleSection(s: string) {
     setCollapsedSections((prev) => {
@@ -1068,6 +1084,36 @@ export default function GoalsPage() {
     setFilterLevels(new Set(ALL_LEVELS))
     setSearchText('')
     setSortBy('priority')
+  }
+
+  function scrollToHierarchy() {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev)
+      next.delete('hierarchy')
+      return next
+    })
+    setTimeout(() => {
+      hierarchyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+  }
+
+  function handleSummaryClickStatus(status: string) {
+    setFilterStatuses(new Set([status]))
+    setFilterLevels(new Set(ALL_LEVELS))
+    setSearchText('')
+    scrollToHierarchy()
+  }
+
+  function handleSummaryClickLevel(level: string) {
+    setFilterStatuses(new Set(ALL_STATUSES))
+    setFilterLevels(new Set([level]))
+    setSearchText('')
+    scrollToHierarchy()
+  }
+
+  function handleSummaryClickAll() {
+    resetFilters()
+    scrollToHierarchy()
   }
 
   const applyUpdate = useCallback((updatedGoals: Goal[]) => {
@@ -1223,7 +1269,14 @@ export default function GoalsPage() {
               collapsed={summaryCollapsed}
               onToggle={() => toggleSection('summary')}
             />
-            {!summaryCollapsed && <SummaryTable flat={flat} />}
+            {!summaryCollapsed && (
+              <SummaryTable
+                flat={flat}
+                onClickStatus={handleSummaryClickStatus}
+                onClickLevel={handleSummaryClickLevel}
+                onClickAll={handleSummaryClickAll}
+              />
+            )}
           </div>
 
           {/* Status overview */}
@@ -1237,7 +1290,7 @@ export default function GoalsPage() {
           </div>
 
           {/* Goal hierarchy */}
-          <div>
+          <div ref={hierarchyRef}>
             <SectionHeader
               title="Goal Hierarchy"
               collapsed={hierarchyCollapsed}
