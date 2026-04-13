@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getFeeds, saveFeeds } from '@/lib/feeds'
 import { clearNewsCache } from '@/lib/news-cache'
+import { getFeedHealth } from '@/lib/feed-health'
 import type { NewsFeed } from '@/lib/config'
 
 export async function GET(req: NextRequest) {
   const type = req.nextUrl.searchParams.get('type') === 'lab' ? 'lab' : 'family'
-  return NextResponse.json({ feeds: getFeeds(type) })
+  return NextResponse.json({ feeds: getFeeds(type), health: getFeedHealth() })
 }
 
 export async function POST(req: NextRequest) {

@@ -16,6 +16,7 @@ interface NewsItem {
 
 const READ_LS_KEY = 'az_news_read'
 const MAX_READ_STORED = 500
+const PAGE_SIZE = 30
 
 function getReadSet(): Set<string> {
   try {
@@ -50,6 +51,8 @@ export default function NewsReader() {
   const [cachedAt, setCachedAt] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [readerUrl, setReaderUrl] = useState<string | null>(null)
   const [readerItem, setReaderItem] = useState<NewsItem | null>(null)
@@ -58,6 +61,7 @@ export default function NewsReader() {
   const [reloadKey, setReloadKey] = useState(0)
   const [focusedIdx, setFocusedIdx] = useState<number>(-1)
   const listRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   // Load read state from localStorage on mount
   useEffect(() => {
@@ -76,6 +80,9 @@ export default function NewsReader() {
   }
 
   useEffect(() => { load() }, [reloadKey])
+
+  // Reset page when filter or search changes
+  useEffect(() => { setPage(0); setFocusedIdx(-1) }, [filter, search])
 
   function markRead(link: string) {
     setReadLinks((prev) => {
@@ -122,42 +129,61 @@ export default function NewsReader() {
     try { localStorage.removeItem(READ_LS_KEY) } catch {}
   }
 
-  const filtered = filter === 'all' ? items : items.filter((i) => i.feedType === filter)
+  // Filtering pipeline
+  const byType = filter === 'all' ? items : items.filter((i) => i.feedType === filter)
+  const q = search.trim().toLowerCase()
+  const filtered = q
+    ? byType.filter((i) =>
+        i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q)
+      )
+    : byType
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const safePage = Math.min(page, Math.max(0, totalPages - 1))
+  const paginated = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+
   const labCount = items.filter((i) => i.feedType === 'lab').length
   const familyCount = items.filter((i) => i.feedType === 'family').length
   const unreadCount = filtered.filter((i) => !readLinks.has(i.link)).length
 
-  // Keyboard navigation
+  // Keyboard navigation (operates on paginated view)
+  const focusedKey = focusedIdx >= 0 ? paginated[focusedIdx]?.link : null
+
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault()
-      setFocusedIdx((i) => Math.min(i + 1, filtered.length - 1))
+      setFocusedIdx((i) => Math.min(i + 1, paginated.length - 1))
     } else if (e.key === 'k' || e.key === 'ArrowUp') {
       e.preventDefault()
       setFocusedIdx((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter' && focusedIdx >= 0) {
       e.preventDefault()
-      const item = filtered[focusedIdx]
+      const item = paginated[focusedIdx]
       if (item) openInReader(item)
     } else if (e.key === ' ' && focusedIdx >= 0) {
       e.preventDefault()
-      const item = filtered[focusedIdx]
+      const item = paginated[focusedIdx]
       if (item) handleExpand(item.link)
     } else if (e.key === 'o' && focusedIdx >= 0) {
-      const item = filtered[focusedIdx]
+      const item = paginated[focusedIdx]
       if (item) { markRead(item.link); window.open(item.link, '_blank', 'noopener,noreferrer') }
-    } else if (e.key === 'r' && focusedKey) {
-      const item = filtered[focusedIdx]
+    } else if (e.key === 'r' && focusedIdx >= 0) {
+      const item = paginated[focusedIdx]
       if (item) markRead(item.link)
+    } else if (e.key === '/' && !readerUrl) {
+      e.preventDefault()
+      searchRef.current?.focus()
     } else if (e.key === 'Escape') {
-      setReaderUrl(null)
-      setReaderItem(null)
+      if (readerUrl) {
+        setReaderUrl(null)
+        setReaderItem(null)
+      } else if (search) {
+        setSearch('')
+      }
     }
-  }, [filtered, focusedIdx, expanded]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const focusedKey = focusedIdx >= 0 ? filtered[focusedIdx]?.link : null
+  }, [paginated, focusedIdx, expanded, readerUrl, search]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -229,6 +255,36 @@ export default function NewsReader() {
           </div>
         </div>
 
+        {/* Search bar */}
+        <div className="mb-4">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 text-xs select-none pointer-events-none">
+              /
+            </span>
+            <input
+              ref={searchRef}
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search articles… (press / to focus)"
+              className="w-full pl-7 pr-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors text-xs"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {search && (
+            <p className="text-[10px] text-zinc-600 mt-1 ml-1">
+              {filtered.length} result{filtered.length !== 1 ? 's' : ''} for &ldquo;{search}&rdquo;
+            </p>
+          )}
+        </div>
+
         {/* Filter tabs */}
         <div className="flex items-center gap-1 mb-4">
           {(['all', 'lab', 'family'] as FilterType[]).map((f) => {
@@ -260,7 +316,7 @@ export default function NewsReader() {
               mark all unread
             </button>
           )}
-          <span className="text-[10px] text-zinc-800 ml-2 hidden md:block">j/k navigate · enter read · space expand · o open</span>
+          <span className="text-[10px] text-zinc-800 ml-2 hidden md:block">j/k navigate · enter read · space expand · o open · / search</span>
         </div>
 
         {/* Article list */}
@@ -270,133 +326,159 @@ export default function NewsReader() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-zinc-500 text-sm text-center py-16">
-            No items — use ⚙ to add feeds
+            {search ? `No results for "${search}"` : 'No items — use ⚙ to add feeds'}
           </div>
         ) : (
-          <div className="space-y-1" ref={listRef}>
-            {filtered.map((item, idx) => {
-              const isRead = readLinks.has(item.link)
-              const isExpanded = expanded === item.link
-              const isFocused = focusedKey === item.link
-              const accent = item.feedType === 'lab' ? '#fb923c' : '#f59e0b'
+          <>
+            <div className="space-y-1" ref={listRef}>
+              {paginated.map((item, idx) => {
+                const isRead = readLinks.has(item.link)
+                const isExpanded = expanded === item.link
+                const isFocused = focusedKey === item.link
+                const accent = item.feedType === 'lab' ? '#fb923c' : '#f59e0b'
 
-              return (
-                <div
-                  key={item.link || idx}
-                  className={`rounded-lg border transition-all cursor-pointer select-none ${
-                    isExpanded
-                      ? 'border-zinc-600 bg-zinc-800/60'
-                      : isFocused
-                      ? 'border-zinc-600 bg-zinc-800/40'
-                      : 'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30'
-                  }`}
-                  onClick={() => { setFocusedIdx(idx); handleExpand(item.link) }}
-                  onDoubleClick={(e) => { e.stopPropagation(); openInReader(item) }}
-                >
-                  {/* Article row */}
-                  <div className="flex items-start gap-3 px-4 py-3">
-                    {item.imageUrl && !isExpanded && (
-                      <img
-                        src={item.imageUrl}
-                        alt=""
-                        className="w-14 h-14 rounded-md object-cover flex-shrink-0 opacity-80"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm leading-snug transition-colors ${isRead && !isExpanded ? 'text-zinc-500' : 'text-zinc-200'}`}>
-                        {item.title}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                          style={{ background: `${accent}18`, color: accent }}
-                        >
-                          {item.source}
-                        </span>
-                        <span className="text-[10px] text-zinc-600">{formatAge(item.pubDate)}</span>
-                        {isRead && !isExpanded && (
-                          <button
-                            className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
-                            onClick={(e) => markUnread(item.link, e)}
-                            title="Mark unread"
-                          >
-                            · mark unread
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0 self-center ml-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openInReader(item) }}
-                        className="p-1.5 rounded text-zinc-600 hover:text-blue-400 hover:bg-zinc-700 transition-colors text-[11px] font-medium"
-                        title="Read in pane (Enter)"
-                      >
-                        Read
-                      </button>
-                      <button
-                        onClick={(e) => openArticle(e, item.link)}
-                        className="p-1.5 rounded text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
-                        title="Open article in new tab"
-                      >
-                        ↗
-                      </button>
-                      <span className={`text-zinc-600 text-[10px] transition-transform duration-200 inline-block ${isExpanded ? 'rotate-180' : ''}`}>
-                        ▾
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Expanded preview */}
-                  {isExpanded && (
-                    <div className="px-4 pb-4 border-t border-zinc-700/50 pt-3">
-                      {item.imageUrl && (
+                return (
+                  <div
+                    key={item.link || idx}
+                    className={`rounded-lg border transition-all cursor-pointer select-none ${
+                      isExpanded
+                        ? 'border-zinc-600 bg-zinc-800/60'
+                        : isFocused
+                        ? 'border-zinc-600 bg-zinc-800/40'
+                        : 'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30'
+                    }`}
+                    onClick={() => { setFocusedIdx(idx); handleExpand(item.link) }}
+                    onDoubleClick={(e) => { e.stopPropagation(); openInReader(item) }}
+                  >
+                    {/* Article row */}
+                    <div className="flex items-start gap-3 px-4 py-3">
+                      {item.imageUrl && !isExpanded && (
                         <img
                           src={item.imageUrl}
                           alt=""
-                          className="w-full max-h-52 object-cover rounded-lg mb-3 opacity-90"
+                          className="w-14 h-14 rounded-md object-cover flex-shrink-0 opacity-80"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                         />
                       )}
-                      {item.summary ? (
-                        <p className="text-sm text-zinc-400 leading-relaxed">
-                          {item.summary}
-                        </p>
-                      ) : (
-                        <p className="text-xs text-zinc-600 italic">No description in feed — click to read the full article.</p>
-                      )}
-                      <div className="flex items-center gap-3 mt-4">
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm leading-snug transition-colors ${isRead && !isExpanded ? 'text-zinc-500' : 'text-zinc-200'}`}>
+                          {item.title}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                            style={{ background: `${accent}18`, color: accent }}
+                          >
+                            {item.source}
+                          </span>
+                          <span className="text-[10px] text-zinc-600">{formatAge(item.pubDate)}</span>
+                          {isRead && !isExpanded && (
+                            <button
+                              className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
+                              onClick={(e) => markUnread(item.link, e)}
+                              title="Mark unread"
+                            >
+                              · mark unread
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0 self-center ml-1">
                         <button
                           onClick={(e) => { e.stopPropagation(); openInReader(item) }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                          className="p-1.5 rounded text-zinc-600 hover:text-blue-400 hover:bg-zinc-700 transition-colors text-[11px] font-medium"
+                          title="Read in pane (Enter)"
                         >
-                          Read in pane
+                          Read
                         </button>
                         <button
                           onClick={(e) => openArticle(e, item.link)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
+                          className="p-1.5 rounded text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+                          title="Open article in new tab"
                         >
-                          Open original ↗
+                          ↗
                         </button>
-                        <button
-                          onClick={(e) => markUnread(item.link, e)}
-                          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-                        >
-                          mark unread
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setExpanded(null) }}
-                          className="text-xs text-zinc-700 hover:text-zinc-500 transition-colors ml-auto"
-                        >
-                          collapse
-                        </button>
+                        <span className={`text-zinc-600 text-[10px] transition-transform duration-200 inline-block ${isExpanded ? 'rotate-180' : ''}`}>
+                          ▾
+                        </span>
                       </div>
                     </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+
+                    {/* Expanded preview */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 border-t border-zinc-700/50 pt-3">
+                        {item.imageUrl && (
+                          <img
+                            src={item.imageUrl}
+                            alt=""
+                            className="w-full max-h-52 object-cover rounded-lg mb-3 opacity-90"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        )}
+                        {item.summary ? (
+                          <p className="text-sm text-zinc-400 leading-relaxed">
+                            {item.summary}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-zinc-600 italic">No description in feed — click to read the full article.</p>
+                        )}
+                        <div className="flex items-center gap-3 mt-4 flex-wrap">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openInReader(item) }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                          >
+                            Read in pane
+                          </button>
+                          <button
+                            onClick={(e) => openArticle(e, item.link)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
+                          >
+                            Open original ↗
+                          </button>
+                          <button
+                            onClick={(e) => markUnread(item.link, e)}
+                            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                          >
+                            mark unread
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setExpanded(null) }}
+                            className="text-xs text-zinc-700 hover:text-zinc-500 transition-colors ml-auto"
+                          >
+                            collapse
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t border-zinc-800">
+                <button
+                  onClick={() => { setPage((p) => Math.max(0, p - 1)); setFocusedIdx(-1) }}
+                  disabled={safePage === 0}
+                  className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ← Prev
+                </button>
+                <span className="text-xs text-zinc-500">
+                  {safePage + 1} / {totalPages}
+                  <span className="text-zinc-700 ml-2">({filtered.length} articles)</span>
+                </span>
+                <button
+                  onClick={() => { setPage((p) => Math.min(totalPages - 1, p + 1)); setFocusedIdx(-1) }}
+                  disabled={safePage >= totalPages - 1}
+                  className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>

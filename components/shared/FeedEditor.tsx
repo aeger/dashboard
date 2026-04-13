@@ -7,6 +7,13 @@ interface Feed {
   name: string
 }
 
+interface FeedHealth {
+  ok: boolean
+  checkedAt: string
+  itemCount?: number
+  error?: string
+}
+
 interface TestResult {
   ok: boolean
   itemCount?: number
@@ -73,6 +80,26 @@ function formatPreviewDate(dateStr: string): string {
   } catch { return '' }
 }
 
+function parseOpml(text: string): Feed[] {
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(text, 'text/xml')
+    const outlines = Array.from(doc.querySelectorAll('outline[xmlUrl]'))
+    return outlines
+      .map((o) => {
+        const url = o.getAttribute('xmlUrl')?.trim() ?? ''
+        const name =
+          (o.getAttribute('text') ?? o.getAttribute('title') ?? '').trim() ||
+          autoName(url)
+        return { url, name }
+      })
+      .filter((f) => {
+        try { const u = new URL(f.url); return ['http:', 'https:'].includes(u.protocol) }
+        catch { return false }
+      })
+  } catch { return [] }
+}
+
 export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) {
   const label = type === 'lab' ? 'Tech / Lab' : 'Family'
   const accent = type === 'lab' ? 'text-orange-400' : 'text-amber-400'
@@ -85,6 +112,7 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
   const [authLoading, setAuthLoading] = useState(false)
 
   const [feeds, setFeeds] = useState<Feed[]>([])
+  const [health, setHealth] = useState<Record<string, FeedHealth>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
@@ -95,8 +123,11 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
 
+  const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
   const urlInputRef = useRef<HTMLInputElement>(null)
   const secretInputRef = useRef<HTMLInputElement>(null)
+  const opmlInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const cached = loadCachedSecret()
@@ -127,6 +158,7 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
       if (!res.ok) throw new Error()
       const data = await res.json()
       setFeeds(data.feeds ?? [])
+      setHealth(data.health ?? {})
       setStep('edit')
     } catch {
       setAuthError('Failed to load feeds — please try again')
@@ -213,6 +245,39 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     if (e.key === 'Enter') { e.preventDefault(); handleAddFeed() }
   }
 
+  function handleOpmlImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result
+      if (typeof text !== 'string') return
+      const parsed = parseOpml(text)
+      if (parsed.length === 0) {
+        setImportMsg({ ok: false, text: 'No valid RSS feed entries found in OPML file' })
+        return
+      }
+      let added = 0
+      setFeeds((prev) => {
+        const existingUrls = new Set(prev.map((f) => f.url))
+        const newFeeds = parsed.filter((f) => !existingUrls.has(f.url))
+        // Respect max 15
+        const slots = Math.max(0, 15 - prev.length)
+        const toAdd = newFeeds.slice(0, slots)
+        added = toAdd.length
+        const skipped = parsed.length - toAdd.length
+        setImportMsg({
+          ok: true,
+          text: `Added ${added} feed${added !== 1 ? 's' : ''}${skipped > 0 ? ` (${skipped} skipped — duplicate or limit reached)` : ''}`,
+        })
+        return [...prev, ...toAdd]
+      })
+    }
+    reader.readAsText(file)
+    // Reset input so same file can be re-imported
+    e.target.value = ''
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
@@ -250,6 +315,24 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     setSecretRemembered(false)
     setSecret('')
     setStep('auth')
+  }
+
+  function HealthDot({ url }: { url: string }) {
+    const h = health[url]
+    if (!h) return <span className="w-2 h-2 rounded-full bg-zinc-700 flex-shrink-0" title="Never checked" />
+    if (h.ok)
+      return (
+        <span
+          className="w-2 h-2 rounded-full bg-emerald-500/80 flex-shrink-0"
+          title={`OK · ${h.itemCount ?? '?'} items · ${new Date(h.checkedAt).toLocaleTimeString()}`}
+        />
+      )
+    return (
+      <span
+        className="w-2 h-2 rounded-full bg-red-500/80 flex-shrink-0"
+        title={`Failed: ${h.error ?? 'unknown error'}`}
+      />
+    )
   }
 
   return (
@@ -332,6 +415,15 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                         forget secret
                       </button>
                     )}
+                    {/* OPML export */}
+                    <a
+                      href={`/api/feeds/opml?type=${type}`}
+                      download
+                      className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                      title="Export as OPML"
+                    >
+                      export OPML
+                    </a>
                     <span className="text-xs text-zinc-600">{feeds.length} / 15</span>
                   </div>
                 </div>
@@ -365,6 +457,9 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                           >▼</button>
                         </div>
 
+                        {/* Health dot */}
+                        <HealthDot url={feed.url} />
+
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-zinc-200 truncate">{feed.name}</div>
                           <div className="text-xs text-zinc-500 truncate mt-0.5">{feed.url}</div>
@@ -386,7 +481,39 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
 
               {/* Add feed */}
               <div className="border-t border-zinc-800 pt-5">
-                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Add a feed</div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Add a feed</span>
+                  {/* OPML import */}
+                  <div>
+                    <input
+                      ref={opmlInputRef}
+                      type="file"
+                      accept=".opml,.xml"
+                      className="hidden"
+                      onChange={handleOpmlImport}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setImportMsg(null); opmlInputRef.current?.click() }}
+                      disabled={feeds.length >= 15}
+                      className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors disabled:opacity-40"
+                      title="Import feeds from OPML file"
+                    >
+                      import OPML
+                    </button>
+                  </div>
+                </div>
+
+                {importMsg && (
+                  <div className={`rounded-lg px-3 py-2 border text-xs mb-3 ${
+                    importMsg.ok
+                      ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
+                      : 'bg-amber-500/5 border-amber-500/20 text-amber-400'
+                  }`}>
+                    {importMsg.text}
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <div>
                     <div className="flex gap-2">

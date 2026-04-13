@@ -36,6 +36,7 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
   const [article, setArticle] = useState<ArticleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const paneRef = useRef<HTMLDivElement>(null)
   const prevUrl = useRef<string | null>(null)
 
@@ -45,6 +46,7 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
     setArticle(null)
     setError(null)
     setLoading(true)
+    setSaveState('idle')
 
     fetch(`/api/article?url=${encodeURIComponent(url)}`)
       .then((r) => r.json())
@@ -58,6 +60,9 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
   }, [url])
+
+  // Reset save state when url changes
+  useEffect(() => { setSaveState('idle') }, [url])
 
   // Escape key closes pane
   useEffect(() => {
@@ -73,7 +78,37 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
     if (e.target === e.currentTarget) onClose()
   }
 
+  async function handleSaveToQueue() {
+    if (!url || saveState === 'saving' || saveState === 'saved') return
+    setSaveState('saving')
+    try {
+      const res = await fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          title: article?.title ?? title ?? '',
+          excerpt: article?.excerpt ?? '',
+          source: article?.siteName ?? source ?? '',
+        }),
+      })
+      if (res.ok) {
+        setSaveState('saved')
+      } else {
+        setSaveState('error')
+      }
+    } catch {
+      setSaveState('error')
+    }
+  }
+
   const open = url !== null
+
+  const saveLabel =
+    saveState === 'saving' ? 'Saving…' :
+    saveState === 'saved'  ? 'Saved ✓' :
+    saveState === 'error'  ? 'Save failed' :
+    'Save to queue'
 
   return (
     <>
@@ -112,6 +147,20 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
               </span>
             )}
           </div>
+          <button
+            onClick={handleSaveToQueue}
+            disabled={saveState === 'saving' || saveState === 'saved'}
+            title="Save to task queue"
+            className={`text-xs transition-colors flex-shrink-0 px-2 py-1 rounded ${
+              saveState === 'saved'
+                ? 'text-emerald-400'
+                : saveState === 'error'
+                ? 'text-red-400 hover:text-red-300'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {saveLabel}
+          </button>
           {url && (
             <a
               href={url}
@@ -196,6 +245,19 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
                     Open original ↗
                   </a>
                 )}
+                <button
+                  onClick={handleSaveToQueue}
+                  disabled={saveState === 'saving' || saveState === 'saved'}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    saveState === 'saved'
+                      ? 'bg-emerald-600/20 text-emerald-400 cursor-default'
+                      : saveState === 'error'
+                      ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                      : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300 hover:text-white'
+                  }`}
+                >
+                  {saveLabel}
+                </button>
                 <span className="text-[10px] text-zinc-700 ml-auto">cached {formatAge(article.cachedAt)}</span>
               </div>
             </div>

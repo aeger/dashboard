@@ -1,4 +1,5 @@
 import Parser from 'rss-parser'
+import { recordFeedResult } from './feed-health'
 
 export interface RssItem {
   title: string
@@ -117,19 +118,28 @@ async function fetchOneFeed(
   limit: number,
   feedType?: 'lab' | 'family'
 ): Promise<RssItem[]> {
-  if (isRedditUrl(feed.url)) {
-    return fetchRedditJson(feed.url, feed.name, limit, feedType)
+  try {
+    let items: RssItem[]
+    if (isRedditUrl(feed.url)) {
+      items = await fetchRedditJson(feed.url, feed.name, limit, feedType)
+    } else {
+      const parsed = await parser.parseURL(feed.url)
+      items = (parsed.items ?? []).slice(0, limit).map((item) => ({
+        title: item.title ?? '',
+        link: item.link ?? '',
+        pubDate: item.pubDate ?? item.isoDate ?? '',
+        source: feed.name,
+        summary: extractSummary(item),
+        imageUrl: extractImage(item),
+        feedType,
+      }))
+    }
+    recordFeedResult(feed.url, true, items.length)
+    return items
+  } catch (err) {
+    recordFeedResult(feed.url, false, undefined, String(err).replace(/^Error:\s*/, '').slice(0, 120))
+    throw err
   }
-  const parsed = await parser.parseURL(feed.url)
-  return (parsed.items ?? []).slice(0, limit).map((item) => ({
-    title: item.title ?? '',
-    link: item.link ?? '',
-    pubDate: item.pubDate ?? item.isoDate ?? '',
-    source: feed.name,
-    summary: extractSummary(item),
-    imageUrl: extractImage(item),
-    feedType,
-  }))
 }
 
 export async function fetchRssFeeds(
@@ -146,9 +156,16 @@ export async function fetchRssFeeds(
     }
   }
 
+  // Deduplicate by link (keep first occurrence after sort)
+  const seen = new Set<string>()
   return items
     .filter((i) => i.title && i.link)
     .sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+    .filter((i) => {
+      if (seen.has(i.link)) return false
+      seen.add(i.link)
+      return true
+    })
     .slice(0, limit * feeds.length)
 }
 
