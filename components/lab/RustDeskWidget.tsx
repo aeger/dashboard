@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import type { RustDeskRemote } from '@/app/api/rustdesk/remotes/route'
+import type { PeerInfo } from '@/app/api/rustdesk/sync/route'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,18 @@ interface RustDeskStatus {
 type Tab = 'list' | 'create' | 'edit'
 
 const EMPTY_FORM = { peerId: '', name: '', password: '', group: '', note: '' }
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return 'never'
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 2) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
@@ -126,15 +139,18 @@ function RemoteForm({
 
 function RemoteList({
   remotes,
+  peers,
   onEdit,
   onDelete,
   onConnect,
 }: {
   remotes: RustDeskRemote[]
+  peers: PeerInfo[]
   onEdit: (r: RustDeskRemote) => void
   onDelete: (id: string) => void
   onConnect: (peerId: string) => void
 }) {
+  const peerMap = Object.fromEntries(peers.map(p => [p.peerId, p]))
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
@@ -163,10 +179,16 @@ function RemoteList({
 
   return (
     <div className="space-y-2">
-      {remotes.map((r) => (
+      {remotes.map((r) => {
+        const peer = peerMap[r.peerId]
+        // Green = registered in relay DB, gray = not in DB (OSS hbbs doesn't expose real-time presence)
+        const dotColor = peer ? '#4ade80' : '#3f3f46'
+        const dotTitle = peer ? `Registered with relay · first seen ${peer.lastSeen}` : 'Not found in relay DB'
+        return (
         <div key={r.id} className="flex items-start justify-between gap-3 bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2.5">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: dotColor }} title={dotTitle} />
               <span className="text-sm font-medium text-white">{r.name}</span>
               {r.group && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-400">{r.group}</span>
@@ -175,6 +197,9 @@ function RemoteList({
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-800/50">
                   pw saved
                 </span>
+              )}
+              {peer && (
+                <span className="text-[10px] text-zinc-600 ml-auto" title="First registered with relay">reg. {relativeTime(peer.lastSeen)}</span>
               )}
             </div>
             <button
@@ -229,7 +254,8 @@ function RemoteList({
             )}
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -239,21 +265,29 @@ function RemoteList({
 export default function RustDeskWidget() {
   const [tab, setTab] = useState<Tab>('list')
   const [remotes, setRemotes] = useState<RustDeskRemote[]>([])
+  const [peers, setPeers] = useState<PeerInfo[]>([])
   const [status, setStatus] = useState<RustDeskStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<RustDeskRemote | null>(null)
   const [quickId, setQuickId] = useState('')
   const [showQuick, setShowQuick] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [statusRes, remotesRes] = await Promise.all([
+      const [statusRes, remotesRes, syncRes] = await Promise.all([
         fetch('/api/rustdesk'),
         fetch('/api/rustdesk/remotes'),
+        fetch('/api/rustdesk/sync'),
       ])
       if (statusRes.ok) setStatus(await statusRes.json())
       if (remotesRes.ok) setRemotes(await remotesRes.json())
+      if (syncRes.ok) {
+        const d = await syncRes.json()
+        setPeers(d.peers ?? [])
+      }
     } catch {
       // ignore
     } finally {
@@ -261,7 +295,27 @@ export default function RustDeskWidget() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  const autoSync = useCallback(async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const res = await fetch('/api/rustdesk/sync', { method: 'POST' })
+      const d = await res.json()
+      setSyncResult(`+${d.added} added, −${d.removed} removed, ${d.unchanged} unchanged`)
+      await load()
+    } catch {
+      setSyncResult('sync failed')
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncResult(null), 4000)
+    }
+  }, [load])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 30000)
+    return () => clearInterval(id)
+  }, [load])
 
   function handleConnect(peerId: string) {
     window.open(`rustdesk://connection/new/${peerId}`, '_self')
@@ -303,6 +357,15 @@ export default function RustDeskWidget() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {syncResult && <span className="text-zinc-500 text-[10px]">{syncResult}</span>}
+            <button
+              onClick={autoSync}
+              disabled={syncing}
+              className="text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40 text-[10px] font-mono"
+              title="Auto-sync remotes from relay DB"
+            >
+              {syncing ? '↻' : 'sync db'}
+            </button>
             {status?.host && <span className="text-zinc-600">{status.host}</span>}
             <button
               onClick={() => setShowQuick(!showQuick)}
@@ -370,6 +433,7 @@ export default function RustDeskWidget() {
         ) : (
           <RemoteList
             remotes={remotes}
+            peers={peers}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onConnect={handleConnect}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { listInbox, isConfigured, GmailAuthError } from '@/lib/gmail'
+import { listInbox, isConfigured, hasClientCredentials, GmailAuthError, type GmailTab } from '@/lib/gmail'
 
 export async function GET(req: NextRequest) {
   // Check Authelia session
@@ -22,13 +22,18 @@ export async function GET(req: NextRequest) {
   }
 
   if (!isConfigured()) {
+    // Client creds exist but no refresh token — show reauth button
+    if (hasClientCredentials()) {
+      return NextResponse.json({ messages: [], reauth_required: true, configured: false, authenticated: true })
+    }
     return NextResponse.json({ messages: [], configured: false, authenticated: true })
   }
 
   try {
     const { searchParams } = req.nextUrl
     const max = Math.min(parseInt(searchParams.get('max') || '15', 10), 30)
-    const messages = await listInbox(max)
+    const tab = (searchParams.get('tab') || 'all') as GmailTab
+    const messages = await listInbox(max, tab)
     return NextResponse.json({ messages, configured: true, authenticated: true })
   } catch (error) {
     if (error instanceof GmailAuthError) {

@@ -107,7 +107,7 @@ export default function AgentHealthBanner() {
         return (
           <div
             key={agent.agent}
-            className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${cfg.bg} ${cfg.border}`}
+            className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border ${cfg.bg} ${cfg.border}`}
           >
             <span className={`w-2 h-2 rounded-full ${cfg.dot} ${cfg.pulse ? 'animate-pulse' : ''}`} />
             <span className={`text-sm font-medium ${cfg.text}`}>

@@ -42,23 +42,29 @@ export default function MessageBlock({ initialMessage }: MessageBlockProps) {
   return (
     <>
       <div className="relative" onMouseEnter={() => setShowGear(true)} onMouseLeave={() => setShowGear(false)}>
-        {message.enabled && (
+        {message.enabled ? (
           <div className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${SEVERITY_STYLES[message.severity]}`}>
             <span className="text-xl flex-shrink-0">{SEVERITY_ICON[message.severity]}</span>
             <div className="flex-1 min-w-0">
               {message.title && <div className="font-semibold text-sm">{message.title}</div>}
               <div className="text-sm">{message.text}</div>
             </div>
+            <button
+              onClick={() => setShowEditor(true)}
+              className={`flex-shrink-0 p-1.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-all ${showGear ? 'opacity-100' : 'opacity-0'}`}
+              title="Edit message"
+            >
+              ⚙️
+            </button>
           </div>
+        ) : (
+          <button
+            onClick={() => setShowEditor(true)}
+            className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+          >
+            + add banner
+          </button>
         )}
-
-        <button
-          onClick={() => setShowEditor(true)}
-          className={`absolute ${message.enabled ? 'top-2 right-2' : 'top-0 right-0'} p-1.5 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-all ${showGear ? 'opacity-100' : 'opacity-0'}`}
-          title="Edit message"
-        >
-          ⚙️
-        </button>
       </div>
 
       {showEditor && (

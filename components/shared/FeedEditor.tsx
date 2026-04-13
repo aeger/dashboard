@@ -7,6 +7,13 @@ interface Feed {
   name: string
 }
 
+interface TestResult {
+  ok: boolean
+  itemCount?: number
+  preview?: Array<{ title: string; pubDate: string }>
+  error?: string
+}
+
 interface FeedEditorProps {
   type: 'family' | 'lab'
   onClose: () => void
@@ -14,7 +21,7 @@ interface FeedEditorProps {
 }
 
 const LS_KEY = 'az_dashboard_secret'
-const SECRET_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+const SECRET_TTL_MS = 24 * 60 * 60 * 1000
 
 function loadCachedSecret(): string | null {
   try {
@@ -57,8 +64,19 @@ function validateUrl(url: string, existing: Feed[]): string {
   return ''
 }
 
+function formatPreviewDate(dateStr: string): string {
+  try {
+    const mins = Math.round((Date.now() - new Date(dateStr).getTime()) / 60000)
+    if (mins < 60) return `${mins}m ago`
+    if (mins < 1440) return `${Math.round(mins / 60)}h ago`
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch { return '' }
+}
+
 export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) {
-  const label = type === 'lab' ? 'Tech News' : 'News'
+  const label = type === 'lab' ? 'Tech / Lab' : 'Family'
+  const accent = type === 'lab' ? 'text-orange-400' : 'text-amber-400'
+  const accentBg = type === 'lab' ? 'bg-orange-500/10 border-orange-500/20' : 'bg-amber-500/10 border-amber-500/20'
 
   const [step, setStep] = useState<'loading' | 'auth' | 'edit'>('loading')
   const [secret, setSecret] = useState('')
@@ -74,11 +92,12 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
   const [addName, setAddName] = useState('')
   const [urlError, setUrlError] = useState('')
   const [urlDirty, setUrlDirty] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
 
   const urlInputRef = useRef<HTMLInputElement>(null)
   const secretInputRef = useRef<HTMLInputElement>(null)
 
-  // On mount: check for a cached secret and skip auth if valid
   useEffect(() => {
     const cached = loadCachedSecret()
     if (cached) {
@@ -90,12 +109,10 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     }
   }, [])
 
-  // Focus management
   useEffect(() => {
     if (step === 'auth') secretInputRef.current?.focus()
   }, [step])
 
-  // Close on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -129,8 +146,19 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     setSaveError('')
   }
 
+  function handleMove(index: number, dir: -1 | 1) {
+    setFeeds((prev) => {
+      const next = [...prev]
+      const target = index + dir
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
   function handleUrlChange(val: string) {
     setAddUrl(val)
+    setTestResult(null)
     if (urlDirty) setUrlError(validateUrl(val, feeds))
   }
 
@@ -140,6 +168,27 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     setUrlError(err)
     if (!err && addUrl.trim() && !addName.trim()) {
       setAddName(autoName(addUrl.trim()))
+    }
+  }
+
+  async function handleTestFeed() {
+    const trimmedUrl = addUrl.trim()
+    const err = validateUrl(trimmedUrl, feeds)
+    if (err) { setUrlError(err); return }
+
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res = await fetch(`/api/feeds/test?url=${encodeURIComponent(trimmedUrl)}`)
+      const data = await res.json() as TestResult
+      setTestResult(data)
+      if (data.ok && !addName.trim()) {
+        setAddName(autoName(trimmedUrl))
+      }
+    } catch {
+      setTestResult({ ok: false, error: 'Network error — check server logs' })
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -155,6 +204,7 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     setAddName('')
     setUrlError('')
     setUrlDirty(false)
+    setTestResult(null)
     setSaveError('')
     urlInputRef.current?.focus()
   }
@@ -185,7 +235,7 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
         }
         return
       }
-      persistSecret(secret) // refresh the 24h TTL on every successful save
+      persistSecret(secret)
       onSaved()
       onClose()
     } catch {
@@ -215,8 +265,13 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
           <div>
-            <h2 className="text-base font-semibold text-white">Manage {label} Feeds</h2>
-            <p className="text-xs text-zinc-500 mt-0.5">Add or remove RSS / Atom feeds</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-white">Manage Feeds</h2>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${accentBg} ${accent}`}>
+                {label}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-500 mt-0.5">Add, remove, or reorder RSS / Atom feeds</p>
           </div>
           <button
             onClick={onClose}
@@ -228,14 +283,12 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
         {/* Body */}
         <div className="px-6 py-5 overflow-y-auto flex-1">
 
-          {/* Loading (checking cached secret) */}
           {step === 'loading' && (
             <div className="flex items-center justify-center py-12">
               <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
             </div>
           )}
 
-          {/* Auth step */}
           {step === 'auth' && (
             <form onSubmit={handleAuth} className="space-y-4">
               <p className="text-sm text-zinc-400">Enter your admin secret to manage feeds.</p>
@@ -260,21 +313,21 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
             </form>
           )}
 
-          {/* Edit step */}
           {step === 'edit' && (
             <form onSubmit={handleSave} className="space-y-5">
 
               {/* Current feeds */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Current feeds</span>
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                    Active feeds
+                  </span>
                   <div className="flex items-center gap-3">
                     {secretRemembered && (
                       <button
                         type="button"
                         onClick={handleForgetSecret}
                         className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-                        title="Clear remembered secret and re-enter"
                       >
                         forget secret
                       </button>
@@ -292,19 +345,38 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                     {feeds.map((feed, i) => (
                       <li
                         key={i}
-                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 transition-colors"
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-zinc-800 hover:border-zinc-700 transition-colors"
                       >
+                        {/* Reorder buttons */}
+                        <div className="flex flex-col gap-0.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleMove(i, -1)}
+                            disabled={i === 0}
+                            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 text-[10px] leading-none transition-colors"
+                            title="Move up"
+                          >▲</button>
+                          <button
+                            type="button"
+                            onClick={() => handleMove(i, 1)}
+                            disabled={i === feeds.length - 1}
+                            className="text-zinc-700 hover:text-zinc-400 disabled:opacity-20 text-[10px] leading-none transition-colors"
+                            title="Move down"
+                          >▼</button>
+                        </div>
+
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-zinc-200 truncate">{feed.name}</div>
                           <div className="text-xs text-zinc-500 truncate mt-0.5">{feed.url}</div>
                         </div>
+
                         <button
                           type="button"
                           onClick={() => handleRemove(i)}
                           disabled={feeds.length <= 1}
                           title={feeds.length <= 1 ? 'At least one feed is required' : `Remove "${feed.name}"`}
                           aria-label={`Remove ${feed.name}`}
-                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
+                          className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-25 disabled:cursor-not-allowed text-sm"
                         >✕</button>
                       </li>
                     ))}
@@ -317,25 +389,59 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                 <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Add a feed</div>
                 <div className="space-y-2">
                   <div>
-                    <input
-                      ref={urlInputRef}
-                      type="url"
-                      value={addUrl}
-                      onChange={(e) => handleUrlChange(e.target.value)}
-                      onBlur={handleUrlBlur}
-                      onKeyDown={handleAddKeyDown}
-                      placeholder="https://example.com/feed.rss"
-                      autoComplete="off"
-                      className={`w-full px-3 py-2 rounded-lg bg-zinc-800 border text-sm text-white placeholder-zinc-500 focus:outline-none transition-colors ${
-                        urlError ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-700 focus:border-zinc-500'
-                      }`}
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        ref={urlInputRef}
+                        type="url"
+                        value={addUrl}
+                        onChange={(e) => handleUrlChange(e.target.value)}
+                        onBlur={handleUrlBlur}
+                        onKeyDown={handleAddKeyDown}
+                        placeholder="https://example.com/feed.rss"
+                        autoComplete="off"
+                        className={`flex-1 px-3 py-2 rounded-lg bg-zinc-800 border text-sm text-white placeholder-zinc-500 focus:outline-none transition-colors ${
+                          urlError ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-700 focus:border-zinc-500'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleTestFeed}
+                        disabled={testing || !addUrl.trim()}
+                        className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors disabled:opacity-40 flex-shrink-0"
+                        title="Test this feed URL"
+                      >
+                        {testing ? '…' : 'Test'}
+                      </button>
+                    </div>
                     {urlError && (
                       <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
                         <span aria-hidden>⚠</span> {urlError}
                       </p>
                     )}
                   </div>
+
+                  {/* Test result */}
+                  {testResult && (
+                    <div className={`rounded-lg px-3 py-2.5 border text-xs ${
+                      testResult.ok
+                        ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'
+                        : 'bg-red-500/5 border-red-500/20 text-red-400'
+                    }`}>
+                      {testResult.ok ? (
+                        <div>
+                          <div className="font-semibold mb-1">✓ Valid feed — {testResult.itemCount} items found</div>
+                          {testResult.preview?.map((p, i) => (
+                            <div key={i} className="text-emerald-500/70 truncate">
+                              · {p.title} <span className="opacity-60">({formatPreviewDate(p.pubDate)})</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div>⚠ {testResult.error}</div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -359,7 +465,6 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
 
               {saveError && <p className="text-sm text-red-400">{saveError}</p>}
 
-              {/* Actions */}
               <div className="flex gap-2 pt-1 border-t border-zinc-800">
                 <button
                   type="button"

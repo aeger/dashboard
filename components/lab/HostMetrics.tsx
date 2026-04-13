@@ -3,125 +3,48 @@
 import { useEffect, useState } from 'react'
 import type { HostMetrics as HostMetricsType } from '@/lib/prometheus'
 
-// ── Ring gauge (SVG) ──────────────────────────────────────────────────────────
-function RingGauge({
-  value,
-  label,
-  detail,
-  size = 72,
-}: {
-  value: number | null
-  label: string
-  detail?: string
-  size?: number
-}) {
-  const r = (size - 12) / 2
-  const cx = size / 2
-  const cy = size / 2
-  const circ = 2 * Math.PI * r
-  const pct = value != null ? Math.min(100, Math.max(0, value)) : 0
-  const filled = (pct / 100) * circ
-
-  const color =
-    value == null ? '#3f3f46'
-    : value >= 90  ? '#ef4444'
-    : value >= 75  ? '#f59e0b'
-    : value >= 50  ? '#6366f1'
-    : '#22c55e'
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {/* Track */}
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#27272a" strokeWidth="6" />
-        {/* Fill */}
-        {value != null && (
-          <circle
-            cx={cx} cy={cy} r={r}
-            fill="none"
-            stroke={color}
-            strokeWidth="6"
-            strokeLinecap="round"
-            strokeDasharray={`${filled} ${circ}`}
-            transform={`rotate(-90 ${cx} ${cy})`}
-          />
-        )}
-        {/* Center label */}
-        <text x={cx} y={cy + 4} textAnchor="middle" fontSize="13" fontWeight="600" fill={value != null ? 'white' : '#52525b'}>
-          {value != null ? `${Math.round(value)}%` : '—'}
-        </text>
-      </svg>
-      <div className="text-center">
-        <div className="text-xs text-zinc-400">{label}</div>
-        {detail && <div className="text-[10px] text-zinc-600 leading-tight">{detail}</div>}
-      </div>
-    </div>
-  )
-}
-
-// ── Network throughput bar ────────────────────────────────────────────────────
-function NetBar({ rx, tx }: { rx: number | null; tx: number | null }) {
-  const fmt = (b: number | null) => {
-    if (b == null) return '—'
-    if (b >= 1_048_576) return `${(b / 1_048_576).toFixed(1)} MB/s`
-    if (b >= 1024) return `${(b / 1024).toFixed(0)} KB/s`
-    return `${Math.round(b)} B/s`
+function tileColor(value: number | null, type: 'pct' | 'uptime' | 'load'): string {
+  if (value == null) return 'rgba(39,39,42,0.8)' // zinc-800
+  if (type === 'uptime') return 'rgba(37,99,235,0.75)' // blue
+  if (type === 'load') {
+    return value >= 4 ? 'rgba(220,38,38,0.75)' : value >= 2 ? 'rgba(217,119,6,0.75)' : 'rgba(22,163,74,0.75)'
   }
+  // pct — green < 70, amber 70-85, red > 85
+  if (value >= 85) return 'rgba(220,38,38,0.75)'
+  if (value >= 70) return 'rgba(217,119,6,0.75)'
+  return 'rgba(22,163,74,0.75)'
+}
 
-  const maxVal = Math.max(rx ?? 0, tx ?? 0, 1)
-  const rxPct = rx != null ? Math.min(100, (rx / maxVal) * 100) : 0
-  const txPct = tx != null ? Math.min(100, (tx / maxVal) * 100) : 0
-
+function StatTile({
+  label,
+  value,
+  unit,
+  sub,
+  color,
+}: {
+  label: string
+  value: string
+  unit?: string
+  sub?: string
+  color: string
+}) {
   return (
-    <div className="bg-zinc-800/50 rounded-lg p-2.5 space-y-1.5">
-      <div className="text-xs text-zinc-500 mb-1">Network</div>
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-indigo-400 w-3">↓</span>
-          <div className="flex-1 h-1.5 rounded-full bg-zinc-700 overflow-hidden">
-            <div className="h-full rounded-full bg-indigo-500" style={{ width: `${rxPct}%` }} />
-          </div>
-          <span className="text-[10px] text-zinc-400 w-16 text-right">{fmt(rx)}</span>
+    <div
+      className="flex flex-col justify-between rounded-xl p-3 min-w-0"
+      style={{ background: color, minHeight: '88px' }}
+    >
+      <div className="text-[10px] font-semibold text-white/70 uppercase tracking-wider">{label}</div>
+      <div>
+        <div className="flex items-baseline gap-1">
+          <span className="text-2xl font-bold text-white leading-none">{value}</span>
+          {unit && <span className="text-sm font-medium text-white/80">{unit}</span>}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-amber-400 w-3">↑</span>
-          <div className="flex-1 h-1.5 rounded-full bg-zinc-700 overflow-hidden">
-            <div className="h-full rounded-full bg-amber-500" style={{ width: `${txPct}%` }} />
-          </div>
-          <span className="text-[10px] text-zinc-400 w-16 text-right">{fmt(tx)}</span>
-        </div>
+        {sub && <div className="text-[10px] text-white/60 mt-0.5">{sub}</div>}
       </div>
     </div>
   )
 }
 
-// ── Load indicator ────────────────────────────────────────────────────────────
-function LoadBadge({ load, cores = 1 }: { load: number | null; cores?: number }) {
-  if (load == null) return null
-  const pct = Math.min(100, (load / cores) * 100)
-  const color = pct >= 90 ? 'text-red-400' : pct >= 60 ? 'text-amber-400' : 'text-green-400'
-  return (
-    <div className="bg-zinc-800/50 rounded-lg p-2.5 flex items-center justify-between">
-      <span className="text-xs text-zinc-500">Load (1m)</span>
-      <span className={`text-sm font-semibold ${color}`}>{load.toFixed(2)}</span>
-    </div>
-  )
-}
-
-// ── Uptime chip ───────────────────────────────────────────────────────────────
-function UptimeChip({ days }: { days: number | null }) {
-  if (days == null) return null
-  const d = Math.floor(days)
-  const h = Math.floor((days - d) * 24)
-  return (
-    <div className="bg-zinc-800/50 rounded-lg p-2.5 flex items-center justify-between">
-      <span className="text-xs text-zinc-500">Uptime</span>
-      <span className="text-sm font-semibold text-zinc-200">{d}d {h}h</span>
-    </div>
-  )
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 export default function HostMetrics() {
   const [metrics, setMetrics] = useState<HostMetricsType[]>([])
   const [loading, setLoading] = useState(true)
@@ -149,45 +72,63 @@ export default function HostMetrics() {
   )
 
   return (
-    <div className="space-y-5">
-      {metrics.map((host) => (
-        <div key={host.instance} className="space-y-3">
-          {/* Host name */}
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
-            <span className="text-sm font-semibold text-zinc-200">{host.name}</span>
-          </div>
+    <div className="space-y-4">
+      {metrics.map((host) => {
+        const uptimeDays = host.uptime_days != null
+          ? `${host.uptime_days.toFixed(2)} days`
+          : '—'
+        const ramUsed = host.ram_used_gb != null ? `${host.ram_used_gb} GiB` : '—'
+        const ramPct = host.ram_used_percent != null ? host.ram_used_percent.toFixed(1) : '—'
+        const cpuPct = host.cpu_percent != null ? host.cpu_percent.toFixed(2) : '—'
+        const diskPct = host.disk_used_percent != null ? host.disk_used_percent.toFixed(1) : '—'
+        const load1m = host.load_1m != null ? host.load_1m.toFixed(2) : '—'
 
-          {/* Ring gauges */}
-          <div className="flex justify-around">
-            <RingGauge
-              value={host.cpu_percent}
-              label="CPU"
-            />
-            <RingGauge
-              value={host.ram_used_percent}
-              label="RAM"
-              detail={host.ram_used_gb != null && host.ram_total_gb != null
-                ? `${host.ram_used_gb} / ${host.ram_total_gb} GB`
-                : undefined}
-            />
-            <RingGauge
-              value={host.disk_used_percent}
-              label="Disk"
-              detail={host.disk_used_gb != null && host.disk_total_gb != null
-                ? `${host.disk_used_gb} / ${host.disk_total_gb} GB`
-                : undefined}
-            />
+        return (
+          <div key={host.instance}>
+            {metrics.length > 1 && (
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                <span className="text-xs font-semibold text-zinc-400">{host.name}</span>
+              </div>
+            )}
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              <StatTile
+                label="CPU Usage"
+                value={cpuPct}
+                unit="%"
+                color={tileColor(host.cpu_percent, 'pct')}
+              />
+              <StatTile
+                label="RAM Usage"
+                value={ramPct}
+                unit="%"
+                color={tileColor(host.ram_used_percent, 'pct')}
+              />
+              <StatTile
+                label="RAM Used"
+                value={ramUsed}
+                color={tileColor(host.ram_used_percent, 'pct')}
+              />
+              <StatTile
+                label="Load Avg (1m)"
+                value={load1m}
+                color={tileColor(host.load_1m, 'load')}
+              />
+              <StatTile
+                label="Uptime"
+                value={uptimeDays}
+                color={tileColor(1, 'uptime')}
+              />
+              <StatTile
+                label="Root Disk Usage"
+                value={diskPct}
+                unit="%"
+                color={tileColor(host.disk_used_percent, 'pct')}
+              />
+            </div>
           </div>
-
-          {/* Network + Load + Uptime */}
-          <NetBar rx={host.net_rx_bytes} tx={host.net_tx_bytes} />
-          <div className="grid grid-cols-2 gap-2">
-            <LoadBadge load={host.load_1m} />
-            <UptimeChip days={host.uptime_days} />
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

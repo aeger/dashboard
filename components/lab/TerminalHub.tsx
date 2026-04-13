@@ -679,8 +679,25 @@ const TABS: { id: Tab; label: string; dot?: string }[] = [
   { id: 'discord',  label: 'Discord' },
 ]
 
-export default function TerminalHub() {
+export default function TerminalHub({ popout = false }: { popout?: boolean }) {
   const [activeTab, setActiveTab] = useState<Tab>('terminal')
+
+  function openPopout() {
+    window.open(
+      '/lab/terminal/popout',
+      'terminal-popout',
+      'width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,scrollbars=no,resizable=yes'
+    )
+  }
+
+  // Popout mode — full-height terminal only, no tabs, no popout button
+  if (popout) {
+    return (
+      <div className="flex flex-col flex-1" style={{ height: '100vh', padding: '12px' }}>
+        <WebTerminalTab />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col">
@@ -699,6 +716,17 @@ export default function TerminalHub() {
             {tab.label}
           </button>
         ))}
+        <div className="flex-1" />
+        <button
+          onClick={openPopout}
+          title="Open terminal in new window"
+          className="px-2 py-1 text-xs text-zinc-600 hover:text-zinc-300 transition-colors rounded hover:bg-zinc-800/40 flex items-center gap-1 mb-0.5"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+            <path d="M6.5 1.75a.75.75 0 0 0 0 1.5h4.69L2.22 12.22a.75.75 0 1 0 1.06 1.06L12.25 4.31v4.69a.75.75 0 0 0 1.5 0V1.75h-7.25Z"/>
+          </svg>
+          pop out
+        </button>
       </div>
 
       {/* Tab content — fixed height so all tabs match */}

@@ -61,3 +61,53 @@ export async function GET() {
     return NextResponse.json({ error: 'Failed to fetch goals' }, { status: 500 })
   }
 }
+
+export async function POST(req: Request) {
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_ANON_KEY
+  if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
+
+  try {
+    const body = await req.json()
+    const { title, description, level, parent_id, status, priority, target_date, notes, tags } = body
+
+    if (!title || !level || !status) {
+      return NextResponse.json({ error: 'Missing required fields: title, level, status' }, { status: 400 })
+    }
+
+    const payload: Record<string, unknown> = {
+      title,
+      level,
+      status,
+      priority: priority ?? 2,
+      sort_order: 100,
+      progress: 0,
+    }
+    if (description) payload.description = description
+    if (parent_id) payload.parent_id = parent_id
+    if (target_date) payload.target_date = target_date
+    if (notes) payload.notes = notes
+    if (tags) payload.tags = tags
+
+    const res = await fetch(`${url}/rest/v1/goals`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      return NextResponse.json({ error: 'Failed to create goal', detail: err }, { status: 500 })
+    }
+
+    const created = await res.json()
+    return NextResponse.json({ goal: Array.isArray(created) ? created[0] : created }, { status: 201 })
+  } catch {
+    return NextResponse.json({ error: 'Failed to create goal' }, { status: 500 })
+  }
+}

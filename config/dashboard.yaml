@@ -41,6 +41,7 @@ lab:
     - { name: "Audiobookshelf", url: "https://abs.az-lab.dev", icon: "audiobookshelf" }
     - { name: "Changedetection", url: "https://changedetect.az-lab.dev", icon: "changedetect" }
     - { name: "Shelfmark", url: "https://shelfmark.az-lab.dev", icon: "shelfmark" }
+    - { name: "Grocy", url: "https://grocy.az-lab.dev", icon: "grocy" }
   tech_news_feeds:
     - { url: "https://www.reddit.com/r/homelab/.rss", name: "r/homelab" }
     - { url: "https://www.reddit.com/r/selfhosted/.rss", name: "r/selfhosted" }

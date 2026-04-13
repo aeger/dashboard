@@ -112,8 +112,15 @@ export default function DiscordChat() {
 
   if (!authenticated) {
     return (
-      <div className="text-center py-6 text-zinc-500 text-sm">
-        Sign in to view the Discord bridge
+      <div className="flex flex-col items-center justify-center h-40 gap-3">
+        <span className="text-2xl">💬</span>
+        <p className="text-sm text-zinc-500">Sign in to view the Discord bridge</p>
+        <a
+          href="https://auth.az-lab.dev/?rd=https://home.az-lab.dev"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+        >
+          <span>🔑</span> Sign In
+        </a>
       </div>
     )
   }

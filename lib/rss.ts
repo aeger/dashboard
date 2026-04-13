@@ -5,10 +5,24 @@ export interface RssItem {
   link: string
   pubDate: string
   source: string
+  summary?: string      // Plain text description/snippet
+  imageUrl?: string     // Thumbnail or enclosure image URL
+  feedType?: 'lab' | 'family'
 }
 
-const parser = new Parser({
+const parser = new Parser<Record<string, never>, {
+  'media:content'?: { $: { url: string; medium?: string } }
+  'media:thumbnail'?: { $: { url: string } }
+  'media:group'?: { 'media:thumbnail'?: Array<{ $: { url: string } }> }
+}>({
   timeout: 10000,
+  customFields: {
+    item: [
+      ['media:content', 'media:content'],
+      ['media:thumbnail', 'media:thumbnail'],
+      ['media:group', 'media:group'],
+    ],
+  },
   headers: {
     'User-Agent': 'AZ-Lab-Dashboard/1.0 (homelab monitoring; self-hosted)',
     'Accept': 'application/rss+xml, application/xml, text/xml',
@@ -19,8 +33,38 @@ function isRedditUrl(url: string): boolean {
   return /reddit\.com\/r\//i.test(url)
 }
 
+function extractImage(item: Parser.Item & {
+  'media:content'?: { $: { url: string; medium?: string } }
+  'media:thumbnail'?: { $: { url: string } }
+  'media:group'?: { 'media:thumbnail'?: Array<{ $: { url: string } }> }
+}): string | undefined {
+  const enclosureUrl = item.enclosure?.url
+  if (enclosureUrl && /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(enclosureUrl)) return enclosureUrl
+
+  const mc = item['media:content']
+  if (mc?.$?.url) return mc.$.url
+
+  const mt = item['media:thumbnail']
+  if (mt?.$?.url) return mt.$.url
+
+  const mg = item['media:group']
+  const mgThumb = mg?.['media:thumbnail']?.[0]?.$?.url
+  if (mgThumb) return mgThumb
+
+  return undefined
+}
+
+function extractSummary(item: Parser.Item): string | undefined {
+  const raw = item.contentSnippet || item.summary || ''
+  const trimmed = raw.replace(/\s+/g, ' ').trim()
+  if (!trimmed || trimmed.length < 10) return undefined
+  return trimmed.length > 500 ? trimmed.slice(0, 497) + '…' : trimmed
+}
+
 // Reddit's JSON API is more reliable than their RSS for automated clients
-async function fetchRedditJson(url: string, name: string, limit: number): Promise<RssItem[]> {
+async function fetchRedditJson(
+  url: string, name: string, limit: number, feedType?: 'lab' | 'family'
+): Promise<RssItem[]> {
   const match = url.match(/reddit\.com\/r\/([^/.]+)/i)
   if (!match) throw new Error('Could not parse subreddit from URL')
 
@@ -38,17 +82,43 @@ async function fetchRedditJson(url: string, name: string, limit: number): Promis
   return (data.data?.children ?? [])
     .filter((c: { data: { stickied: boolean } }) => !c.data?.stickied)
     .slice(0, limit)
-    .map((c: { data: { title: string; permalink: string; created_utc: number } }) => ({
-      title: c.data.title,
-      link: `https://www.reddit.com${c.data.permalink}`,
-      pubDate: new Date(c.data.created_utc * 1000).toISOString(),
-      source: name,
-    }))
+    .map((c: {
+      data: {
+        title: string
+        permalink: string
+        created_utc: number
+        selftext?: string
+        thumbnail?: string
+        url?: string
+        score?: number
+      }
+    }) => {
+      const thumb = c.data.thumbnail
+      const imageUrl = thumb && thumb.startsWith('http') ? thumb : undefined
+      const selftext = c.data.selftext?.trim()
+      const summary = selftext && selftext.length > 0 && selftext !== '[removed]' && selftext !== '[deleted]'
+        ? selftext.slice(0, 400) + (selftext.length > 400 ? '…' : '')
+        : undefined
+
+      return {
+        title: c.data.title,
+        link: `https://www.reddit.com${c.data.permalink}`,
+        pubDate: new Date(c.data.created_utc * 1000).toISOString(),
+        source: name,
+        summary,
+        imageUrl,
+        feedType,
+      }
+    })
 }
 
-async function fetchOneFeed(feed: { url: string; name: string }, limit: number): Promise<RssItem[]> {
+async function fetchOneFeed(
+  feed: { url: string; name: string },
+  limit: number,
+  feedType?: 'lab' | 'family'
+): Promise<RssItem[]> {
   if (isRedditUrl(feed.url)) {
-    return fetchRedditJson(feed.url, feed.name, limit)
+    return fetchRedditJson(feed.url, feed.name, limit, feedType)
   }
   const parsed = await parser.parseURL(feed.url)
   return (parsed.items ?? []).slice(0, limit).map((item) => ({
@@ -56,11 +126,18 @@ async function fetchOneFeed(feed: { url: string; name: string }, limit: number):
     link: item.link ?? '',
     pubDate: item.pubDate ?? item.isoDate ?? '',
     source: feed.name,
+    summary: extractSummary(item),
+    imageUrl: extractImage(item),
+    feedType,
   }))
 }
 
-export async function fetchRssFeeds(feeds: { url: string; name: string }[], limit = 10): Promise<RssItem[]> {
-  const results = await Promise.allSettled(feeds.map((feed) => fetchOneFeed(feed, limit)))
+export async function fetchRssFeeds(
+  feeds: { url: string; name: string }[],
+  limit = 10,
+  feedType?: 'lab' | 'family'
+): Promise<RssItem[]> {
+  const results = await Promise.allSettled(feeds.map((feed) => fetchOneFeed(feed, limit, feedType)))
 
   const items: RssItem[] = []
   for (const result of results) {

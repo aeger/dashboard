@@ -9,8 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/jsdom": "^28.0.1",
+    "better-sqlite3": "^12.8.0",
     "google-auth-library": "^10.6.1",
     "js-yaml": "^4.1.1",
+    "jsdom": "^29.0.2",
     "next": "16.1.6",
     "node-ical": "^0.25.3",
     "react": "19.2.3",

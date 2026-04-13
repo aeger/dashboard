@@ -106,12 +106,19 @@ export interface GmailMessage {
 
 // ── Public Functions ─────────────────────────────────────────────────────────
 
+export function hasClientCredentials(): boolean {
+  return !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET)
+}
+
 export function isConfigured(): boolean {
-  return !!(
-    process.env.GMAIL_CLIENT_ID &&
-    process.env.GMAIL_CLIENT_SECRET &&
-    process.env.GMAIL_REFRESH_TOKEN
-  )
+  if (!hasClientCredentials()) return false
+  if (process.env.GMAIL_REFRESH_TOKEN) return true
+  try {
+    const token = fs.readFileSync(TOKEN_FILE, 'utf8').trim()
+    return !!token
+  } catch {
+    return false
+  }
 }
 
 export async function getProfile(): Promise<{ email: string }> {
@@ -119,10 +126,21 @@ export async function getProfile(): Promise<{ email: string }> {
   return { email: data.emailAddress }
 }
 
-export async function listInbox(maxResults = 15): Promise<GmailMessage[]> {
+// Gmail tab → label IDs mapping
+export const GMAIL_TABS = {
+  all:        { label: 'All',        labelIds: ['INBOX'] },
+  promotions: { label: 'Promos',     labelIds: ['INBOX', 'CATEGORY_PROMOTIONS'] },
+  social:     { label: 'Social',     labelIds: ['INBOX', 'CATEGORY_SOCIAL'] },
+  updates:    { label: 'Updates',    labelIds: ['INBOX', 'CATEGORY_UPDATES'] },
+} as const
+
+export type GmailTab = keyof typeof GMAIL_TABS
+
+export async function listInbox(maxResults = 15, tab: GmailTab = 'all'): Promise<GmailMessage[]> {
+  const labelIds = [...GMAIL_TABS[tab].labelIds]
   const data = await apiGet('/users/me/messages', {
     maxResults: String(maxResults),
-    q: 'in:inbox',
+    labelIds,
   })
 
   if (!data.messages?.length) return []

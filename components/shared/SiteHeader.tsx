@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import QuickLinksDropdown from '@/components/shared/QuickLinksDropdown'
 
 // Per-page color identities
 const NAV_ITEMS = [
@@ -10,11 +11,9 @@ const NAV_ITEMS = [
     path: '/',
     label: 'Home',
     icon: '🏠',
-    // active: warm amber-orange
     activeBg: 'linear-gradient(135deg, #f59e0b, #ef4444)',
     activeGlow: 'rgba(245,158,11,0.35)',
     activeBorder: 'rgba(245,158,11,0.5)',
-    // inactive: muted tint
     dimBg: 'rgba(245,158,11,0.08)',
     dimBorder: 'rgba(245,158,11,0.2)',
     dimColor: '#d97706',
@@ -22,9 +21,8 @@ const NAV_ITEMS = [
   {
     key: 'lab',
     path: '/lab',
-    label: 'Lab',
+    label: 'Lab Status',
     icon: '⚗️',
-    // active: electric cyan-blue
     activeBg: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
     activeGlow: 'rgba(6,182,212,0.35)',
     activeBorder: 'rgba(6,182,212,0.5)',
@@ -33,11 +31,22 @@ const NAV_ITEMS = [
     dimColor: '#0891b2',
   },
   {
+    key: 'news',
+    path: '/news',
+    label: 'News Feed',
+    icon: '📰',
+    activeBg: 'linear-gradient(135deg, #fb923c, #f59e0b)',
+    activeGlow: 'rgba(251,146,60,0.35)',
+    activeBorder: 'rgba(251,146,60,0.5)',
+    dimBg: 'rgba(251,146,60,0.08)',
+    dimBorder: 'rgba(251,146,60,0.2)',
+    dimColor: '#ea580c',
+  },
+  {
     key: 'haos',
     path: '/haos',
-    label: 'HAOS',
+    label: 'Home Assistant',
     icon: '🏡',
-    // active: emerald green
     activeBg: 'linear-gradient(135deg, #10b981, #06d6a0)',
     activeGlow: 'rgba(16,185,129,0.35)',
     activeBorder: 'rgba(16,185,129,0.5)',
@@ -48,9 +57,8 @@ const NAV_ITEMS = [
   {
     key: 'goals',
     path: '/goals',
-    label: 'Goals',
+    label: 'Vision & Goals',
     icon: '🎯',
-    // active: violet-purple
     activeBg: 'linear-gradient(135deg, #8b5cf6, #c084fc)',
     activeGlow: 'rgba(139,92,246,0.35)',
     activeBorder: 'rgba(139,92,246,0.5)',
@@ -67,6 +75,7 @@ function currentKey(pathname: string): NavKey {
   if (pathname.startsWith('/lab')) return 'lab'
   if (pathname.startsWith('/haos')) return 'haos'
   if (pathname.startsWith('/goals')) return 'goals'
+  if (pathname.startsWith('/news')) return 'news'
   return 'lab'
 }
 
@@ -75,14 +84,13 @@ export default function SiteHeader() {
   const active = currentKey(pathname)
 
   return (
-    <header className="relative w-full">
+    <header className="relative w-full" style={{ zIndex: 100, position: 'relative' }}>
       {/* Banner image */}
-      <div className="relative w-full overflow-hidden" style={{ height: '120px' }}>
+      <div className="relative w-full overflow-hidden" style={{ height: '220px' }}>
         <img
           src="/header-banner.png"
           alt="AZ-Lab"
           className="w-full h-full object-cover object-center"
-          style={{ objectPosition: '50% 40%' }}
         />
         {/* Gradient overlay — darken bottom edge so nav sits on it cleanly */}
         <div
@@ -99,13 +107,15 @@ export default function SiteHeader() {
 
       {/* Nav tab bar — sits just below banner */}
       <div
-        className="flex items-center gap-2 px-4 py-2.5 border-b"
+        className="flex items-center gap-2 px-4 py-2.5 border-b relative"
         style={{
           background: 'rgba(9,9,11,0.95)',
           backdropFilter: 'blur(12px)',
           borderColor: 'rgba(255,255,255,0.06)',
+          overflow: 'visible',
         }}
       >
+        <div className="flex items-center gap-2 flex-1">
         {NAV_ITEMS.map((item) => {
           const isActive = item.key === active
           return (
@@ -137,6 +147,8 @@ export default function SiteHeader() {
             </Link>
           )
         })}
+        </div>
+        <QuickLinksDropdown />
       </div>
     </header>
   )

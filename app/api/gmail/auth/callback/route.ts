@@ -3,7 +3,10 @@ import { saveRefreshToken } from '@/lib/gmail'
 
 // Handles OAuth callback from Google — exchanges code for tokens, saves refresh token
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = req.nextUrl
+  const { searchParams } = req.nextUrl
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'home.az-lab.dev'
+  const proto = req.headers.get('x-forwarded-proto') || 'https'
+  const origin = `${proto}://${host}`
   const code = searchParams.get('code')
   const error = searchParams.get('error')
 
@@ -20,17 +23,22 @@ export async function GET(req: NextRequest) {
 
   const redirectUri = `${origin}/api/gmail/auth/callback`
 
+  const codeVerifier = req.cookies.get('gmail_pkce_verifier')?.value
+
   try {
+    const tokenParams: Record<string, string> = {
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }
+    if (codeVerifier) tokenParams.code_verifier = codeVerifier
+
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
+      body: new URLSearchParams(tokenParams),
     })
 
     if (!res.ok) {
@@ -53,7 +61,9 @@ export async function GET(req: NextRequest) {
 
     saveRefreshToken(data.refresh_token)
 
-    return NextResponse.redirect(`${origin}/?gmail_auth=success`)
+    const successRes = NextResponse.redirect(`${origin}/?gmail_auth=success`)
+    successRes.cookies.delete('gmail_pkce_verifier')
+    return successRes
   } catch (err) {
     console.error('Gmail auth callback error:', err)
     return NextResponse.redirect(

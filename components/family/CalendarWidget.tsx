@@ -83,12 +83,39 @@ function groupByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
   return groups
 }
 
+// ── Cache helpers ─────────────────────────────────────────────────────────────
+
+const CAL_EVENTS_KEY = 'az_calendar_events'
+const CAL_LIST_KEY   = 'az_calendar_list'
+
+function readCacheEvents(): CalendarEvent[] {
+  try { return JSON.parse(localStorage.getItem(CAL_EVENTS_KEY) || '[]') } catch { return [] }
+}
+function writeCacheEvents(events: CalendarEvent[]) {
+  try { localStorage.setItem(CAL_EVENTS_KEY, JSON.stringify(events)) } catch {}
+}
+function readCacheCalendars(): CalendarInfo[] {
+  try { return JSON.parse(localStorage.getItem(CAL_LIST_KEY) || '[]') } catch { return [] }
+}
+function writeCacheCalendars(cals: CalendarInfo[]) {
+  try { localStorage.setItem(CAL_LIST_KEY, JSON.stringify(cals)) } catch {}
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CalendarWidget() {
-  const [calendars, setCalendars] = useState<CalendarInfo[]>([])
-  const [events, setEvents] = useState<CalendarEvent[]>([])
-  const [enabledCals, setEnabledCals] = useState<Set<string>>(new Set())
+  const cachedEvents = typeof window !== 'undefined' ? readCacheEvents() : []
+  const cachedCals   = typeof window !== 'undefined' ? readCacheCalendars() : []
+
+  const [calendars, setCalendars] = useState<CalendarInfo[]>(cachedCals)
+  const [events, setEvents] = useState<CalendarEvent[]>(cachedEvents)
+  const [enabledCals, setEnabledCals] = useState<Set<string>>(() => {
+    if (cachedCals.length === 0) return new Set()
+    try {
+      const disabled: string[] = JSON.parse(localStorage.getItem('calendar-disabled') || '[]')
+      return new Set(cachedCals.filter((c) => !disabled.includes(c.id)).map((c) => c.id))
+    } catch { return new Set(cachedCals.map((c) => c.id)) }
+  })
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
@@ -96,7 +123,8 @@ export default function CalendarWidget() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [modalEvent, setModalEvent] = useState<CalendarEvent | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(cachedEvents.length === 0)
+  const [refreshing, setRefreshing] = useState(false)
   const [configured, setConfigured] = useState(true)
   const [authRequired, setAuthRequired] = useState(false)
   const [showAllCalendars, setShowAllCalendars] = useState(false)
@@ -117,6 +145,7 @@ export default function CalendarWidget() {
         setConfigured(data.configured !== false)
         const cals: CalendarInfo[] = data.calendars || []
         setCalendars(cals)
+        writeCacheCalendars(cals)
 
         const stored = localStorage.getItem('calendar-disabled')
         const disabled: string[] = stored ? JSON.parse(stored) : []
@@ -144,6 +173,7 @@ export default function CalendarWidget() {
       7,
     )
 
+    setRefreshing(true)
     try {
       const res = await fetch(
         `/api/calendar?timeMin=${start.toISOString()}&timeMax=${end.toISOString()}`,
@@ -154,7 +184,9 @@ export default function CalendarWidget() {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setEvents(data.events || [])
+      const newEvents = data.events || []
+      setEvents(newEvents)
+      writeCacheEvents(newEvents)
     } catch {
       if (retries > 0) {
         await new Promise((r) => setTimeout(r, 1500))
@@ -162,6 +194,7 @@ export default function CalendarWidget() {
       }
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [currentMonth, configured])
 
@@ -374,6 +407,7 @@ export default function CalendarWidget() {
     <div>
       {/* Calendar toggles + Add button */}
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+        {refreshing && <div className="w-3 h-3 border border-zinc-600 border-t-zinc-300 rounded-full animate-spin flex-shrink-0" />}
         {visibleCalendars.map((cal) => {
           const enabled = enabledCals.has(cal.id)
           return (
