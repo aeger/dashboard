@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import Fuse from 'fuse.js'
 import FeedEditor from '@/components/shared/FeedEditor'
 import ArticleReaderPane from '@/components/shared/ArticleReaderPane'
 
@@ -52,8 +53,9 @@ export default function NewsReader() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
   const [search, setSearch] = useState('')
-  const [page, setPage] = useState(0)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [savedItems, setSavedItems] = useState<Map<string, 'saving' | 'saved' | 'error'>>(new Map())
   const [readerUrl, setReaderUrl] = useState<string | null>(null)
   const [readerItem, setReaderItem] = useState<NewsItem | null>(null)
   const [readLinks, setReadLinks] = useState<Set<string>>(new Set())
@@ -81,8 +83,8 @@ export default function NewsReader() {
 
   useEffect(() => { load() }, [reloadKey])
 
-  // Reset page when filter or search changes
-  useEffect(() => { setPage(0); setFocusedIdx(-1) }, [filter, search])
+  // Reset visible count when filter or search changes
+  useEffect(() => { setVisibleCount(PAGE_SIZE); setFocusedIdx(-1) }, [filter, search])
 
   function markRead(link: string) {
     setReadLinks((prev) => {
@@ -129,48 +131,77 @@ export default function NewsReader() {
     try { localStorage.removeItem(READ_LS_KEY) } catch {}
   }
 
+  async function saveItem(item: NewsItem, e: React.MouseEvent) {
+    e.stopPropagation()
+    const key = item.link
+    if (savedItems.get(key) === 'saving' || savedItems.get(key) === 'saved') return
+    setSavedItems((prev) => new Map(prev).set(key, 'saving'))
+    try {
+      const res = await fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.link, title: item.title, excerpt: item.summary ?? '', source: item.source }),
+      })
+      setSavedItems((prev) => new Map(prev).set(key, res.ok ? 'saved' : 'error'))
+    } catch {
+      setSavedItems((prev) => new Map(prev).set(key, 'error'))
+    }
+  }
+
   // Filtering pipeline
   const byType = filter === 'all' ? items : items.filter((i) => i.feedType === filter)
-  const q = search.trim().toLowerCase()
-  const filtered = q
-    ? byType.filter((i) =>
-        i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q)
-      )
-    : byType
+  const q = search.trim()
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
-  const safePage = Math.min(page, Math.max(0, totalPages - 1))
-  const paginated = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+  // Fuse.js instance — recreated only when byType changes
+  const fuse = useMemo(
+    () =>
+      new Fuse(byType, {
+        keys: [
+          { name: 'title',   weight: 0.6 },
+          { name: 'source',  weight: 0.25 },
+          { name: 'summary', weight: 0.15 },
+        ],
+        threshold: 0.4,       // 0 = exact, 1 = match everything
+        ignoreLocation: true, // don't penalise matches deep in the string
+        minMatchCharLength: 2,
+      }),
+    [byType]
+  )
+
+  const filtered = q ? fuse.search(q).map((r) => r.item) : byType
+
+  const visible = filtered.slice(0, visibleCount)
+  const hasMore = visibleCount < filtered.length
 
   const labCount = items.filter((i) => i.feedType === 'lab').length
   const familyCount = items.filter((i) => i.feedType === 'family').length
   const unreadCount = filtered.filter((i) => !readLinks.has(i.link)).length
 
-  // Keyboard navigation (operates on paginated view)
-  const focusedKey = focusedIdx >= 0 ? paginated[focusedIdx]?.link : null
+  // Keyboard navigation (operates on visible items)
+  const focusedKey = focusedIdx >= 0 ? visible[focusedIdx]?.link : null
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault()
-      setFocusedIdx((i) => Math.min(i + 1, paginated.length - 1))
+      setFocusedIdx((i) => Math.min(i + 1, visible.length - 1))
     } else if (e.key === 'k' || e.key === 'ArrowUp') {
       e.preventDefault()
       setFocusedIdx((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter' && focusedIdx >= 0) {
       e.preventDefault()
-      const item = paginated[focusedIdx]
+      const item = visible[focusedIdx]
       if (item) openInReader(item)
     } else if (e.key === ' ' && focusedIdx >= 0) {
       e.preventDefault()
-      const item = paginated[focusedIdx]
+      const item = visible[focusedIdx]
       if (item) handleExpand(item.link)
     } else if (e.key === 'o' && focusedIdx >= 0) {
-      const item = paginated[focusedIdx]
+      const item = visible[focusedIdx]
       if (item) { markRead(item.link); window.open(item.link, '_blank', 'noopener,noreferrer') }
     } else if (e.key === 'r' && focusedIdx >= 0) {
-      const item = paginated[focusedIdx]
+      const item = visible[focusedIdx]
       if (item) markRead(item.link)
     } else if (e.key === '/' && !readerUrl) {
       e.preventDefault()
@@ -183,7 +214,7 @@ export default function NewsReader() {
         setSearch('')
       }
     }
-  }, [paginated, focusedIdx, expanded, readerUrl, search]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible, focusedIdx, expanded, readerUrl, search]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -331,7 +362,7 @@ export default function NewsReader() {
         ) : (
           <>
             <div className="space-y-1" ref={listRef}>
-              {paginated.map((item, idx) => {
+              {visible.map((item, idx) => {
                 const isRead = readLinks.has(item.link)
                 const isExpanded = expanded === item.link
                 const isFocused = focusedKey === item.link
@@ -436,6 +467,19 @@ export default function NewsReader() {
                             Open original ↗
                           </button>
                           <button
+                            onClick={(e) => saveItem(item, e)}
+                            disabled={savedItems.get(item.link) === 'saving' || savedItems.get(item.link) === 'saved'}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              savedItems.get(item.link) === 'saved'
+                                ? 'bg-emerald-600/20 text-emerald-400 cursor-default'
+                                : savedItems.get(item.link) === 'error'
+                                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                                : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300 hover:text-white'
+                            }`}
+                          >
+                            {savedItems.get(item.link) === 'saving' ? 'Saving…' : savedItems.get(item.link) === 'saved' ? 'Saved ✓' : savedItems.get(item.link) === 'error' ? 'Failed' : 'Save'}
+                          </button>
+                          <button
                             onClick={(e) => markUnread(item.link, e)}
                             className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
                           >
@@ -455,26 +499,14 @@ export default function NewsReader() {
               })}
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t border-zinc-800">
+            {/* Load more */}
+            {hasMore && (
+              <div className="flex items-center justify-center mt-6 pt-4 border-t border-zinc-800">
                 <button
-                  onClick={() => { setPage((p) => Math.max(0, p - 1)); setFocusedIdx(-1) }}
-                  disabled={safePage === 0}
-                  className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                  className="px-4 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
                 >
-                  ← Prev
-                </button>
-                <span className="text-xs text-zinc-500">
-                  {safePage + 1} / {totalPages}
-                  <span className="text-zinc-700 ml-2">({filtered.length} articles)</span>
-                </span>
-                <button
-                  onClick={() => { setPage((p) => Math.min(totalPages - 1, p + 1)); setFocusedIdx(-1) }}
-                  disabled={safePage >= totalPages - 1}
-                  className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Next →
+                  Load more <span className="text-zinc-600 ml-1">({filtered.length - visibleCount} remaining)</span>
                 </button>
               </div>
             )}
