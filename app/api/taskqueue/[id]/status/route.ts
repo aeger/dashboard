@@ -122,6 +122,14 @@ export async function POST(
   const updated: TaskItem[] = await patchRes.json()
   const updatedTask = updated[0]
 
+  // If no rows returned, the PATCH matched nothing (RLS or wrong ID)
+  if (!updatedTask) {
+    return NextResponse.json(
+      { error: 'Update matched no rows — task may be protected by RLS or ID is wrong' },
+      { status: 422 }
+    )
+  }
+
   // Auto-notify Jeff when task enters an attention-required status
   if (NOTIFY_STATUSES.has(newStatus)) {
     const ctx = updatedTask?.context ?? updatedContext

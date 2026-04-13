@@ -37,12 +37,12 @@ const PRIORITY_LABEL: Record<number, { label: string; cls: string }> = {
 const SECTIONS = [
   { key: 'jeff_urgent',   label: 'Needs Jeff',   statuses: ['pending_jeff_action'],         headerCls: 'text-rose-400',    urgent: true  },
   { key: 'review',        label: 'Review',        statuses: ['review_needed'],                headerCls: 'text-orange-400',  urgent: true  },
+  { key: 'failed',        label: 'Failed',        statuses: ['failed', 'escalated'],          headerCls: 'text-red-400',     urgent: false },
   { key: 'blocked',       label: 'Blocked',       statuses: ['blocked'],                      headerCls: 'text-amber-400',   urgent: false },
+  { key: 'waiting',       label: 'Waiting',       statuses: ['delegated', 'pending_eval'],    headerCls: 'text-indigo-400',  urgent: false },
   { key: 'jeff_working',  label: 'Jeff Working',  statuses: ['in_progress_jeff'],             headerCls: 'text-cyan-400',    urgent: false },
   { key: 'agent_running', label: 'Agent Running', statuses: ['in_progress_agent', 'claimed'], headerCls: 'text-blue-400',    urgent: false },
   { key: 'ready',         label: 'Ready',         statuses: ['ready', 'pending', 'backlog'],  headerCls: 'text-zinc-400',    urgent: false },
-  { key: 'waiting',       label: 'Waiting',       statuses: ['delegated', 'pending_eval'],    headerCls: 'text-indigo-400',  urgent: false },
-  { key: 'failed',        label: 'Failed',        statuses: ['failed', 'escalated'],          headerCls: 'text-red-400',     urgent: false },
   { key: 'completed',     label: 'Completed',     statuses: ['completed'],                    headerCls: 'text-emerald-400', urgent: false },
   { key: 'cancelled',     label: 'Cancelled',     statuses: ['cancelled', 'expired'],         headerCls: 'text-zinc-600',    urgent: false },
 ]
@@ -315,6 +315,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh }: {
   const [jeffNotes, setJeffNotes] = useState((task.context?.jeff_notes ?? '') as string)
   const [contextSummary, setContextSummary] = useState((task.context?.context_summary ?? '') as string)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [exportMenu, setExportMenu] = useState(false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -331,24 +332,29 @@ function DetailPanel({ task: initialTask, onClose, onRefresh }: {
 
   async function doAction(action: { label: string; status?: string; special?: string }) {
     setActionBusy(action.label)
+    setActionError(null)
     try {
       if (action.special === 'archive') {
         const res = await fetch(`/api/taskqueue/${task.id}/archive`, { method: 'POST' })
         if (res.ok) { onRefresh(); onClose() }
+        else setActionError('Archive failed')
       } else if (action.status) {
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: action.status }),
         })
-        if (res.ok) {
-          const data = await res.json()
-          setTask(data.task ?? { ...task, status: action.status })
+        const data = await res.json()
+        if (res.ok && data.task) {
+          setTask(data.task)
           onRefresh()
+        } else {
+          setActionError(data.error ?? `Failed (${res.status})`)
         }
       }
     } catch (err) {
       console.error('doAction failed:', err)
+      setActionError('Network error')
     } finally { setActionBusy(null) }
   }
 
@@ -555,6 +561,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh }: {
       {/* Actions */}
       {actions.length > 0 && (
         <div className="flex-shrink-0 p-3 border-t border-zinc-800/60 space-y-1.5">
+          {actionError && (
+            <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
+              {actionError}
+            </div>
+          )}
           {actions.map(action => (
             <button
               key={action.label}
@@ -631,15 +642,17 @@ function ContextMenu({ menu, onClose, onCopyId, onMarkExpired, onNeedsAction, on
 
 // ── Task row ──────────────────────────────────────────────────────────────────
 
-function TaskRow({ task, selected, onClick, onContextMenu }: {
+function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
   task: TaskItem
   selected: boolean
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  onNeedsAction?: (t: TaskItem) => void
 }) {
   const c = getStatusColor(task.status)
   const urgent = isJeffUrgent(task.status)
   const running = isRunning(task.status)
+  const showNeedsAction = onNeedsAction && ['in_progress_agent', 'claimed', 'failed', 'escalated', 'waiting', 'delegated', 'pending_eval'].includes(task.status)
 
   return (
     <div
@@ -699,10 +712,19 @@ function TaskRow({ task, selected, onClick, onContextMenu }: {
       </div>
 
       {/* Right meta */}
-      <div className="flex-shrink-0 text-right">
+      <div className="flex-shrink-0 text-right flex flex-col items-end gap-1">
         <div className="text-[10px] text-zinc-600 group-hover:text-zinc-500">{timeAgo(task.updated_at)}</div>
         {isRunning(task.status) && task.claimed_at && (
-          <div className="text-[10px] text-blue-400 mt-0.5">{elapsed(task.claimed_at)}</div>
+          <div className="text-[10px] text-blue-400">{elapsed(task.claimed_at)}</div>
+        )}
+        {showNeedsAction && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onNeedsAction!(task) }}
+            className="text-[10px] px-1.5 py-0.5 rounded bg-rose-900/40 border border-rose-800/40 text-rose-300 hover:bg-rose-900/70 transition-colors opacity-0 group-hover:opacity-100"
+            title="Needs My Action"
+          >
+            ! Jeff
+          </button>
         )}
       </div>
     </div>
@@ -713,12 +735,13 @@ function TaskRow({ task, selected, onClick, onContextMenu }: {
 
 type SectionDef = typeof SECTIONS[number] & { urgent?: boolean }
 
-function Section({ section, tasks, selected, onSelect, onContextMenu, defaultOpen = true }: {
+function Section({ section, tasks, selected, onSelect, onContextMenu, onNeedsAction, defaultOpen = true }: {
   section: SectionDef
   tasks: TaskItem[]
   selected: string | null
   onSelect: (t: TaskItem) => void
   onContextMenu: (e: React.MouseEvent, t: TaskItem) => void
+  onNeedsAction: (t: TaskItem) => void
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -750,6 +773,7 @@ function Section({ section, tasks, selected, onSelect, onContextMenu, defaultOpe
               selected={selected === t.id}
               onClick={() => onSelect(t)}
               onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, t) }}
+              onNeedsAction={onNeedsAction}
             />
           ))}
         </div>
@@ -1056,7 +1080,8 @@ export default function TaskQueueExpanded() {
               selected={selected?.id ?? null}
               onSelect={t => setSelected(prev => prev?.id === t.id ? null : t)}
               onContextMenu={(e, t) => setCtxMenu({ x: e.clientX, y: e.clientY, task: t })}
-              defaultOpen={['jeff_urgent', 'review', 'jeff_working', 'agent_running'].includes(section.key)}
+              onNeedsAction={handleNeedsAction}
+              defaultOpen={['jeff_urgent', 'review', 'failed', 'waiting', 'jeff_working', 'agent_running'].includes(section.key)}
             />
           ))}
           {filteredTasks.length === 0 && (
