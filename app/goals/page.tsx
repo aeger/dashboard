@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import LabSubNav from '@/components/lab/LabSubNav'
 import type { Goal } from '@/app/api/goals/route'
 
@@ -819,6 +821,119 @@ function SectionHeader({ title, collapsed, onToggle, count }: { title: string; c
   )
 }
 
+// ── markdown toolbar ───────────────────────────────────────────────────────────
+
+interface MarkdownToolbarProps {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  value: string
+  onChange: (v: string) => void
+}
+
+const MD_TOOLS = [
+  { label: 'B',   title: 'Bold',          wrap: ['**', '**'],   placeholder: 'bold text',    style: 'font-bold' },
+  { label: 'I',   title: 'Italic',        wrap: ['_', '_'],     placeholder: 'italic text',  style: 'italic' },
+  { label: 'S',   title: 'Strikethrough', wrap: ['~~', '~~'],   placeholder: 'struck text',  style: 'line-through' },
+  { label: '<>',  title: 'Inline code',   wrap: ['`', '`'],     placeholder: 'code',         style: 'font-mono text-[10px]' },
+  { label: '```', title: 'Code block',    wrap: ['```\n', '\n```'], placeholder: 'code block', style: 'font-mono text-[9px]' },
+  { label: 'H2',  title: 'Heading 2',     prefix: '## ',        style: 'font-semibold' },
+  { label: 'H3',  title: 'Heading 3',     prefix: '### ',       style: '' },
+  { label: '—',   title: 'Divider',       insert: '\n---\n',    style: '' },
+  { label: '•',   title: 'Bullet list',   prefix: '- ',         style: '' },
+  { label: '1.',  title: 'Numbered list', prefix: '1. ',        style: '' },
+  { label: '[ ]', title: 'Task item',     prefix: '- [ ] ',     style: 'font-mono text-[9px]' },
+  { label: '🔗',  title: 'Link',          wrap: ['[', '](url)'], placeholder: 'link text',  style: '' },
+] as const
+
+function applyMarkdown(
+  tool: (typeof MD_TOOLS)[number],
+  textarea: HTMLTextAreaElement,
+  value: string,
+  onChange: (v: string) => void,
+) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = value.slice(start, end)
+
+  let newValue = value
+  let newCursorStart = start
+  let newCursorEnd = end
+
+  if ('insert' in tool) {
+    newValue = value.slice(0, start) + tool.insert + value.slice(end)
+    newCursorStart = newCursorEnd = start + tool.insert.length
+  } else if ('prefix' in tool) {
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    newValue = value.slice(0, lineStart) + tool.prefix + value.slice(lineStart)
+    newCursorStart = start + tool.prefix.length
+    newCursorEnd = end + tool.prefix.length
+  } else if ('wrap' in tool) {
+    const [open, close] = tool.wrap
+    const text = selected || tool.placeholder
+    newValue = value.slice(0, start) + open + text + close + value.slice(end)
+    if (selected) {
+      newCursorStart = start + open.length
+      newCursorEnd = start + open.length + text.length
+    } else {
+      newCursorStart = start + open.length
+      newCursorEnd = start + open.length + text.length
+    }
+  }
+
+  onChange(newValue)
+  requestAnimationFrame(() => {
+    textarea.focus()
+    textarea.setSelectionRange(newCursorStart, newCursorEnd)
+  })
+}
+
+function MarkdownToolbar({ textareaRef, value, onChange }: MarkdownToolbarProps) {
+  return (
+    <div className="flex items-center gap-0.5 flex-wrap px-2 py-1.5 bg-zinc-800/60 border border-zinc-700/60 border-b-0 rounded-t-md">
+      {MD_TOOLS.map((tool) => (
+        <button
+          key={tool.title}
+          type="button"
+          title={tool.title}
+          onClick={() => textareaRef.current && applyMarkdown(tool, textareaRef.current, value, onChange)}
+          className={`text-[10px] px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 transition-colors ${tool.style}`}
+        >
+          {tool.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── markdown preview ───────────────────────────────────────────────────────────
+
+function MarkdownPreview({ content }: { content: string }) {
+  if (!content.trim()) {
+    return <p className="text-xs text-zinc-600 italic">Nothing to preview yet…</p>
+  }
+  return (
+    <div className="prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed
+      [&_h1]:text-base [&_h1]:font-bold [&_h1]:text-zinc-100 [&_h1]:mb-2
+      [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-zinc-200 [&_h2]:mb-1.5
+      [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:text-zinc-300 [&_h3]:mb-1
+      [&_p]:mb-2 [&_p]:leading-relaxed
+      [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-2
+      [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-2
+      [&_li]:mb-0.5
+      [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-purple-300 [&_code]:font-mono [&_code]:text-[10px]
+      [&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:mb-2 [&_pre]:overflow-x-auto
+      [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-green-300
+      [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-600 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-500 [&_blockquote]:italic
+      [&_hr]:border-zinc-700 [&_hr]:my-3
+      [&_a]:text-purple-400 [&_a]:underline
+      [&_strong]:text-zinc-100 [&_strong]:font-semibold
+      [&_input[type=checkbox]]:mr-1.5
+      [&_table]:w-full [&_table]:text-xs [&_td]:px-2 [&_td]:py-1 [&_td]:border [&_td]:border-zinc-700 [&_th]:px-2 [&_th]:py-1 [&_th]:border [&_th]:border-zinc-700 [&_th]:bg-zinc-800/60 [&_th]:font-semibold
+    ">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  )
+}
+
 // ── add goal modal ─────────────────────────────────────────────────────────────
 
 interface AddGoalPanelProps {
@@ -840,6 +955,10 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
+  const [notesTab, setNotesTab] = useState<'edit' | 'preview'>('edit')
+  const descRef = useRef<HTMLTextAreaElement>(null)
+  const notesRef = useRef<HTMLTextAreaElement>(null)
 
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose()
@@ -883,6 +1002,8 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
 
   const inputCls = 'w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600'
   const labelCls = 'text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1'
+  const tabBtn = (active: boolean) =>
+    `text-[10px] px-2.5 py-1 rounded-t font-medium transition-colors ${active ? 'bg-zinc-900 text-zinc-200 border border-zinc-700 border-b-zinc-900' : 'text-zinc-500 hover:text-zinc-300'}`
 
   return (
     <div
@@ -891,7 +1012,7 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
       onClick={handleBackdrop}
     >
       <div
-        className="w-full max-w-md bg-zinc-950 border-l border-zinc-800 flex flex-col h-full"
+        className="w-full max-w-2xl bg-zinc-950 border-l border-zinc-800 flex flex-col h-full"
         style={{ animation: 'slideInRight 0.2s ease-out' }}
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
@@ -899,35 +1020,56 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 p-4 space-y-4 overflow-y-auto">
-          <div>
-            <label className={labelCls}>Level</label>
-            <select
-              value={form.level}
-              onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))}
-              className={inputCls}
-            >
-              <option value="vision">Vision</option>
-              <option value="strategy">Strategy</option>
-              <option value="milestone">Milestone</option>
-              <option value="objective">Objective</option>
-            </select>
+        <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
+          {/* Row: Level + Status + Priority */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className={labelCls}>Level</label>
+              <select value={form.level} onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))} className={inputCls}>
+                <option value="vision">Vision</option>
+                <option value="strategy">Strategy</option>
+                <option value="milestone">Milestone</option>
+                <option value="objective">Objective</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Status</label>
+              <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Goal['status'] }))} className={inputCls}>
+                <option value="active">Active</option>
+                <option value="planned">Planned</option>
+                <option value="paused">Paused</option>
+                <option value="blocked">Blocked</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Priority</label>
+              <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))} className={inputCls}>
+                <option value={0}>0 — Critical</option>
+                <option value={1}>1 — High</option>
+                <option value={2}>2 — Normal</option>
+                <option value={3}>3 — Low</option>
+              </select>
+            </div>
           </div>
 
-          <div>
-            <label className={labelCls}>Parent Goal (optional)</label>
-            <select
-              value={form.parent_id}
-              onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}
-              className={inputCls}
-            >
-              <option value="">— None —</option>
-              {flat.map((g) => (
-                <option key={g.id} value={g.id}>[{g.level}] {g.title}</option>
-              ))}
-            </select>
+          {/* Row: Parent + Target Date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Parent Goal (optional)</label>
+              <select value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))} className={inputCls}>
+                <option value="">— None —</option>
+                {flat.map((g) => (
+                  <option key={g.id} value={g.id}>[{g.level}] {g.title}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Target Date</label>
+              <input type="date" value={form.target_date} onChange={(e) => setForm((f) => ({ ...f, target_date: e.target.value }))} className={inputCls} />
+            </div>
           </div>
 
+          {/* Title */}
           <div>
             <label className={labelCls}>Title *</label>
             <input
@@ -940,72 +1082,67 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
             />
           </div>
 
+          {/* Description with markdown toolbar + preview */}
           <div>
-            <label className={labelCls}>Description</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="Optional description…"
-              rows={3}
-              className={inputCls + ' resize-none'}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Goal['status'] }))}
-                className={inputCls}
-              >
-                <option value="active">Active</option>
-                <option value="planned">Planned</option>
-                <option value="paused">Paused</option>
-                <option value="blocked">Blocked</option>
-              </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Description</label>
+              <div className="flex gap-0.5 -mb-px relative z-10">
+                <button type="button" className={tabBtn(descTab === 'edit')} onClick={() => setDescTab('edit')}>Edit</button>
+                <button type="button" className={tabBtn(descTab === 'preview')} onClick={() => setDescTab('preview')}>Preview</button>
+              </div>
             </div>
-            <div>
-              <label className={labelCls}>Priority</label>
-              <select
-                value={form.priority}
-                onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
-                className={inputCls}
-              >
-                <option value={0}>0 — Critical</option>
-                <option value={1}>1 — High</option>
-                <option value={2}>2 — Normal</option>
-                <option value={3}>3 — Low</option>
-              </select>
+            {descTab === 'edit' ? (
+              <>
+                <MarkdownToolbar textareaRef={descRef} value={form.description} onChange={(v) => setForm((f) => ({ ...f, description: v }))} />
+                <textarea
+                  ref={descRef}
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Describe the goal… (supports **markdown**)"
+                  rows={10}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
+                />
+              </>
+            ) : (
+              <div className="min-h-[220px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+                <MarkdownPreview content={form.description} />
+              </div>
+            )}
+          </div>
+
+          {/* Notes with markdown toolbar + preview */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Notes</label>
+              <div className="flex gap-0.5 -mb-px relative z-10">
+                <button type="button" className={tabBtn(notesTab === 'edit')} onClick={() => setNotesTab('edit')}>Edit</button>
+                <button type="button" className={tabBtn(notesTab === 'preview')} onClick={() => setNotesTab('preview')}>Preview</button>
+              </div>
             </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Target Date</label>
-            <input
-              type="date"
-              value={form.target_date}
-              onChange={(e) => setForm((f) => ({ ...f, target_date: e.target.value }))}
-              className={inputCls}
-            />
-          </div>
-
-          <div>
-            <label className={labelCls}>Notes</label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Internal notes…"
-              rows={2}
-              className={inputCls + ' resize-none'}
-            />
+            {notesTab === 'edit' ? (
+              <>
+                <MarkdownToolbar textareaRef={notesRef} value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} />
+                <textarea
+                  ref={notesRef}
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Internal notes, blockers, context… (supports **markdown**)"
+                  rows={5}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
+                />
+              </>
+            ) : (
+              <div className="min-h-[100px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+                <MarkdownPreview content={form.notes} />
+              </div>
+            )}
           </div>
 
           {error && (
             <p className="text-xs text-red-400 border border-red-900/50 rounded-md px-3 py-2 bg-red-950/20">{error}</p>
           )}
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2 pt-2 pb-4">
             <button
               type="submit"
               disabled={saving}
