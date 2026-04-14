@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import type { ArticleIntel } from '@/lib/news-intel'
 
 interface ArticleData {
   url: string
@@ -18,6 +19,7 @@ interface Props {
   title?: string
   source?: string
   pubDate?: string
+  intel?: ArticleIntel
   onClose: () => void
 }
 
@@ -32,13 +34,26 @@ function formatAge(dateStr?: string): string {
   } catch { return '' }
 }
 
-export default function ArticleReaderPane({ url, title, source, pubDate, onClose }: Props) {
+/** Strip HTML tags for voice readout */
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+export default function ArticleReaderPane({ url, title, source, pubDate, intel, onClose }: Props) {
   const [article, setArticle] = useState<ArticleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [speaking, setSpeaking] = useState(false)
+  const [speechAvailable, setSpeechAvailable] = useState(false)
   const paneRef = useRef<HTMLDivElement>(null)
   const prevUrl = useRef<string | null>(null)
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
+
+  // Check speech synthesis availability
+  useEffect(() => {
+    setSpeechAvailable('speechSynthesis' in window)
+  }, [])
 
   useEffect(() => {
     if (!url || url === prevUrl.current) return
@@ -47,6 +62,12 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
     setError(null)
     setLoading(true)
     setSaveState('idle')
+
+    // Stop any ongoing speech when navigating to a new article
+    if (speaking) {
+      window.speechSynthesis?.cancel()
+      setSpeaking(false)
+    }
 
     fetch(`/api/article?url=${encodeURIComponent(url)}`)
       .then((r) => r.json())
@@ -59,10 +80,25 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [url])
+  }, [url]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset save state when url changes
   useEffect(() => { setSaveState('idle') }, [url])
+
+  // Stop speech when pane closes
+  useEffect(() => {
+    if (!url && speaking) {
+      window.speechSynthesis?.cancel()
+      setSpeaking(false)
+    }
+  }, [url]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel()
+    }
+  }, [])
 
   // Escape key closes pane
   useEffect(() => {
@@ -100,6 +136,39 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
     } catch {
       setSaveState('error')
     }
+  }
+
+  function toggleVoice() {
+    if (!speechAvailable) return
+
+    if (speaking) {
+      window.speechSynthesis.cancel()
+      setSpeaking(false)
+      return
+    }
+
+    // Build text to read: AI tldr → article excerpt → title fallback
+    let text = ''
+    if (intel?.tldr) {
+      text = `${article?.title ?? title ?? ''}. ${intel.tldr}`
+    } else if (article) {
+      // Read title + first ~800 chars of stripped content
+      const bodyText = stripHtml(article.content).slice(0, 800)
+      text = `${article.title}. ${bodyText}`
+    } else if (title) {
+      text = title
+    }
+
+    if (!text.trim()) return
+
+    const utterance = new SpeechSynthesisUtterance(text)
+    utteranceRef.current = utterance
+    utterance.rate = 0.92
+    utterance.pitch = 1
+    utterance.onend = () => setSpeaking(false)
+    utterance.onerror = () => setSpeaking(false)
+    window.speechSynthesis.speak(utterance)
+    setSpeaking(true)
   }
 
   const open = url !== null
@@ -147,6 +216,27 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
               </span>
             )}
           </div>
+          {/* Voice readout button */}
+          {speechAvailable && (url || title) && (
+            <button
+              onClick={toggleVoice}
+              title={speaking ? 'Stop reading aloud' : 'Read aloud (TL;DR or article)'}
+              className={`flex items-center gap-1 text-xs transition-colors flex-shrink-0 px-2 py-1 rounded ${
+                speaking
+                  ? 'text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              {speaking ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse inline-block" />
+                  Stop
+                </>
+              ) : (
+                '🔊'
+              )}
+            </button>
+          )}
           <button
             onClick={handleSaveToQueue}
             disabled={saveState === 'saving' || saveState === 'saved'}
@@ -173,6 +263,15 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
             </a>
           )}
         </div>
+
+        {/* AI TL;DR strip (shown when intel available) */}
+        {intel?.tldr && open && (
+          <div className="flex items-start gap-2 px-5 py-2 border-b border-purple-500/20 bg-purple-500/5 flex-shrink-0">
+            <span className="text-[10px] font-semibold text-purple-400 flex-shrink-0 mt-0.5">AI</span>
+            <p className="text-xs text-zinc-300 leading-relaxed italic flex-1">{intel.tldr}</p>
+            <span className="text-[10px] text-zinc-600 flex-shrink-0 mt-0.5">{intel.score}/10</span>
+          </div>
+        )}
 
         {/* Content area */}
         <div className="flex-1 overflow-y-auto">
@@ -234,7 +333,7 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
               />
 
               {/* Footer actions */}
-              <div className="flex items-center gap-3 pt-4 border-t border-zinc-700/40">
+              <div className="flex items-center gap-3 pt-4 border-t border-zinc-700/40 flex-wrap">
                 {url && (
                   <a
                     href={url}
@@ -258,6 +357,18 @@ export default function ArticleReaderPane({ url, title, source, pubDate, onClose
                 >
                   {saveLabel}
                 </button>
+                {speechAvailable && (
+                  <button
+                    onClick={toggleVoice}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      speaking
+                        ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/20'
+                        : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300 hover:text-white'
+                    }`}
+                  >
+                    {speaking ? '⏹ Stop reading' : '🔊 Read aloud'}
+                  </button>
+                )}
                 <span className="text-[10px] text-zinc-700 ml-auto">cached {formatAge(article.cachedAt)}</span>
               </div>
             </div>
