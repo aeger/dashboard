@@ -4,20 +4,24 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import Fuse from 'fuse.js'
 import FeedEditor from '@/components/shared/FeedEditor'
 import ArticleReaderPane from '@/components/shared/ArticleReaderPane'
+import NewsDigest from '@/components/shared/NewsDigest'
+import type { DigestSection } from '@/lib/news-intel'
+import type { ArticleIntel } from '@/lib/news-intel'
 
 interface NewsItem {
-  title: string
-  link: string
-  pubDate: string
-  source: string
+  title:    string
+  link:     string
+  pubDate:  string
+  source:   string
   summary?: string
   imageUrl?: string
   feedType?: 'lab' | 'family'
+  intel?:   ArticleIntel | null
 }
 
-const READ_LS_KEY = 'az_news_read'
+const READ_LS_KEY    = 'az_news_read'
 const MAX_READ_STORED = 500
-const PAGE_SIZE = 30
+const PAGE_SIZE       = 30
 
 function getReadSet(): Set<string> {
   try {
@@ -37,43 +41,63 @@ function formatAge(dateStr: string): string {
   if (!dateStr) return ''
   try {
     const mins = Math.round((Date.now() - new Date(dateStr).getTime()) / 60000)
-    if (mins < 1) return 'just now'
-    if (mins < 60) return `${mins}m ago`
+    if (mins < 1)    return 'just now'
+    if (mins < 60)   return `${mins}m ago`
     if (mins < 1440) return `${Math.round(mins / 60)}h ago`
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   } catch { return '' }
 }
 
-type FilterType = 'all' | 'lab' | 'family'
+/** Colored dot indicating article importance score */
+function ImportanceDot({ score }: { score: number }) {
+  const color =
+    score >= 8 ? 'bg-red-500'    :
+    score >= 6 ? 'bg-orange-400' :
+    score >= 4 ? 'bg-yellow-500/70' :
+                 'bg-zinc-700'
+  return (
+    <span
+      className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 mt-[5px] ${color}`}
+      title={`Importance ${score}/10`}
+    />
+  )
+}
+
+type FilterType  = 'all' | 'lab' | 'family'
+type ViewMode    = 'list' | 'digest'
 type EditorState = { open: boolean; type: 'lab' | 'family' }
 
 export default function NewsReader() {
-  const [items, setItems] = useState<NewsItem[]>([])
-  const [cachedAt, setCachedAt] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<FilterType>('all')
-  const [search, setSearch] = useState('')
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [savedItems, setSavedItems] = useState<Map<string, 'saving' | 'saved' | 'error'>>(new Map())
-  const [readerUrl, setReaderUrl] = useState<string | null>(null)
-  const [readerItem, setReaderItem] = useState<NewsItem | null>(null)
-  const [readLinks, setReadLinks] = useState<Set<string>>(new Set())
-  const [editor, setEditor] = useState<EditorState>({ open: false, type: 'lab' })
-  const [reloadKey, setReloadKey] = useState(0)
-  const [focusedIdx, setFocusedIdx] = useState<number>(-1)
-  const listRef = useRef<HTMLDivElement>(null)
+  const [items,          setItems]          = useState<NewsItem[]>([])
+  const [cachedAt,       setCachedAt]       = useState<string | null>(null)
+  const [loading,        setLoading]        = useState(true)
+  const [filter,         setFilter]         = useState<FilterType>('all')
+  const [topicFilter,    setTopicFilter]    = useState<string | null>(null)
+  const [search,         setSearch]         = useState('')
+  const [visibleCount,   setVisibleCount]   = useState(PAGE_SIZE)
+  const [expanded,       setExpanded]       = useState<string | null>(null)
+  const [savedItems,     setSavedItems]     = useState<Map<string, 'saving' | 'saved' | 'error'>>(new Map())
+  const [readerUrl,      setReaderUrl]      = useState<string | null>(null)
+  const [readerItem,     setReaderItem]     = useState<NewsItem | null>(null)
+  const [readLinks,      setReadLinks]      = useState<Set<string>>(new Set())
+  const [editor,         setEditor]         = useState<EditorState>({ open: false, type: 'lab' })
+  const [reloadKey,      setReloadKey]      = useState(0)
+  const [focusedIdx,     setFocusedIdx]     = useState<number>(-1)
+  const [viewMode,       setViewMode]       = useState<ViewMode>('list')
+  const [analyzing,      setAnalyzing]      = useState(false)
+  const [digest,         setDigest]         = useState<DigestSection[]>([])
+  const [analyzedAt,     setAnalyzedAt]     = useState<string | null>(null)
+  const [topics,         setTopics]         = useState<string[]>([])
+  const listRef   = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Load read state from localStorage on mount
-  useEffect(() => {
-    setReadLinks(getReadSet())
-  }, [])
+  useEffect(() => { setReadLinks(getReadSet()) }, [])
 
   async function load() {
     setLoading(true)
     try {
-      const res = await fetch('/api/news?type=all')
+      const res  = await fetch('/api/news?type=all')
       const data = await res.json()
       setItems(data.items ?? [])
       setCachedAt(data.cachedAt ?? null)
@@ -84,7 +108,32 @@ export default function NewsReader() {
   useEffect(() => { load() }, [reloadKey])
 
   // Reset visible count when filter or search changes
-  useEffect(() => { setVisibleCount(PAGE_SIZE); setFocusedIdx(-1) }, [filter, search])
+  useEffect(() => { setVisibleCount(PAGE_SIZE); setFocusedIdx(-1) }, [filter, topicFilter, search])
+
+  async function analyze() {
+    setAnalyzing(true)
+    try {
+      const res  = await fetch('/api/news/analyze')
+      const data = await res.json()
+
+      if (data.items) {
+        setItems(data.items)
+      }
+
+      if (data.digest)     setDigest(data.digest)
+      if (data.analyzedAt) setAnalyzedAt(data.analyzedAt)
+      if (data.clusters) {
+        setTopics((data.clusters as Array<{ topic: string }>).map((c) => c.topic))
+      }
+    } catch (err) {
+      console.error('analyze failed', err)
+    }
+    setAnalyzing(false)
+  }
+
+  function getItemIntel(item: NewsItem): ArticleIntel | undefined {
+    return item.intel ?? undefined
+  }
 
   function markRead(link: string) {
     setReadLinks((prev) => {
@@ -111,13 +160,17 @@ export default function NewsReader() {
     markRead(item.link)
   }
 
-  function handleExpand(link: string) {
-    if (expanded === link) {
-      setExpanded(null)
-    } else {
-      setExpanded(link)
-      markRead(link)
+  function openInReaderByParts(url: string, title: string, source: string, pubDate: string) {
+    const found = items.find((i) => i.link === url)
+    if (found) { openInReader(found) } else {
+      setReaderUrl(url)
+      setReaderItem({ title, link: url, source, pubDate })
+      markRead(url)
     }
+  }
+
+  function handleExpand(link: string) {
+    if (expanded === link) { setExpanded(null) } else { setExpanded(link); markRead(link) }
   }
 
   function openArticle(e: React.MouseEvent, link: string) {
@@ -138,9 +191,9 @@ export default function NewsReader() {
     setSavedItems((prev) => new Map(prev).set(key, 'saving'))
     try {
       const res = await fetch('/api/save-article', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: item.link, title: item.title, excerpt: item.summary ?? '', source: item.source }),
+        body:    JSON.stringify({ url: item.link, title: item.title, excerpt: item.summary ?? '', source: item.source }),
       })
       setSavedItems((prev) => new Map(prev).set(key, res.ok ? 'saved' : 'error'))
     } catch {
@@ -150,38 +203,33 @@ export default function NewsReader() {
 
   // Filtering pipeline
   const byType = filter === 'all' ? items : items.filter((i) => i.feedType === filter)
+  const byTopic = topicFilter
+    ? byType.filter((i) => getItemIntel(i)?.topic === topicFilter)
+    : byType
   const q = search.trim()
 
-  // Fuse.js instance — recreated only when byType changes
   const fuse = useMemo(
-    () =>
-      new Fuse(byType, {
-        keys: [
-          { name: 'title',   weight: 0.6 },
-          { name: 'source',  weight: 0.25 },
-          { name: 'summary', weight: 0.15 },
-        ],
-        threshold: 0.4,       // 0 = exact, 1 = match everything
-        ignoreLocation: true, // don't penalise matches deep in the string
-        minMatchCharLength: 2,
-      }),
-    [byType]
+    () => new Fuse(byTopic, {
+      keys:             [{ name: 'title', weight: 0.6 }, { name: 'source', weight: 0.25 }, { name: 'summary', weight: 0.15 }],
+      threshold:        0.4,
+      ignoreLocation:   true,
+      minMatchCharLength: 2,
+    }),
+    [byTopic]
   )
 
-  const filtered = q ? fuse.search(q).map((r) => r.item) : byType
-
-  const visible = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-
-  const labCount = items.filter((i) => i.feedType === 'lab').length
-  const familyCount = items.filter((i) => i.feedType === 'family').length
-  const unreadCount = filtered.filter((i) => !readLinks.has(i.link)).length
-
-  // Keyboard navigation (operates on visible items)
-  const focusedKey = focusedIdx >= 0 ? visible[focusedIdx]?.link : null
+  const filtered     = q ? fuse.search(q).map((r) => r.item) : byTopic
+  const visible      = filtered.slice(0, visibleCount)
+  const hasMore      = visibleCount < filtered.length
+  const labCount     = items.filter((i) => i.feedType === 'lab').length
+  const familyCount  = items.filter((i) => i.feedType === 'family').length
+  const unreadCount  = filtered.filter((i) => !readLinks.has(i.link)).length
+  const hasIntel     = items.some((i) => i.intel)
+  const focusedKey   = focusedIdx >= 0 ? visible[focusedIdx]?.link : null
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    if (viewMode !== 'list') return
 
     if (e.key === 'j' || e.key === 'ArrowDown') {
       e.preventDefault()
@@ -207,21 +255,16 @@ export default function NewsReader() {
       e.preventDefault()
       searchRef.current?.focus()
     } else if (e.key === 'Escape') {
-      if (readerUrl) {
-        setReaderUrl(null)
-        setReaderItem(null)
-      } else if (search) {
-        setSearch('')
-      }
+      if (readerUrl) { setReaderUrl(null); setReaderItem(null) }
+      else if (search) setSearch('')
     }
-  }, [visible, focusedIdx, expanded, readerUrl, search]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible, focusedIdx, expanded, readerUrl, search, viewMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
 
-  // Scroll focused item into view
   useEffect(() => {
     if (focusedIdx >= 0 && listRef.current) {
       const el = listRef.current.children[focusedIdx] as HTMLElement | undefined
@@ -254,7 +297,7 @@ export default function NewsReader() {
           <div className="flex items-center gap-3">
             <span className="text-lg">📰</span>
             <h1 className="text-sm font-semibold text-zinc-300 tracking-wide uppercase">News Feed</h1>
-            {!loading && unreadCount > 0 && (
+            {!loading && unreadCount > 0 && viewMode === 'list' && (
               <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-medium">
                 {unreadCount} unread
               </span>
@@ -264,6 +307,30 @@ export default function NewsReader() {
             )}
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {/* AI Analyze button */}
+            <button
+              onClick={analyze}
+              disabled={analyzing}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                analyzing
+                  ? 'border-purple-700/40 text-purple-500/60 cursor-wait'
+                  : hasIntel
+                  ? 'border-purple-700/40 text-purple-400 hover:border-purple-500/60 hover:text-purple-300'
+                  : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+              }`}
+              title="Analyze with Nemotron — adds TL;DR, importance scores, topic clusters"
+            >
+              {analyzing ? (
+                <>
+                  <span className="w-3 h-3 border border-purple-500 border-t-transparent rounded-full animate-spin" />
+                  Analyzing…
+                </>
+              ) : hasIntel ? (
+                '✦ Re-analyze'
+              ) : (
+                '✦ AI Analyze'
+              )}
+            </button>
             <button
               onClick={() => setEditor({ open: true, type: 'lab' })}
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -286,229 +353,319 @@ export default function NewsReader() {
           </div>
         </div>
 
-        {/* Search bar */}
-        <div className="mb-4">
-          <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 text-xs select-none pointer-events-none">
-              /
-            </span>
-            <input
-              ref={searchRef}
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search articles… (press / to focus)"
-              className="w-full pl-7 pr-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors text-xs"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-          {search && (
-            <p className="text-[10px] text-zinc-600 mt-1 ml-1">
-              {filtered.length} result{filtered.length !== 1 ? 's' : ''} for &ldquo;{search}&rdquo;
-            </p>
-          )}
-        </div>
-
-        {/* Filter tabs */}
+        {/* View mode tabs */}
         <div className="flex items-center gap-1 mb-4">
-          {(['all', 'lab', 'family'] as FilterType[]).map((f) => {
-            const count = f === 'all' ? items.length : f === 'lab' ? labCount : familyCount
-            const active = filter === f
-            const activeClass = f === 'lab'
-              ? 'bg-orange-500/15 text-orange-400 border-orange-500/30'
-              : f === 'family'
-              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-              : 'bg-zinc-700/60 text-zinc-200 border-zinc-600'
-            const inactiveClass = 'text-zinc-500 hover:text-zinc-300 border-transparent hover:border-zinc-700'
-            return (
-              <button
-                key={f}
-                onClick={() => { setFilter(f); setFocusedIdx(-1) }}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${active ? activeClass : inactiveClass}`}
-              >
-                {f === 'all' ? 'All' : f === 'lab' ? 'Tech' : 'Family'}
-                <span className={`ml-1 ${active ? 'opacity-70' : 'opacity-40'}`}>({count})</span>
-              </button>
-            )
-          })}
-          {unreadCount > 0 && (
-            <button
-              onClick={clearAllRead}
-              className="ml-auto text-xs text-zinc-700 hover:text-zinc-500 transition-colors"
-              title="Reset read state"
-            >
-              mark all unread
-            </button>
-          )}
-          <span className="text-[10px] text-zinc-800 ml-2 hidden md:block">j/k navigate · enter read · space expand · o open · / search</span>
+          <button
+            onClick={() => setViewMode('list')}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              viewMode === 'list'
+                ? 'bg-zinc-700/60 text-zinc-200 border-zinc-600'
+                : 'text-zinc-500 hover:text-zinc-300 border-transparent hover:border-zinc-700'
+            }`}
+          >
+            Feed
+          </button>
+          <button
+            onClick={() => setViewMode('digest')}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              viewMode === 'digest'
+                ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 border-transparent hover:border-zinc-700'
+            }`}
+          >
+            ✦ Digest
+            {digest.length > 0 && (
+              <span className="ml-1 opacity-70">({digest.length})</span>
+            )}
+          </button>
         </div>
 
-        {/* Article list */}
-        {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <div className="w-6 h-6 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-zinc-500 text-sm text-center py-16">
-            {search ? `No results for "${search}"` : 'No items — use ⚙ to add feeds'}
-          </div>
-        ) : (
+        {/* ── DIGEST VIEW ──────────────────────────────────────────────────── */}
+        {viewMode === 'digest' && (
+          <NewsDigest
+            digest={digest}
+            analyzedAt={analyzedAt}
+            onOpenReader={openInReaderByParts}
+          />
+        )}
+
+        {/* ── LIST VIEW ────────────────────────────────────────────────────── */}
+        {viewMode === 'list' && (
           <>
-            <div className="space-y-1" ref={listRef}>
-              {visible.map((item, idx) => {
-                const isRead = readLinks.has(item.link)
-                const isExpanded = expanded === item.link
-                const isFocused = focusedKey === item.link
-                const accent = item.feedType === 'lab' ? '#fb923c' : '#f59e0b'
-
-                return (
-                  <div
-                    key={item.link || idx}
-                    className={`rounded-lg border transition-all cursor-pointer select-none ${
-                      isExpanded
-                        ? 'border-zinc-600 bg-zinc-800/60'
-                        : isFocused
-                        ? 'border-zinc-600 bg-zinc-800/40'
-                        : 'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30'
-                    }`}
-                    onClick={() => { setFocusedIdx(idx); handleExpand(item.link) }}
-                    onDoubleClick={(e) => { e.stopPropagation(); openInReader(item) }}
+            {/* Search bar */}
+            <div className="mb-4">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 text-xs select-none pointer-events-none">
+                  /
+                </span>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search articles… (press / to focus)"
+                  className="w-full pl-7 pr-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors text-xs"
                   >
-                    {/* Article row */}
-                    <div className="flex items-start gap-3 px-4 py-3">
-                      {item.imageUrl && !isExpanded && (
-                        <img
-                          src={item.imageUrl}
-                          alt=""
-                          className="w-14 h-14 rounded-md object-cover flex-shrink-0 opacity-80"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-sm leading-snug transition-colors ${isRead && !isExpanded ? 'text-zinc-500' : 'text-zinc-200'}`}>
-                          {item.title}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                          <span
-                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                            style={{ background: `${accent}18`, color: accent }}
-                          >
-                            {item.source}
-                          </span>
-                          <span className="text-[10px] text-zinc-600">{formatAge(item.pubDate)}</span>
-                          {isRead && !isExpanded && (
-                            <button
-                              className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
-                              onClick={(e) => markUnread(item.link, e)}
-                              title="Mark unread"
-                            >
-                              · mark unread
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0 self-center ml-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); openInReader(item) }}
-                          className="p-1.5 rounded text-zinc-600 hover:text-blue-400 hover:bg-zinc-700 transition-colors text-[11px] font-medium"
-                          title="Read in pane (Enter)"
-                        >
-                          Read
-                        </button>
-                        <button
-                          onClick={(e) => openArticle(e, item.link)}
-                          className="p-1.5 rounded text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
-                          title="Open article in new tab"
-                        >
-                          ↗
-                        </button>
-                        <span className={`text-zinc-600 text-[10px] transition-transform duration-200 inline-block ${isExpanded ? 'rotate-180' : ''}`}>
-                          ▾
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Expanded preview */}
-                    {isExpanded && (
-                      <div className="px-4 pb-4 border-t border-zinc-700/50 pt-3">
-                        {item.imageUrl && (
-                          <img
-                            src={item.imageUrl}
-                            alt=""
-                            className="w-full max-h-52 object-cover rounded-lg mb-3 opacity-90"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                          />
-                        )}
-                        {item.summary ? (
-                          <p className="text-sm text-zinc-400 leading-relaxed">
-                            {item.summary}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-zinc-600 italic">No description in feed — click to read the full article.</p>
-                        )}
-                        <div className="flex items-center gap-3 mt-4 flex-wrap">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openInReader(item) }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
-                          >
-                            Read in pane
-                          </button>
-                          <button
-                            onClick={(e) => openArticle(e, item.link)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
-                          >
-                            Open original ↗
-                          </button>
-                          <button
-                            onClick={(e) => saveItem(item, e)}
-                            disabled={savedItems.get(item.link) === 'saving' || savedItems.get(item.link) === 'saved'}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                              savedItems.get(item.link) === 'saved'
-                                ? 'bg-emerald-600/20 text-emerald-400 cursor-default'
-                                : savedItems.get(item.link) === 'error'
-                                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
-                                : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300 hover:text-white'
-                            }`}
-                          >
-                            {savedItems.get(item.link) === 'saving' ? 'Saving…' : savedItems.get(item.link) === 'saved' ? 'Saved ✓' : savedItems.get(item.link) === 'error' ? 'Failed' : 'Save'}
-                          </button>
-                          <button
-                            onClick={(e) => markUnread(item.link, e)}
-                            className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-                          >
-                            mark unread
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setExpanded(null) }}
-                            className="text-xs text-zinc-700 hover:text-zinc-500 transition-colors ml-auto"
-                          >
-                            collapse
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+                    ✕
+                  </button>
+                )}
+              </div>
+              {search && (
+                <p className="text-[10px] text-zinc-600 mt-1 ml-1">
+                  {filtered.length} result{filtered.length !== 1 ? 's' : ''} for &ldquo;{search}&rdquo;
+                </p>
+              )}
             </div>
 
-            {/* Load more */}
-            {hasMore && (
-              <div className="flex items-center justify-center mt-6 pt-4 border-t border-zinc-800">
+            {/* Filter tabs */}
+            <div className="flex items-center gap-1 mb-3 flex-wrap">
+              {(['all', 'lab', 'family'] as FilterType[]).map((f) => {
+                const count      = f === 'all' ? items.length : f === 'lab' ? labCount : familyCount
+                const active     = filter === f && !topicFilter
+                const activeClass =
+                  f === 'lab'    ? 'bg-orange-500/15 text-orange-400 border-orange-500/30' :
+                  f === 'family' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'   :
+                                   'bg-zinc-700/60 text-zinc-200 border-zinc-600'
+                const inactiveClass = 'text-zinc-500 hover:text-zinc-300 border-transparent hover:border-zinc-700'
+                return (
+                  <button
+                    key={f}
+                    onClick={() => { setFilter(f); setTopicFilter(null); setFocusedIdx(-1) }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${active ? activeClass : inactiveClass}`}
+                  >
+                    {f === 'all' ? 'All' : f === 'lab' ? 'Tech' : 'Family'}
+                    <span className={`ml-1 ${active ? 'opacity-70' : 'opacity-40'}`}>({count})</span>
+                  </button>
+                )
+              })}
+              {unreadCount > 0 && !topicFilter && (
                 <button
-                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                  className="px-4 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+                  onClick={clearAllRead}
+                  className="ml-auto text-xs text-zinc-700 hover:text-zinc-500 transition-colors"
+                  title="Reset read state"
                 >
-                  Load more <span className="text-zinc-600 ml-1">({filtered.length - visibleCount} remaining)</span>
+                  mark all unread
                 </button>
+              )}
+              <span className="text-[10px] text-zinc-800 ml-2 hidden md:block">j/k navigate · enter read · space expand · o open · / search</span>
+            </div>
+
+            {/* Topic cluster filter (shown when intel is available) */}
+            {hasIntel && topics.length > 0 && (
+              <div className="flex items-center gap-1 mb-4 flex-wrap">
+                <button
+                  onClick={() => setTopicFilter(null)}
+                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+                    !topicFilter
+                      ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                      : 'text-zinc-600 border-transparent hover:border-zinc-700 hover:text-zinc-400'
+                  }`}
+                >
+                  All topics
+                </button>
+                {topics.map((topic) => (
+                  <button
+                    key={topic}
+                    onClick={() => setTopicFilter(topicFilter === topic ? null : topic)}
+                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium border transition-colors ${
+                      topicFilter === topic
+                        ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                        : 'text-zinc-600 border-transparent hover:border-zinc-700 hover:text-zinc-400'
+                    }`}
+                  >
+                    {topic}
+                  </button>
+                ))}
               </div>
+            )}
+
+            {/* Article list */}
+            {loading ? (
+              <div className="flex items-center justify-center py-24">
+                <div className="w-6 h-6 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-zinc-500 text-sm text-center py-16">
+                {search ? `No results for "${search}"` : 'No items — use ⚙ to add feeds'}
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1" ref={listRef}>
+                  {visible.map((item, idx) => {
+                    const isRead     = readLinks.has(item.link)
+                    const isExpanded = expanded === item.link
+                    const isFocused  = focusedKey === item.link
+                    const accent     = item.feedType === 'lab' ? '#fb923c' : '#f59e0b'
+                    const intel      = getItemIntel(item)
+
+                    return (
+                      <div
+                        key={item.link || idx}
+                        className={`rounded-lg border transition-all cursor-pointer select-none ${
+                          isExpanded
+                            ? 'border-zinc-600 bg-zinc-800/60'
+                            : isFocused
+                            ? 'border-zinc-600 bg-zinc-800/40'
+                            : 'border-zinc-800/60 hover:border-zinc-700 hover:bg-zinc-800/30'
+                        }`}
+                        onClick={() => { setFocusedIdx(idx); handleExpand(item.link) }}
+                        onDoubleClick={(e) => { e.stopPropagation(); openInReader(item) }}
+                      >
+                        {/* Article row */}
+                        <div className="flex items-start gap-3 px-4 py-3">
+                          {item.imageUrl && !isExpanded && (
+                            <img
+                              src={item.imageUrl}
+                              alt=""
+                              className="w-14 h-14 rounded-md object-cover flex-shrink-0 opacity-80"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start gap-2">
+                              {intel && <ImportanceDot score={intel.score} />}
+                              <div className={`text-sm leading-snug transition-colors ${isRead && !isExpanded ? 'text-zinc-500' : 'text-zinc-200'}`}>
+                                {item.title}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                              <span
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                style={{ background: `${accent}18`, color: accent }}
+                              >
+                                {item.source}
+                              </span>
+                              {intel && (
+                                <span className="text-[10px] text-purple-500/60 font-medium">
+                                  {intel.topic}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-zinc-600">{formatAge(item.pubDate)}</span>
+                              {isRead && !isExpanded && (
+                                <button
+                                  className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
+                                  onClick={(e) => markUnread(item.link, e)}
+                                  title="Mark unread"
+                                >
+                                  · mark unread
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0 self-center ml-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openInReader(item) }}
+                              className="p-1.5 rounded text-zinc-600 hover:text-blue-400 hover:bg-zinc-700 transition-colors text-[11px] font-medium"
+                              title="Read in pane (Enter)"
+                            >
+                              Read
+                            </button>
+                            <button
+                              onClick={(e) => openArticle(e, item.link)}
+                              className="p-1.5 rounded text-zinc-600 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+                              title="Open article in new tab"
+                            >
+                              ↗
+                            </button>
+                            <span className={`text-zinc-600 text-[10px] transition-transform duration-200 inline-block ${isExpanded ? 'rotate-180' : ''}`}>
+                              ▾
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Expanded preview */}
+                        {isExpanded && (
+                          <div className="px-4 pb-4 border-t border-zinc-700/50 pt-3">
+                            {item.imageUrl && (
+                              <img
+                                src={item.imageUrl}
+                                alt=""
+                                className="w-full max-h-52 object-cover rounded-lg mb-3 opacity-90"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                              />
+                            )}
+
+                            {/* AI TL;DR */}
+                            {intel?.tldr && (
+                              <div className="flex items-start gap-2 mb-3 px-3 py-2 rounded-lg bg-purple-500/8 border border-purple-500/20">
+                                <span className="text-[10px] font-semibold text-purple-400 flex-shrink-0 mt-0.5">AI</span>
+                                <p className="text-sm text-zinc-300 leading-relaxed italic">{intel.tldr}</p>
+                                <span className="text-[10px] text-zinc-600 flex-shrink-0 mt-0.5">{intel.score}/10</span>
+                              </div>
+                            )}
+
+                            {/* Original summary */}
+                            {item.summary ? (
+                              <p className="text-sm text-zinc-400 leading-relaxed">
+                                {item.summary}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-zinc-600 italic">No description in feed — click to read the full article.</p>
+                            )}
+
+                            <div className="flex items-center gap-3 mt-4 flex-wrap">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openInReader(item) }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                              >
+                                Read in pane
+                              </button>
+                              <button
+                                onClick={(e) => openArticle(e, item.link)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200 hover:text-white text-xs font-medium transition-colors"
+                              >
+                                Open original ↗
+                              </button>
+                              <button
+                                onClick={(e) => saveItem(item, e)}
+                                disabled={savedItems.get(item.link) === 'saving' || savedItems.get(item.link) === 'saved'}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  savedItems.get(item.link) === 'saved'
+                                    ? 'bg-emerald-600/20 text-emerald-400 cursor-default'
+                                    : savedItems.get(item.link) === 'error'
+                                    ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                                    : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300 hover:text-white'
+                                }`}
+                              >
+                                {savedItems.get(item.link) === 'saving' ? 'Saving…' : savedItems.get(item.link) === 'saved' ? 'Saved ✓' : savedItems.get(item.link) === 'error' ? 'Failed' : 'Save'}
+                              </button>
+                              <button
+                                onClick={(e) => markUnread(item.link, e)}
+                                className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                              >
+                                mark unread
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setExpanded(null) }}
+                                className="text-xs text-zinc-700 hover:text-zinc-500 transition-colors ml-auto"
+                              >
+                                collapse
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Load more */}
+                {hasMore && (
+                  <div className="flex items-center justify-center mt-6 pt-4 border-t border-zinc-800">
+                    <button
+                      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                      className="px-4 py-1.5 rounded-lg text-xs text-zinc-400 border border-zinc-700 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+                    >
+                      Load more <span className="text-zinc-600 ml-1">({filtered.length - visibleCount} remaining)</span>
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
