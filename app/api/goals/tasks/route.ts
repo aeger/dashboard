@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Returns the most recent task per goal_id for the given goal IDs
+// Returns task counts + most recent task per goal_id for the given goal IDs
 // GET /api/goals/tasks?goalIds=uuid1,uuid2,...
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
@@ -15,10 +15,8 @@ export async function GET(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ tasks: {} })
 
   try {
-    // Fetch all tasks for these goal_ids, ordered newest first
-    const filter = ids.map((id) => `goal_id.eq.${id}`).join(',')
     const res = await fetch(
-      `${url}/rest/v1/task_queue?select=id,goal_id,status,title,created_at,updated_at,claimed_by,result,error&goal_id=in.(${ids.join(',')})&order=created_at.desc&limit=100`,
+      `${url}/rest/v1/task_queue?select=id,goal_id,status,title,created_at,updated_at,claimed_by,result,error&goal_id=in.(${ids.join(',')})&order=created_at.desc&limit=500`,
       {
         headers: { apikey: key, Authorization: `Bearer ${key}` },
         cache: 'no-store',
@@ -39,10 +37,56 @@ export async function GET(req: NextRequest) {
       error: string | null
     }[] = await res.json()
 
-    // Keep only the most recent task per goal
-    const tasks: Record<string, typeof rows[0]> = {}
+    type TaskEntry = {
+      id: string
+      goal_id: string
+      status: string
+      updated_at: string
+      claimed_by: string | null
+      error: string | null
+      counts: { active: number; done: number; blocked: number; total: number; pct_complete: number }
+    }
+
+    const tasks: Record<string, TaskEntry> = {}
+    const countsMap: Record<string, { active: number; done: number; blocked: number }> = {}
+
     for (const row of rows) {
-      if (!tasks[row.goal_id]) tasks[row.goal_id] = row
+      // Track most recent task per goal (rows are desc by created_at)
+      if (!tasks[row.goal_id]) {
+        tasks[row.goal_id] = {
+          id: row.id,
+          goal_id: row.goal_id,
+          status: row.status,
+          updated_at: row.updated_at,
+          claimed_by: row.claimed_by,
+          error: row.error,
+          counts: { active: 0, done: 0, blocked: 0, total: 0, pct_complete: 0 },
+        }
+      }
+
+      // Skip archived tasks from counts
+      if (row.status === 'archived') continue
+
+      if (!countsMap[row.goal_id]) countsMap[row.goal_id] = { active: 0, done: 0, blocked: 0 }
+
+      if (row.status === 'completed') {
+        countsMap[row.goal_id].done++
+      } else if (['blocked', 'failed', 'escalated'].includes(row.status)) {
+        countsMap[row.goal_id].blocked++
+      } else {
+        countsMap[row.goal_id].active++
+      }
+    }
+
+    // Attach counts to each task entry
+    for (const goalId of Object.keys(tasks)) {
+      const c = countsMap[goalId] ?? { active: 0, done: 0, blocked: 0 }
+      const total = c.active + c.done + c.blocked
+      tasks[goalId].counts = {
+        ...c,
+        total,
+        pct_complete: total > 0 ? Math.round((c.done / total) * 100) : 0,
+      }
     }
 
     return NextResponse.json({ tasks })

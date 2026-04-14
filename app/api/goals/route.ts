@@ -6,7 +6,7 @@ export interface Goal {
   title: string
   description: string | null
   level: 'vision' | 'strategy' | 'milestone' | 'objective'
-  status: 'active' | 'completed' | 'paused' | 'planned' | 'blocked' | 'archived'
+  status: 'active' | 'completed' | 'paused' | 'planned' | 'blocked' | 'archived' | 'cancelled'
   priority: number
   target_date: string | null
   completed_at: string | null

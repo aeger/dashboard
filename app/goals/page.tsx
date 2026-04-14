@@ -272,6 +272,99 @@ interface ScheduleFormProps {
   onClose: () => void
 }
 
+function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    title: goal.title,
+    description: goal.description ?? '',
+    notes: goal.notes ?? '',
+    priority: goal.priority,
+    target_date: goal.target_date ?? '',
+    tags: (goal.tags ?? []).join(', '),
+    progress: goal.progress,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSave() {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/goals/${goal.id}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+          target_date: form.target_date || null,
+          description: form.description || null,
+          notes: form.notes || null,
+        }),
+      })
+      if (res.ok) onSaved()
+      else { const d = await res.json(); setError(d.error ?? 'Save failed') }
+    } catch { setError('Save failed') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-zinc-800/60 border border-zinc-700/50 space-y-2.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-zinc-300">Edit Goal</span>
+        <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 text-sm">✕</button>
+      </div>
+      <div>
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Title</label>
+        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+               className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+      </div>
+      <div>
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Description</label>
+        <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2}
+                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+      </div>
+      <div>
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Notes</label>
+        <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500 resize-y font-mono" />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Priority</label>
+          <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: +e.target.value }))}
+                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none">
+            <option value={0}>0 — Critical</option>
+            <option value={1}>1 — High</option>
+            <option value={2}>2 — Normal</option>
+            <option value={3}>3 — Low</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Progress %</label>
+          <input type="number" min={0} max={100} value={form.progress} onChange={e => setForm(f => ({ ...f, progress: +e.target.value }))}
+                 className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Target Date</label>
+          <input type="date" value={form.target_date} onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))}
+                 className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Tags (comma-separated)</label>
+        <input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+               className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="flex gap-2 pt-1">
+        <button onClick={handleSave} disabled={saving}
+                className="flex-1 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
+          {saving ? 'Saving…' : 'Save — Wren will review'}
+        </button>
+        <button onClick={onClose} className="px-3 py-1.5 rounded text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-300">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
   const today = new Date().toISOString().slice(0, 10)
   const nowTime = new Date().toTimeString().slice(0, 5)
@@ -372,12 +465,21 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
 
 // ── goal card ──────────────────────────────────────────────────────────────────
 
+interface TaskCounts {
+  active: number
+  done: number
+  blocked: number
+  total: number
+  pct_complete: number
+}
+
 interface TaskStatus {
   id: string
   status: string
   updated_at: string
   claimed_by: string | null
   error: string | null
+  counts?: TaskCounts
 }
 
 interface GoalCardProps {
@@ -409,16 +511,20 @@ function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   )
 }
 
-function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void }) {
+function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
   const hasChildren = (goal.children?.length ?? 0) > 0
   const [collapsed, setCollapsed] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [triggering, setTriggering] = useState(false)
   const [flagging, setFlagging] = useState(false)
   const [archiving, setArchiving] = useState(false)
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null)
 
   async function handleTrigger() {
@@ -461,6 +567,31 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
       await fetch(`/api/goals/${goal.id}/restore`, { method: 'POST' })
       onRestore?.(goal.id)
     } catch { /* noop */ } finally { setArchiving(false) }
+  }
+
+  async function handleStatusChange(status: string) {
+    setActionBusy(status)
+    setActionError(null)
+    try {
+      const res = await fetch(`/api/goals/${goal.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (res.ok) onRefresh?.()
+      else setActionError('Failed')
+    } catch { setActionError('Failed') } finally { setActionBusy(null) }
+  }
+
+  async function handleDelete() {
+    setActionBusy('delete')
+    setActionError(null)
+    try {
+      const res = await fetch(`/api/goals/${goal.id}/delete`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) { onRefresh?.(); setShowDeleteConfirm(false) }
+      else setActionError(data.error ?? 'Delete failed')
+    } catch { setActionError('Delete failed') } finally { setActionBusy(null) }
   }
 
   const LEVEL_STRIPE: Record<string, string> = {
@@ -539,6 +670,30 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
 
         <ProgressBar value={goal.progress} status={goal.status} />
 
+        {taskStatus?.counts && taskStatus.counts.total > 0 && (
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">tasks</span>
+            {taskStatus.counts.done > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/25 text-green-400 border border-green-800/30">
+                ✓ {taskStatus.counts.done}
+              </span>
+            )}
+            {taskStatus.counts.active > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/25 text-blue-400 border border-blue-800/30">
+                ● {taskStatus.counts.active}
+              </span>
+            )}
+            {taskStatus.counts.blocked > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/25 text-amber-400 border border-amber-800/30">
+                ⚠ {taskStatus.counts.blocked}
+              </span>
+            )}
+            <span className="text-[9px] text-zinc-600 ml-0.5">
+              {taskStatus.counts.pct_complete}% done
+            </span>
+          </div>
+        )}
+
         {goal.tags && goal.tags.length > 0 && (
           <div className="flex gap-1.5 mt-2 flex-wrap">
             {goal.tags.map((t) => (
@@ -585,31 +740,65 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             }`}>{triggerMsg}</span>
           ) : null}
 
-          {/* Archive / Restore / Export */}
-          <div className="ml-auto flex items-center gap-1.5">
-            <a
-              href={`/api/goals/${goal.id}/export?format=json`}
-              download
-              className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600"
-            >↓</a>
+          {/* Goal actions */}
+          <div className="ml-auto flex items-center gap-1 flex-wrap justify-end">
+            {actionError && <span className="text-[10px] text-red-400 mr-1">{actionError}</span>}
+            <a href={`/api/goals/${goal.id}/export?format=json`} download
+               className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300">↓</a>
+            <button onClick={() => setShowEdit(!showEdit)}
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
+              ✎ Edit
+            </button>
             {goal.status === 'archived' ? (
-              <button
-                onClick={handleRestore}
-                disabled={archiving}
-                className="text-[10px] px-2 py-0.5 rounded border border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/40 disabled:opacity-50"
-              >{archiving ? '…' : 'Restore'}</button>
-            ) : (
-              <button
-                onClick={handleArchive}
-                disabled={archiving}
-                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-400 disabled:opacity-50"
-              >{archiving ? '…' : 'Archive'}</button>
-            )}
+              <button onClick={handleRestore} disabled={archiving}
+                      className="text-[10px] px-2 py-0.5 rounded border border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/40 disabled:opacity-50">
+                {archiving ? '…' : 'Restore'}
+              </button>
+            ) : (<>
+              {goal.status !== 'completed' && (
+                <button onClick={() => handleStatusChange('completed')} disabled={!!actionBusy}
+                        className="text-[10px] px-2 py-0.5 rounded border border-green-800/50 bg-green-900/20 text-green-400 hover:bg-green-900/40 disabled:opacity-50">
+                  {actionBusy === 'completed' ? '…' : '✓ Complete'}
+                </button>
+              )}
+              {goal.status !== 'cancelled' && (
+                <button onClick={() => handleStatusChange('cancelled')} disabled={!!actionBusy}
+                        className="text-[10px] px-2 py-0.5 rounded border border-amber-800/50 bg-amber-900/20 text-amber-400 hover:bg-amber-900/40 disabled:opacity-50">
+                  {actionBusy === 'cancelled' ? '…' : '✕ Cancel'}
+                </button>
+              )}
+              <button onClick={() => handleStatusChange('archived')} disabled={archiving || !!actionBusy}
+                      className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-400 disabled:opacity-50">
+                {archiving ? '…' : 'Archive'}
+              </button>
+              <button onClick={() => setShowDeleteConfirm(!showDeleteConfirm)}
+                      className="text-[10px] px-2 py-0.5 rounded border border-red-900/50 bg-red-950/20 text-red-500 hover:text-red-400 hover:bg-red-950/40">
+                🗑
+              </button>
+            </>)}
           </div>
+
+          {/* Delete confirmation */}
+          {showDeleteConfirm && (
+            <div className="mt-2 p-2 rounded-lg bg-red-950/30 border border-red-800/50 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-red-300 flex-1">Delete permanently? This cannot be undone.</span>
+              <button onClick={handleDelete} disabled={actionBusy === 'delete'}
+                      className="text-xs px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50">
+                {actionBusy === 'delete' ? 'Deleting…' : 'Yes, Delete'}
+              </button>
+              <button onClick={() => setShowDeleteConfirm(false)}
+                      className="text-xs px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300">
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
 
         {showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
+        )}
+        {showEdit && (
+          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
         )}
       </div>
 
@@ -628,6 +817,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
               filterStatuses={filterStatuses}
               filterLevels={filterLevels}
               searchText={searchText}
+              onRefresh={onRefresh}
             />
           ))}
         </div>
@@ -1213,95 +1403,227 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
 
 // ── Vision Health Widget ───────────────────────────────────────────────────────
 
-function VisionHealth({ flat }: { flat: Goal[] }) {
-  const [taskData, setTaskData] = useState<{ jeff_urgent?: unknown[] } | null>(null)
-  const [open, setOpen] = useState(true)
+interface TaskQueueHealth {
+  jeff_urgent: Array<{ id: string; title: string; priority: number; updated_at: string }>
+  waiting: Array<{ id: string; title: string; status: string; blocked_reason: string | null }>
+  completed: Array<{ id: string; title: string; updated_at: string }>
+}
 
-  useEffect(() => {
-    fetch('/api/taskqueue').then(r => r.json()).then(d => setTaskData(d)).catch(() => {})
+function VisionHealth({ flat }: { flat: Goal[] }) {
+  const [taskData, setTaskData] = useState<TaskQueueHealth | null>(null)
+  const [open, setOpen] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+
+  const loadTasks = useCallback(() => {
+    fetch('/api/taskqueue').then(r => r.json()).then((d: TaskQueueHealth) => {
+      setTaskData(d)
+      setLastRefresh(new Date())
+    }).catch(() => {})
   }, [])
 
-  const needsJeff = (taskData?.jeff_urgent as Array<{ title: string; id: string }> | undefined) ?? []
-  const blocked = flat.filter(g => g.status === 'blocked' && g.level !== 'vision')
-  const completedLast7 = flat.filter(g => {
+  useEffect(() => {
+    loadTasks()
+    const iv = setInterval(loadTasks, 30_000)
+    return () => clearInterval(iv)
+  }, [loadTasks])
+
+  const now = Date.now()
+  const week = 7 * 86_400_000
+
+  // Jeff actions: pending_jeff_action + review_needed tasks
+  const jeffTasks = taskData?.jeff_urgent ?? []
+
+  // Blocked tasks from task queue (waiting bucket contains 'blocked' status)
+  const blockedTasks = (taskData?.waiting ?? []).filter(t => t.status === 'blocked')
+
+  // Blocked goals
+  const blockedGoals = flat.filter(g => g.status === 'blocked' && g.level !== 'vision')
+
+  // Tasks completed this week
+  const tasksThisWeek = (taskData?.completed ?? []).filter(t =>
+    now - new Date(t.updated_at).getTime() < week
+  )
+
+  // Goals completed this week
+  const goalsThisWeek = flat.filter(g => {
     if (g.status !== 'completed' || !g.completed_at) return false
-    return Date.now() - new Date(g.completed_at).getTime() < 7 * 86400000
+    return now - new Date(g.completed_at).getTime() < week
   })
+
+  // Drift alerts: non-completed goals with past target_date and progress < 75
   const driftAlerts = flat.filter(g => {
-    const auto = g.progress
-    const manual = g.progress
-    return Math.abs(auto - manual) > 20
-  })
+    if (!g.target_date || g.status === 'completed' || g.status === 'archived') return false
+    const isPast = new Date(g.target_date).getTime() < now
+    return isPast && g.progress < 75
+  }).sort((a, b) => (a.target_date ?? '').localeCompare(b.target_date ?? ''))
+
+  const totalBlocked = blockedTasks.length + blockedGoals.length
 
   const metrics = [
     {
-      label: 'Needs Jeff',
-      value: needsJeff.length,
-      cls: needsJeff.length > 0 ? 'text-rose-400' : 'text-zinc-500',
-      bgCls: needsJeff.length > 0 ? 'bg-rose-950/30 border-rose-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
-      desc: needsJeff.length > 0 ? `${needsJeff.length} task${needsJeff.length !== 1 ? 's' : ''} pending action` : 'All clear',
+      label: 'Pending Jeff',
+      value: jeffTasks.length,
+      cls: jeffTasks.length > 0 ? 'text-rose-400' : 'text-zinc-500',
+      bgCls: jeffTasks.length > 0 ? 'bg-rose-950/30 border-rose-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
+      dot: jeffTasks.length > 0 ? 'bg-rose-400' : null,
+      desc: jeffTasks.length > 0 ? `${jeffTasks.length} task${jeffTasks.length !== 1 ? 's' : ''} awaiting action` : 'Queue clear',
     },
     {
-      label: 'Blocked Goals',
-      value: blocked.length,
-      cls: blocked.length > 0 ? 'text-amber-400' : 'text-zinc-500',
-      bgCls: blocked.length > 0 ? 'bg-amber-950/30 border-amber-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
-      desc: blocked.length > 0 ? blocked.slice(0, 2).map(g => g.title.slice(0, 25)).join(', ') : 'No blockers',
+      label: 'Blocked',
+      value: totalBlocked,
+      cls: totalBlocked > 0 ? 'text-amber-400' : 'text-zinc-500',
+      bgCls: totalBlocked > 0 ? 'bg-amber-950/30 border-amber-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
+      dot: totalBlocked > 0 ? 'bg-amber-400' : null,
+      desc: totalBlocked > 0
+        ? `${blockedTasks.length} task${blockedTasks.length !== 1 ? 's' : ''}, ${blockedGoals.length} goal${blockedGoals.length !== 1 ? 's' : ''}`
+        : 'No blockers',
     },
     {
-      label: 'Velocity (7d)',
-      value: completedLast7.length,
-      cls: completedLast7.length > 0 ? 'text-emerald-400' : 'text-zinc-500',
+      label: 'Velocity / 7d',
+      value: tasksThisWeek.length + goalsThisWeek.length,
+      cls: (tasksThisWeek.length + goalsThisWeek.length) > 0 ? 'text-emerald-400' : 'text-zinc-500',
       bgCls: 'bg-zinc-900/30 border-zinc-800/40',
-      desc: `${completedLast7.length} goal${completedLast7.length !== 1 ? 's' : ''} completed this week`,
+      dot: null,
+      desc: `${tasksThisWeek.length} task${tasksThisWeek.length !== 1 ? 's' : ''} + ${goalsThisWeek.length} goal${goalsThisWeek.length !== 1 ? 's' : ''} done`,
     },
     {
-      label: 'Active Goals',
-      value: flat.filter(g => g.status === 'active').length,
-      cls: 'text-blue-400',
-      bgCls: 'bg-zinc-900/30 border-zinc-800/40',
-      desc: `${flat.filter(g => g.level === 'objective' && g.status === 'active').length} objectives in progress`,
+      label: 'Drift Alerts',
+      value: driftAlerts.length,
+      cls: driftAlerts.length > 0 ? 'text-orange-400' : 'text-zinc-500',
+      bgCls: driftAlerts.length > 0 ? 'bg-orange-950/30 border-orange-900/40' : 'bg-zinc-900/30 border-zinc-800/40',
+      dot: driftAlerts.length > 0 ? 'bg-orange-400' : null,
+      desc: driftAlerts.length > 0
+        ? `${driftAlerts.length} goal${driftAlerts.length !== 1 ? 's' : ''} past target date`
+        : 'On track',
     },
   ]
 
+  const refreshAgo = Math.round((now - lastRefresh.getTime()) / 1000)
+
   return (
     <div className="mb-6">
+      {/* Header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 mb-2 group"
       >
-        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 group-hover:text-zinc-400">Vision Health</span>
-        {needsJeff.length > 0 && (
+        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 group-hover:text-zinc-400">Mission Control</span>
+        {jeffTasks.length > 0 && (
           <span className="px-1.5 py-0.5 rounded-full bg-rose-900/50 text-rose-300 text-[10px] font-bold animate-pulse">
-            {needsJeff.length} need action
+            {jeffTasks.length} need action
           </span>
         )}
-        <span className="ml-auto text-zinc-700 text-[10px]">{open ? '▲' : '▼'}</span>
+        {driftAlerts.length > 0 && jeffTasks.length === 0 && (
+          <span className="px-1.5 py-0.5 rounded-full bg-orange-900/50 text-orange-300 text-[10px] font-bold">
+            {driftAlerts.length} drifting
+          </span>
+        )}
+        <span className="ml-auto text-zinc-700 text-[10px]">
+          {taskData ? `${refreshAgo}s ago` : 'loading…'}
+        </span>
+        <span className="text-zinc-700 text-[10px]">{open ? '▲' : '▼'}</span>
       </button>
+
       {open && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-          {metrics.map(m => (
-            <div key={m.label} className={`rounded-xl border p-3 ${m.bgCls}`}>
-              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">{m.label}</div>
-              <div className={`text-2xl font-bold tabular-nums ${m.cls}`}>{m.value}</div>
-              <div className="text-[10px] text-zinc-600 mt-0.5 truncate" title={m.desc}>{m.desc}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {open && needsJeff.length > 0 && (
-        <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3 mb-3">
-          <div className="text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-2">⚡ Pending Jeff Actions</div>
-          <div className="space-y-1">
-            {(needsJeff as Array<{ id: string; title: string }>).slice(0, 5).map(t => (
-              <div key={t.id} className="flex items-center gap-2 text-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse flex-shrink-0" />
-                <span className="text-zinc-300 truncate flex-1">{t.title}</span>
-                <span className="text-zinc-600 font-mono text-[10px]">{t.id.slice(0, 8)}</span>
+        <>
+          {/* Metric cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+            {metrics.map(m => (
+              <div key={m.label} className={`rounded-xl border p-3 ${m.bgCls}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  {m.dot && <span className={`w-1.5 h-1.5 rounded-full ${m.dot} animate-pulse flex-shrink-0`} />}
+                  <span className="text-[10px] text-zinc-600 uppercase tracking-widest">{m.label}</span>
+                </div>
+                <div className={`text-2xl font-bold tabular-nums ${m.cls}`}>{m.value}</div>
+                <div className="text-[10px] text-zinc-600 mt-0.5 truncate" title={m.desc}>{m.desc}</div>
               </div>
             ))}
           </div>
-        </div>
+
+          {/* Jeff action queue */}
+          {jeffTasks.length > 0 && (
+            <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3 mb-3">
+              <div className="text-[10px] font-bold text-rose-400 uppercase tracking-widest mb-2">
+                Pending Jeff Actions
+              </div>
+              <div className="space-y-1.5">
+                {jeffTasks.slice(0, 6).map(t => {
+                  const age = Math.round((now - new Date(t.updated_at).getTime()) / 3_600_000)
+                  return (
+                    <div key={t.id} className="flex items-center gap-2 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse flex-shrink-0" />
+                      <span className="text-zinc-300 truncate flex-1">{t.title}</span>
+                      <span className="text-zinc-600 font-mono text-[10px] flex-shrink-0">
+                        {age < 1 ? '<1h' : `${age}h`}
+                      </span>
+                    </div>
+                  )
+                })}
+                {jeffTasks.length > 6 && (
+                  <div className="text-[10px] text-zinc-600 pl-3">+{jeffTasks.length - 6} more</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Blocked tasks */}
+          {blockedTasks.length > 0 && (
+            <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3 mb-3">
+              <div className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-2">
+                Blocked Tasks
+              </div>
+              <div className="space-y-1.5">
+                {blockedTasks.slice(0, 4).map(t => (
+                  <div key={t.id} className="flex items-start gap-2 text-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <span className="text-zinc-300 truncate block">{t.title}</span>
+                      {t.blocked_reason && (
+                        <span className="text-zinc-600 text-[10px] truncate block">{t.blocked_reason}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {blockedTasks.length > 4 && (
+                  <div className="text-[10px] text-zinc-600 pl-3">+{blockedTasks.length - 4} more</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Drift alerts */}
+          {driftAlerts.length > 0 && (
+            <div className="rounded-xl border border-orange-900/40 bg-orange-950/20 p-3 mb-3">
+              <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-2">
+                Drift Alerts — Past Target Date
+              </div>
+              <div className="space-y-1.5">
+                {driftAlerts.slice(0, 5).map(g => {
+                  const daysLate = Math.round((now - new Date(g.target_date!).getTime()) / 86_400_000)
+                  return (
+                    <div key={g.id} className="flex items-center gap-2 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
+                      <span className="text-zinc-300 truncate flex-1">{g.title}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-orange-500 font-mono text-[10px]">+{daysLate}d</span>
+                        <div className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-orange-500/60 rounded-full"
+                            style={{ width: `${g.progress}%` }}
+                          />
+                        </div>
+                        <span className="text-zinc-600 font-mono text-[10px]">{g.progress}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+                {driftAlerts.length > 5 && (
+                  <div className="text-[10px] text-zinc-600 pl-3">+{driftAlerts.length - 5} more</div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -1493,7 +1815,7 @@ export default function GoalsPage() {
     return () => es.close()
   }, [applyUpdate])
 
-  // Poll task statuses every 10s
+  // Poll task statuses every 10s + auto-advance milestones
   useEffect(() => {
     async function fetchTaskStatuses() {
       if (!flat.length) return
@@ -1501,8 +1823,30 @@ export default function GoalsPage() {
       try {
         const res = await fetch(`/api/goals/tasks?goalIds=${encodeURIComponent(ids)}`)
         if (!res.ok) return
-        const data = await res.json()
+        const data: { tasks: Record<string, TaskStatus> } = await res.json()
         setTaskStatuses(data.tasks ?? {})
+
+        // Auto-advance milestones where all tasks are completed
+        const candidates = flat.filter((g) =>
+          g.level === 'milestone' &&
+          g.status !== 'completed' &&
+          g.status !== 'archived' &&
+          (data.tasks[g.id]?.counts?.total ?? 0) > 0 &&
+          (data.tasks[g.id]?.counts?.active ?? 1) === 0 &&
+          (data.tasks[g.id]?.counts?.blocked ?? 1) === 0
+        )
+        for (const goal of candidates) {
+          fetch('/api/goals', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: goal.id,
+              status: 'completed',
+              progress: 100,
+              completed_at: new Date().toISOString(),
+            }),
+          }).catch(() => {/* non-fatal */})
+        }
       } catch { /* silent */ }
     }
 
@@ -1681,6 +2025,7 @@ export default function GoalsPage() {
                       searchText={searchText}
                       onArchive={handleGoalArchived}
                       onRestore={handleGoalRestored}
+                      onRefresh={handleGoalRestored}
                     />
                   ))}
                 </div>
