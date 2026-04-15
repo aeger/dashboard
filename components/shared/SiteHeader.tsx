@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import QuickLinksDropdown from '@/components/shared/QuickLinksDropdown'
+import NotificationBell from '@/components/shared/NotificationBell'
 
 // Per-page color identities
 const NAV_ITEMS = [
@@ -148,6 +149,7 @@ export default function SiteHeader() {
           )
         })}
         </div>
+        <NotificationBell />
         <QuickLinksDropdown />
       </div>
     </header>
