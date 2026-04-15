@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import type { TaskQueueData, TaskItem, ChecklistItem } from '@/app/api/taskqueue/route'
+import TaskDependencyGraph from './TaskDependencyGraph'
+import TaskDependencyModal from './TaskDependencyModal'
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -306,10 +308,11 @@ function ChecklistPanel({ taskId, items, onUpdate }: {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
-function DetailPanel({ task: initialTask, onClose, onRefresh }: {
+function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies }: {
   task: TaskItem
   onClose: () => void
   onRefresh: () => void
+  onEditDependencies?: (task: TaskItem) => void
 }) {
   const [task, setTask] = useState(initialTask)
   const [jeffNotes, setJeffNotes] = useState((task.context?.jeff_notes ?? '') as string)
@@ -428,6 +431,13 @@ function DetailPanel({ task: initialTask, onClose, onRefresh }: {
               </div>
             )}
           </div>
+          {onEditDependencies && (
+            <button
+              onClick={() => onEditDependencies(task)}
+              className="text-zinc-600 hover:text-zinc-400 text-[11px] px-2 py-0.5 rounded border border-zinc-800 hover:border-zinc-700"
+              title="Edit task dependencies"
+            >🔗 Dependencies</button>
+          )}
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg leading-none mt-0.5">✕</button>
         </div>
       </div>
@@ -856,6 +866,147 @@ function ArchivedSection({ onRestore }: { onRestore: () => void }) {
   )
 }
 
+// ── New task modal ────────────────────────────────────────────────────────────
+
+function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    priority: 2,
+    target: 'claude-code',
+    tags: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!form.title.trim()) { setError('Title is required'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
+      const res = await fetch('/api/taskqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: form.title.trim(),
+          description: form.description.trim() || null,
+          priority: form.priority,
+          target: form.target || null,
+          tags: tags.length ? tags : [],
+        }),
+      })
+      if (res.ok) { onCreated(); onClose() }
+      else {
+        const d = await res.json()
+        setError(d.error ?? 'Failed to create task')
+      }
+    } catch { setError('Network error') } finally { setSaving(false) }
+  }
+
+  const PRIORITIES = [
+    { value: 0, label: 'Critical', cls: 'text-red-400' },
+    { value: 1, label: 'High',     cls: 'text-orange-400' },
+    { value: 2, label: 'Normal',   cls: 'text-zinc-300' },
+    { value: 3, label: 'Low',      cls: 'text-zinc-500' },
+  ]
+  const AGENTS = ['claude-code', 'cowork', 'atlas', 'forge', 'volt', 'hermes', '']
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.75)' }}>
+      <form
+        onSubmit={handleSubmit}
+        className="rounded-2xl border border-zinc-800 shadow-2xl p-5 w-full max-w-lg space-y-3"
+        style={{ background: 'rgba(12,12,14,0.98)' }}
+      >
+        <div className="flex justify-between items-center">
+          <h3 className="text-sm font-semibold text-zinc-100">New Task</h3>
+          <button type="button" onClick={onClose} className="text-zinc-600 hover:text-zinc-300">✕</button>
+        </div>
+
+        {/* Title */}
+        <div>
+          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Title *</label>
+          <input
+            autoFocus
+            value={form.title}
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            placeholder="What needs to be done?"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800/60 border border-zinc-700/50 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</label>
+          <textarea
+            value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            placeholder="Context, steps, links…"
+            rows={4}
+            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+          />
+        </div>
+
+        {/* Priority + Target row */}
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Priority</label>
+            <select
+              value={form.priority}
+              onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
+              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
+            >
+              {PRIORITIES.map(p => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Target Agent</label>
+            <select
+              value={form.target}
+              onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
+            >
+              {AGENTS.map(a => (
+                <option key={a} value={a}>{a || '— unassigned —'}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Tags */}
+        <div>
+          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Tags <span className="text-zinc-700 normal-case">(comma-separated)</span></label>
+          <input
+            value={form.tags}
+            onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+            placeholder="homelab, infra, security…"
+            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+          >Cancel</button>
+          <button
+            type="submit"
+            disabled={saving || !form.title.trim()}
+            className="flex-1 py-2 rounded-lg text-xs bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-40 font-semibold"
+          >{saving ? 'Creating…' : 'Create Task'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 // ── Import modal ──────────────────────────────────────────────────────────────
 
 function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
@@ -936,19 +1087,25 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function TaskQueueExpanded() {
-  const [data, setData] = useState<(TaskQueueData & { jeff_urgent?: TaskItem[] }) | null>(null)
+  const [data, setData] = useState<(TaskQueueData & { jeff_urgent?: TaskItem[]; completedTotal?: number; completedOffset?: number; completedPageSize?: number }) | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<TaskItem | null>(null)
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
   const [search, setSearch] = useState('')
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<string>>(new Set(['expired', 'cancelled']))
   const [showImport, setShowImport] = useState(false)
+  const [showNewTask, setShowNewTask] = useState(false)
+  const [completedPage, setCompletedPage] = useState(0)
+  const [viewTab, setViewTab] = useState<'list' | 'dependencies'>('list')
+  const [dependencyModal, setDependencyModal] = useState<TaskItem | null>(null)
 
-  const load = useCallback(() =>
-    fetch('/api/taskqueue')
+  const load = useCallback((page?: number) => {
+    const offset = (page ?? completedPage) * 25
+    return fetch(`/api/taskqueue?completedOffset=${offset}`)
       .then(r => r.json())
       .then(d => !d.error && setData(d))
-      .catch(() => {}), [])
+      .catch(() => {})
+  }, [completedPage])
 
   useEffect(() => {
     load().finally(() => setLoading(false))
@@ -962,6 +1119,7 @@ export default function TaskQueueExpanded() {
     ...data.waiting,
     ...data.active,
     ...(data.recent ?? []),
+    ...(data.completed ?? []),
   ].filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i) : []
 
   const filteredTasks = allTasks.filter(t => {
@@ -1007,6 +1165,15 @@ export default function TaskQueueExpanded() {
     load()
   }
 
+  async function handleSaveDependencies(task: TaskItem, blockedByIds: string[]) {
+    await fetch(`/api/task-dependencies`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId: task.id, blockedByIds }),
+    }).catch(() => {})
+    load()
+  }
+
   // Keep selected task in sync after reload
   useEffect(() => {
     if (selected && allTasks.length > 0) {
@@ -1037,7 +1204,34 @@ export default function TaskQueueExpanded() {
           <StatsBar tasks={allTasks} />
         </div>
 
-        {/* Filter + controls */}
+        {/* View tabs */}
+        <div className="flex gap-2 mb-3 px-1">
+          <button
+            onClick={() => setViewTab('list')}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition ${
+              viewTab === 'list'
+                ? 'bg-blue-900/60 text-blue-300 border border-blue-700/50'
+                : 'bg-zinc-800/40 text-zinc-500 border border-zinc-700/30 hover:bg-zinc-800/60'
+            }`}
+          >
+            Tasks
+          </button>
+          <button
+            onClick={() => setViewTab('dependencies')}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition ${
+              viewTab === 'dependencies'
+                ? 'bg-blue-900/60 text-blue-300 border border-blue-700/50'
+                : 'bg-zinc-800/40 text-zinc-500 border border-zinc-700/30 hover:bg-zinc-800/60'
+            }`}
+          >
+            Dependencies
+          </button>
+        </div>
+
+        {/* Conditional view content */}
+        {viewTab === 'list' ? (
+          <>
+            {/* Filter + controls */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <input
             type="text"
@@ -1065,6 +1259,10 @@ export default function TaskQueueExpanded() {
             )
           })}
           <button
+            onClick={() => setShowNewTask(true)}
+            className="px-2 py-1.5 rounded-lg text-[11px] bg-blue-900/50 border border-blue-700/50 text-blue-300 hover:bg-blue-800/60"
+          >+ New</button>
+          <button
             onClick={() => setShowImport(true)}
             className="px-2 py-1.5 rounded-lg text-[11px] bg-zinc-800/60 border border-zinc-700/50 text-zinc-500 hover:text-zinc-300"
           >↑ Import</button>
@@ -1088,18 +1286,63 @@ export default function TaskQueueExpanded() {
             <div className="text-zinc-600 text-sm text-center py-12">No tasks match</div>
           )}
 
+          {/* Completed pagination controls */}
+          {!hiddenStatuses.has('completed') && (() => {
+            const total = data?.completedTotal ?? 0
+            const pageSize = data?.completedPageSize ?? 25
+            const totalPages = Math.ceil(total / pageSize)
+            if (totalPages <= 1) return null
+            const start = completedPage * pageSize + 1
+            const end = Math.min((completedPage + 1) * pageSize, total)
+            return (
+              <div className="flex items-center justify-between px-3 py-2 mt-1 rounded-lg bg-zinc-800/40 border border-zinc-700/30 text-[11px] text-zinc-500">
+                <span>{start}–{end} of {total} completed</span>
+                <div className="flex gap-2">
+                  <button
+                    disabled={completedPage === 0}
+                    onClick={() => { const p = completedPage - 1; setCompletedPage(p); load(p) }}
+                    className="px-2 py-0.5 rounded bg-zinc-700/60 hover:bg-zinc-600/60 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300"
+                  >← Prev</button>
+                  <span className="px-1 text-zinc-600">pg {completedPage + 1}/{totalPages}</span>
+                  <button
+                    disabled={completedPage >= totalPages - 1}
+                    onClick={() => { const p = completedPage + 1; setCompletedPage(p); load(p) }}
+                    className="px-2 py-0.5 rounded bg-zinc-700/60 hover:bg-zinc-600/60 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300"
+                  >Next →</button>
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Archived section at bottom */}
           <ArchivedSection onRestore={load} />
         </div>
+          </>
+        ) : (
+          // Dependencies view
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <TaskDependencyGraph
+              tasks={allTasks}
+              onTaskSelect={(taskId) => {
+                const task = allTasks.find(t => t.id === taskId)
+                if (task) {
+                  setViewTab('list')
+                  setSelected(task)
+                }
+              }}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Right: detail panel ── */}
       {showPanel && selected && (
-        <div className="flex-[0_0_45%] min-w-0 ml-3">
+        <div key={selected.id} className="flex-[0_0_45%] min-w-0 ml-3 sticky top-4 self-start overflow-hidden" style={{ height: 'calc(100vh - 6rem)' }}>
           <DetailPanel
             task={selected}
             onClose={() => setSelected(null)}
             onRefresh={load}
+            onEditDependencies={setDependencyModal}
           />
         </div>
       )}
@@ -1116,9 +1359,24 @@ export default function TaskQueueExpanded() {
         />
       )}
 
+      {/* New Task modal */}
+      {showNewTask && (
+        <NewTaskModal onClose={() => setShowNewTask(false)} onCreated={load} />
+      )}
+
       {/* Import modal */}
       {showImport && (
         <ImportModal onClose={() => setShowImport(false)} onDone={load} />
+      )}
+
+      {/* Dependency modal */}
+      {dependencyModal && (
+        <TaskDependencyModal
+          task={dependencyModal}
+          allTasks={allTasks}
+          onClose={() => setDependencyModal(null)}
+          onSave={(blockedByIds) => handleSaveDependencies(dependencyModal, blockedByIds)}
+        />
       )}
     </div>
   )
