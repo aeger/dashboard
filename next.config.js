@@ -1,7 +1,8 @@
-import type { NextConfig } from 'next'
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   output: 'standalone',
+  // Don't bundle native/non-ESM server-only packages with Turbopack
+  serverExternalPackages: ['ssh2', 'better-sqlite3', 'cpu-features', 'sshcrypto', 'jsdom', '@mozilla/readability'],
   images: {
     remotePatterns: [
       // Immich photos (update host to match your deployment)
@@ -11,4 +12,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+module.exports = nextConfig

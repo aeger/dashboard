@@ -1,6 +1,4 @@
 import { getConfig } from '@/lib/config'
-import ViewToggle from '@/components/shared/ViewToggle'
-import AuthIndicator from '@/components/shared/AuthIndicator'
 import HADashboard from '@/components/haos/HADashboard'
 
 export const dynamic = 'force-dynamic'
@@ -11,19 +9,7 @@ export default function HAOSPage() {
   const defaultDashboard = config.homeassistant?.default_dashboard ?? '/home/overview'
 
   return (
-    <div className="h-screen flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-950 border-b border-zinc-800">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-white">Home Assistant</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <AuthIndicator />
-          <ViewToggle currentView="haos" />
-        </div>
-      </div>
-
-      {/* HA Dashboard iframe */}
+    <div className="flex flex-col" style={{ height: 'calc(100dvh - 268px)' }}>
       <HADashboard haUrl={haUrl} defaultDashboard={defaultDashboard} />
     </div>
   )

@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 import net from 'net'
+
+const DEVICES_FILE = join(process.cwd(), 'data', 'rustdesk-devices.json')
+
+interface RustDeskDevice {
+  id: string
+  name: string
+  icon?: string
+}
 
 async function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -10,6 +20,15 @@ async function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<b
     socket.on('error', () => resolve(false))
     socket.connect(port, host)
   })
+}
+
+function loadDevices(): RustDeskDevice[] {
+  if (!existsSync(DEVICES_FILE)) return []
+  try {
+    return JSON.parse(readFileSync(DEVICES_FILE, 'utf-8'))
+  } catch {
+    return []
+  }
 }
 
 export async function GET() {
@@ -25,5 +44,7 @@ export async function GET() {
     tcpProbe(host, 21117),
   ])
 
-  return NextResponse.json({ configured: true, hbbs, hbbr, host, key })
+  const devices = loadDevices()
+
+  return NextResponse.json({ configured: true, hbbs, hbbr, host, key, devices })
 }

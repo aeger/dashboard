@@ -5,6 +5,11 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ eventId: string }> },
 ) {
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   if (!isConfigured()) {
     return NextResponse.json(
       { error: 'Calendar not configured' },
@@ -63,6 +68,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ eventId: string }> },
 ) {
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   if (!isConfigured()) {
     return NextResponse.json(
       { error: 'Calendar not configured' },

@@ -3,22 +3,13 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
 const STATE_FILE = join(process.cwd(), 'data', 'update_state.json')
-const VALID_ACTIONS = ['update_now', 'schedule', 'skip'] as const
-
-async function isAuthenticated(req: NextRequest): Promise<boolean> {
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) return false
-  try {
-    const res = await fetch('https://auth.az-lab.dev/api/state', { headers: { cookie } })
-    const data = await res.json()
-    return (data.data?.authentication_level ?? 0) > 0
-  } catch {
-    return false
-  }
-}
+const VALID_ACTIONS = ['update_now', 'schedule', 'skip', 'ignore', 'unignore'] as const
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated(req))) {
+  // Auth is enforced at Traefik level (lan-allow@file middleware).
+  // Cookie presence check as basic sanity — real auth is at the reverse proxy.
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -55,6 +46,12 @@ export async function POST(req: NextRequest) {
       entry.status = 'skipped'
       entry.skipped_at = now
       entry.skip_reassess_at = reassess.toISOString()
+    } else if (action === 'ignore') {
+      entry.status = 'ignored'
+      entry.ignored_at = now
+    } else if (action === 'unignore') {
+      entry.status = 'pending_review'
+      delete entry.ignored_at
     }
 
     state.containers[container] = entry

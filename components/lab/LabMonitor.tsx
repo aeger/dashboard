@@ -159,16 +159,46 @@ function ServicesTab() {
   if (!monitors) return <Spinner />
   if (!monitors.length) return <div className="text-zinc-500 text-sm text-center py-6">No monitors configured</div>
 
-  const up = monitors.filter((m) => m.status === 'up').length
-  const down = monitors.filter((m) => m.status === 'down').length
+  const statusGroups: Record<string, { color: string; label: string }> = {
+    up:          { color: 'bg-green-400',  label: 'up' },
+    down:        { color: 'bg-red-400',    label: 'down' },
+    pending:     { color: 'bg-amber-400',  label: 'pending' },
+    maintenance: { color: 'bg-blue-400',   label: 'maintenance' },
+  }
+  const counts: Record<string, number> = {}
+  for (const m of monitors) {
+    counts[m.status] = (counts[m.status] ?? 0) + 1
+  }
 
   return (
     <div className="space-y-3">
       {/* Summary bar */}
-      <div className="flex items-center gap-4 text-xs">
-        <span className="text-green-400 font-medium">{up} up</span>
-        {down > 0 && <span className="text-red-400 font-medium">{down} down</span>}
-        <span className="text-zinc-600">{monitors.length} total</span>
+      <div className="flex items-center gap-3 flex-wrap text-xs">
+        {Object.entries(statusGroups).map(([status, { color, label }]) =>
+          counts[status] ? (
+            <div key={status} className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color}`} />
+              <span className="text-zinc-200 font-medium">{counts[status]}</span>
+              <span className="text-zinc-500">{label}</span>
+            </div>
+          ) : null
+        )}
+        {Object.keys(counts).filter((s) => !statusGroups[s]).map((s) => (
+          <div key={s} className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full flex-shrink-0 bg-zinc-500" />
+            <span className="text-zinc-200 font-medium">{counts[s]}</span>
+            <span className="text-zinc-500">{s}</span>
+          </div>
+        ))}
+        <span className="text-zinc-600 ml-auto">{monitors.length} total</span>
+      </div>
+
+      {/* Arc color legend */}
+      <div className="flex items-center gap-3 text-[10px] text-zinc-600 border-t border-zinc-800/50 pt-2">
+        <span>Uptime ring:</span>
+        <span><span className="text-green-400">■</span> ≥99%</span>
+        <span><span className="text-amber-400">■</span> 90–99%</span>
+        <span><span className="text-red-400">■</span> &lt;90%</span>
       </div>
 
       {/* Monitor grid */}

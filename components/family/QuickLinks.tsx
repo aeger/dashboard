@@ -2,7 +2,7 @@ import type { QuickLink } from '@/lib/config'
 
 const ICON_EMOJIS: Record<string, string> = {
   photos: '📷',
-  gmail: '✉️',
+  pdf: '📄',
   netflix: '🎬',
   disney: '🏰',
   youtube: '▶️',

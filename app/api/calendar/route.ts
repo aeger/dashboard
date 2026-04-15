@@ -8,6 +8,11 @@ import {
 } from '@/lib/google-calendar'
 
 export async function GET(req: NextRequest) {
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   if (!isConfigured()) {
     return NextResponse.json({ events: [], configured: false })
   }
@@ -41,6 +46,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   if (!isConfigured()) {
     return NextResponse.json(
       { error: 'Calendar not configured' },

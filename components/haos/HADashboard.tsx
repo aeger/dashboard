@@ -37,7 +37,13 @@ export default function HADashboard({ haUrl, defaultDashboard }: HADashboardProp
       .then((r) => r.json())
       .then((data) => {
         if (data.dashboards?.length) {
-          setDashboards(data.dashboards)
+          // Overview first, rest alphabetical
+          const sorted = [...data.dashboards].sort((a: Dashboard, b: Dashboard) => {
+            if (a.title.toLowerCase() === 'overview') return -1
+            if (b.title.toLowerCase() === 'overview') return 1
+            return a.title.localeCompare(b.title)
+          })
+          setDashboards(sorted)
         }
       })
       .catch(() => {
