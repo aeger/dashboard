@@ -288,12 +288,13 @@ interface ScheduleFormProps {
   onClose: () => void
 }
 
-function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => void; onSaved: () => void }) {
+function GoalEditForm({ goal, flat = [], onClose, onSaved }: { goal: Goal; flat?: Goal[]; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
     title: goal.title,
     description: goal.description ?? '',
     notes: goal.notes ?? '',
     level: goal.level,
+    parent_id: goal.parent_id ?? '',
     priority: goal.priority,
     target_date: goal.target_date ?? '',
     tags: (goal.tags ?? []).join(', '),
@@ -303,7 +304,27 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
   const [error, setError] = useState<string | null>(null)
   const [reviewAgent, setReviewAgent] = useState<string>('')
 
+  // Derived parent options based on level
+  const visions    = flat.filter(g => g.level === 'vision'    && g.status !== 'archived' && g.id !== goal.id)
+  const strategies = flat.filter(g => g.level === 'strategy'  && g.status !== 'archived' && g.id !== goal.id)
+  const milestones = flat.filter(g => g.level === 'milestone' && g.status !== 'archived' && g.id !== goal.id)
+
+  // For task parent: group milestones by their parent goal
+  const milestonesByGoal = strategies.map(s => ({
+    goal: s,
+    milestones: milestones.filter(m => m.parent_id === s.id),
+  })).filter(g => g.milestones.length > 0)
+  const orphanMilestones = milestones.filter(m => !strategies.find(s => s.id === m.parent_id))
+
+  const parentRequired = form.level === 'milestone' || form.level === 'objective'
+  const canSave = form.title.trim() && (!parentRequired || form.parent_id)
+
+  function handleLevelChange(level: Goal['level']) {
+    setForm(f => ({ ...f, level, parent_id: '' }))
+  }
+
   async function handleSave() {
+    if (!canSave) { setError(parentRequired ? 'Parent is required for this type' : 'Title is required'); return }
     setSaving(true)
     setError(null)
     try {
@@ -316,6 +337,7 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
           target_date: form.target_date || null,
           description: form.description || null,
           notes: form.notes || null,
+          parent_id: form.parent_id || null,
           reviewAgent: reviewAgent || null,
         }),
       })
@@ -324,42 +346,86 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
     } catch { setError('Save failed') } finally { setSaving(false) }
   }
 
+  const inputCls = 'w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500'
+  const labelCls = 'text-[10px] text-zinc-500 uppercase tracking-wider block mb-1'
+
   return (
     <div className="mt-3 p-3 rounded-lg bg-zinc-800/60 border border-zinc-700/50 space-y-2.5">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-semibold text-zinc-300">Edit Goal</span>
+        <span className="text-xs font-semibold text-zinc-300">Edit {LEVEL_DISPLAY[form.level] ?? form.level}</span>
         <button onClick={onClose} className="text-zinc-600 hover:text-zinc-400 text-sm">✕</button>
       </div>
+
+      {/* Level selector */}
+      <div className="grid grid-cols-4 gap-1">
+        {(['vision', 'strategy', 'milestone', 'objective'] as Goal['level'][]).map(lv => (
+          <button
+            key={lv}
+            type="button"
+            onClick={() => handleLevelChange(lv)}
+            className={`py-1 rounded text-[10px] font-semibold border transition-colors ${
+              form.level === lv
+                ? 'bg-purple-900/50 border-purple-700/60 text-purple-300'
+                : 'bg-zinc-900/40 border-zinc-700/40 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+            }`}
+          >
+            {LEVEL_DISPLAY[lv]}
+          </button>
+        ))}
+      </div>
+
+      {/* Parent selector — changes based on level */}
+      {form.level === 'strategy' && visions.length > 0 && (
+        <div>
+          <label className={labelCls}>Vision (optional)</label>
+          <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls}>
+            <option value="">No parent vision</option>
+            {visions.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
+          </select>
+        </div>
+      )}
+      {form.level === 'milestone' && (
+        <div>
+          <label className={labelCls}>Goal *</label>
+          <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls} required>
+            <option value="" disabled>Select a Goal…</option>
+            {strategies.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+          </select>
+        </div>
+      )}
+      {form.level === 'objective' && (
+        <div>
+          <label className={labelCls}>Milestone *</label>
+          <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls} required>
+            <option value="" disabled>Select a Milestone…</option>
+            {milestonesByGoal.map(({ goal: g, milestones: ms }) => (
+              <optgroup key={g.id} label={g.title}>
+                {ms.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+              </optgroup>
+            ))}
+            {orphanMilestones.length > 0 && (
+              <optgroup label="— Other Milestones —">
+                {orphanMilestones.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </div>
+      )}
+
       <div>
-        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Title</label>
-        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-               className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+        <label className={labelCls}>Title</label>
+        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={inputCls} />
       </div>
       <div>
-        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Description</label>
+        <label className={labelCls}>Description</label>
         <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2}
                   className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
       </div>
-      <div>
-        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Notes</label>
-        <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3}
-                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500 resize-y font-mono" />
-      </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <div>
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Level</label>
-          <select value={form.level} onChange={e => setForm(f => ({ ...f, level: e.target.value as Goal['level'] }))}
-                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none">
-            <option value="vision">Vision</option>
-            <option value="strategy">Goal</option>
-            <option value="milestone">Milestone</option>
-            <option value="objective">Task</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Priority</label>
+          <label className={labelCls}>Priority</label>
           <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: +e.target.value }))}
-                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none">
+                  className={inputCls}>
             <option value={0}>0 — Critical</option>
             <option value={1}>1 — High</option>
             <option value={2}>2 — Normal</option>
@@ -367,20 +433,19 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
           </select>
         </div>
         <div>
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Progress %</label>
+          <label className={labelCls}>Progress %</label>
           <input type="number" min={0} max={100} value={form.progress} onChange={e => setForm(f => ({ ...f, progress: +e.target.value }))}
-                 className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+                 className={inputCls} />
         </div>
         <div>
-          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Target Date</label>
+          <label className={labelCls}>Target Date</label>
           <input type="date" value={form.target_date} onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))}
-                 className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+                 className={inputCls} />
         </div>
       </div>
       <div>
-        <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Tags (comma-separated)</label>
-        <input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-               className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
+        <label className={labelCls}>Tags (comma-separated)</label>
+        <input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} className={inputCls} />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       <div className="flex gap-2 pt-1 items-center">
@@ -392,7 +457,7 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
           <option value="atlas">Atlas (Desktop)</option>
           <option value="forge">Forge</option>
         </select>
-        <button onClick={handleSave} disabled={saving}
+        <button onClick={handleSave} disabled={saving || !canSave}
                 className="flex-1 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -682,6 +747,7 @@ interface TaskStatus {
 
 interface GoalCardProps {
   goal: Goal
+  flat?: Goal[]
   depth?: number
   onTrigger: (goal: Goal) => Promise<string>
   onFlag: (taskId: string) => Promise<void>
@@ -709,7 +775,7 @@ function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   )
 }
 
-function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
+function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
@@ -1048,7 +1114,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
         )}
         {cardExpanded && showEdit && (
-          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
+          <GoalEditForm goal={goal} flat={flat} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
         )}
       </div>
 
@@ -1423,8 +1489,11 @@ interface AddGoalPanelProps {
   initialLevel?: Goal['level']
 }
 
+const LEVEL_LABELS: Record<Goal['level'], string> = {
+  vision: 'Vision', strategy: 'Goal', milestone: 'Milestone', objective: 'Task',
+}
+
 function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelProps) {
-  const isVision = initialLevel === 'vision'
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -1442,41 +1511,24 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
   const descRef = useRef<HTMLTextAreaElement>(null)
   const notesRef = useRef<HTMLTextAreaElement>(null)
 
-  // Inline new-goal (strategy) creation
-  const [showNewGoalForm, setShowNewGoalForm] = useState(false)
-  const [newGoalForm, setNewGoalForm] = useState({ title: '', description: '' })
-  const [newGoalSaving, setNewGoalSaving] = useState(false)
-  const [localStrategies, setLocalStrategies] = useState<{ id: string; title: string }[]>([])
+  // Parent options derived from level
+  const visions    = flat.filter(g => g.level === 'vision'    && g.status !== 'archived')
+  const strategies = flat.filter(g => g.level === 'strategy'  && g.status !== 'archived')
+  const milestones = flat.filter(g => g.level === 'milestone' && g.status !== 'archived')
 
-  const strategies = flat.filter(g => g.level === 'strategy')
-  const allStrategies = [...strategies, ...localStrategies.filter(ls => !strategies.find(s => s.id === ls.id))]
+  // Milestones grouped by parent goal for task parent picker
+  const milestonesByGoal = strategies.map(s => ({
+    goal: s,
+    milestones: milestones.filter(m => m.parent_id === s.id),
+  })).filter(g => g.milestones.length > 0)
+  const orphanMilestones = milestones.filter(m => !strategies.find(s => s.id === m.parent_id))
 
-  async function handleCreateNewGoal() {
-    if (!newGoalForm.title.trim()) return
-    setNewGoalSaving(true)
-    try {
-      const res = await fetch('/api/goals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: newGoalForm.title.trim(),
-          level: 'strategy',
-          status: 'planned',
-          priority: 2,
-          ...(newGoalForm.description.trim() && { description: newGoalForm.description.trim() }),
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        const newId = data.id ?? data.goal?.id
-        if (newId) {
-          setLocalStrategies(prev => [...prev, { id: newId, title: newGoalForm.title.trim() }])
-          setForm(f => ({ ...f, parent_id: newId }))
-        }
-        setShowNewGoalForm(false)
-        setNewGoalForm({ title: '', description: '' })
-      }
-    } catch { /* ignore */ } finally { setNewGoalSaving(false) }
+  const parentRequired = form.level === 'milestone' || form.level === 'objective'
+  const canSubmit = form.title.trim() && (!parentRequired || form.parent_id)
+
+  function handleLevelChange(level: Goal['level']) {
+    setForm(f => ({ ...f, level, parent_id: '' }))
+    setError(null)
   }
 
   function handleBackdrop(e: React.MouseEvent) {
@@ -1486,7 +1538,10 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title.trim()) { setError('Title is required'); return }
-    if (!isVision && !form.parent_id) { setError('Parent goal is required'); return }
+    if (parentRequired && !form.parent_id) {
+      setError(form.level === 'milestone' ? 'Select a Goal parent' : 'Select a Milestone parent')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -1506,13 +1561,8 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      if (res.ok) {
-        onCreated()
-        onClose()
-      } else {
-        const data = await res.json()
-        setError(data.error ?? 'Failed to create goal')
-      }
+      if (res.ok) { onCreated(); onClose() }
+      else { const data = await res.json(); setError(data.error ?? 'Failed to create') }
     } catch {
       setError('Request failed')
     } finally {
@@ -1536,25 +1586,78 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
         style={{ animation: 'slideInRight 0.2s ease-out' }}
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-200">{isVision ? 'Add New Vision' : 'Add Milestone / Task'}</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">New {LEVEL_LABELS[form.level]}</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
-          {/* Row: Level (hidden for vision) + Status + Priority */}
-          <div className={`grid gap-3 ${isVision ? 'grid-cols-2' : 'grid-cols-3'}`}>
-            {!isVision && (
-              <div>
-                <label className={labelCls}>Level</label>
-                <select value={form.level} onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))} className={inputCls}>
-                  <option value="milestone">Milestone</option>
-                  <option value="objective">Task</option>
-                </select>
-              </div>
-            )}
+
+          {/* Level selector — tab style */}
+          <div>
+            <label className={labelCls}>Type</label>
+            <div className="grid grid-cols-4 gap-1">
+              {(['vision', 'strategy', 'milestone', 'objective'] as Goal['level'][]).map(lv => (
+                <button
+                  key={lv}
+                  type="button"
+                  onClick={() => handleLevelChange(lv)}
+                  className={`py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                    form.level === lv
+                      ? 'bg-purple-900/50 border-purple-700/60 text-purple-200'
+                      : 'bg-zinc-900/40 border-zinc-700/40 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+                  }`}
+                >
+                  {LEVEL_LABELS[lv]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Parent picker — changes based on level */}
+          {form.level === 'strategy' && visions.length > 0 && (
+            <div>
+              <label className={labelCls}>Vision (optional)</label>
+              <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls}>
+                <option value="">No parent vision</option>
+                {visions.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
+              </select>
+            </div>
+          )}
+
+          {form.level === 'milestone' && (
+            <div>
+              <label className={labelCls}>Goal *</label>
+              <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls} required>
+                <option value="" disabled>Select a Goal…</option>
+                {strategies.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+              </select>
+            </div>
+          )}
+
+          {form.level === 'objective' && (
+            <div>
+              <label className={labelCls}>Milestone *</label>
+              <select value={form.parent_id} onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))} className={inputCls} required>
+                <option value="" disabled>Select a Milestone…</option>
+                {milestonesByGoal.map(({ goal: g, milestones: ms }) => (
+                  <optgroup key={g.id} label={g.title}>
+                    {ms.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                  </optgroup>
+                ))}
+                {orphanMilestones.length > 0 && (
+                  <optgroup label="— Other Milestones —">
+                    {orphanMilestones.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+          )}
+
+          {/* Status + Priority + Target Date */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>Status</label>
-              <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Goal['status'] }))} className={inputCls}>
+              <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as Goal['status'] }))} className={inputCls}>
                 <option value="active">Active</option>
                 <option value="planned">Planned</option>
                 <option value="paused">Paused</option>
@@ -1563,79 +1666,16 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
             </div>
             <div>
               <label className={labelCls}>Priority</label>
-              <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))} className={inputCls}>
+              <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} className={inputCls}>
                 <option value={0}>0 — Critical</option>
                 <option value={1}>1 — High</option>
                 <option value={2}>2 — Normal</option>
                 <option value={3}>3 — Low</option>
               </select>
             </div>
-          </div>
-
-          {/* Row: Parent Goal (required, strategies only) + Target Date */}
-          <div className="grid grid-cols-2 gap-3">
-            {!isVision && (
-              <div>
-                <label className={labelCls}>Parent Goal *</label>
-                <select
-                  value={form.parent_id}
-                  onChange={(e) => {
-                    if (e.target.value === '__new__') {
-                      setShowNewGoalForm(true)
-                    } else {
-                      setForm((f) => ({ ...f, parent_id: e.target.value }))
-                      setShowNewGoalForm(false)
-                    }
-                  }}
-                  className={inputCls}
-                  required
-                >
-                  <option value="" disabled>Select a Goal...</option>
-                  {allStrategies.map((g) => (
-                    <option key={g.id} value={g.id}>{g.title}</option>
-                  ))}
-                  <option value="__new__">+ Create new Goal...</option>
-                </select>
-                {showNewGoalForm && (
-                  <div className="mt-2 p-3 rounded-lg bg-indigo-950/30 border border-indigo-800/40 space-y-2">
-                    <div className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider">New Goal</div>
-                    <input
-                      value={newGoalForm.title}
-                      onChange={(e) => setNewGoalForm((f) => ({ ...f, title: e.target.value }))}
-                      placeholder="Goal name..."
-                      className={inputCls}
-                    />
-                    <textarea
-                      value={newGoalForm.description}
-                      onChange={(e) => setNewGoalForm((f) => ({ ...f, description: e.target.value }))}
-                      placeholder="Description (optional)"
-                      rows={2}
-                      className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-600 placeholder-zinc-600 resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleCreateNewGoal}
-                        disabled={newGoalSaving || !newGoalForm.title.trim()}
-                        className="flex-1 text-xs px-2 py-1.5 rounded border border-indigo-700/60 bg-indigo-900/40 text-indigo-200 hover:bg-indigo-900/60 disabled:opacity-50 font-semibold"
-                      >
-                        {newGoalSaving ? 'Creating...' : 'Create Goal'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setShowNewGoalForm(false); setNewGoalForm({ title: '', description: '' }) }}
-                        className="text-xs px-2 py-1.5 rounded border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             <div>
               <label className={labelCls}>Target Date</label>
-              <input type="date" value={form.target_date} onChange={(e) => setForm((f) => ({ ...f, target_date: e.target.value }))} className={inputCls} />
+              <input type="date" value={form.target_date} onChange={e => setForm(f => ({ ...f, target_date: e.target.value }))} className={inputCls} />
             </div>
           </div>
 
@@ -1645,14 +1685,14 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
             <input
               type="text"
               value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Goal title…"
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder={`${LEVEL_LABELS[form.level]} title…`}
               className={inputCls}
-              required
+              autoFocus
             />
           </div>
 
-          {/* Description with markdown toolbar + preview */}
+          {/* Description */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className={labelCls}>Description</label>
@@ -1663,24 +1703,24 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
             </div>
             {descTab === 'edit' ? (
               <>
-                <MarkdownToolbar textareaRef={descRef} value={form.description} onChange={(v) => setForm((f) => ({ ...f, description: v }))} />
+                <MarkdownToolbar textareaRef={descRef} value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} />
                 <textarea
                   ref={descRef}
                   value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  placeholder="Describe the goal… (supports **markdown**)"
-                  rows={10}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Describe this… (supports **markdown**)"
+                  rows={8}
                   className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
                 />
               </>
             ) : (
-              <div className="min-h-[220px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+              <div className="min-h-[180px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
                 <MarkdownPreview content={form.description} />
               </div>
             )}
           </div>
 
-          {/* Notes with markdown toolbar + preview */}
+          {/* Notes */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className={labelCls}>Notes</label>
@@ -1691,18 +1731,18 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
             </div>
             {notesTab === 'edit' ? (
               <>
-                <MarkdownToolbar textareaRef={notesRef} value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} />
+                <MarkdownToolbar textareaRef={notesRef} value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
                 <textarea
                   ref={notesRef}
                   value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                  placeholder="Internal notes, blockers, context… (supports **markdown**)"
-                  rows={5}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Internal notes, blockers, context…"
+                  rows={4}
                   className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
                 />
               </>
             ) : (
-              <div className="min-h-[100px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+              <div className="min-h-[80px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
                 <MarkdownPreview content={form.notes} />
               </div>
             )}
@@ -1715,16 +1755,13 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
           <div className="flex gap-2 pt-2 pb-4">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !canSubmit}
               className="flex-1 text-xs px-3 py-2 rounded-md border border-purple-700/60 bg-purple-900/40 text-purple-200 hover:bg-purple-900/60 disabled:opacity-50 font-semibold transition-colors"
             >
-              {saving ? 'Saving…' : 'Create Goal'}
+              {saving ? 'Saving…' : `Create ${LEVEL_LABELS[form.level]}`}
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-xs px-3 py-2 rounded-md border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
+            <button type="button" onClick={onClose}
+              className="text-xs px-3 py-2 rounded-md border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 transition-colors">
               Cancel
             </button>
           </div>
@@ -2040,9 +2077,9 @@ function GoalsArchiveSection({ onRestore }: { onRestore: () => void }) {
 // ── Vision Header (collapsible section header for vision-level goals) ──────────
 
 function VisionHeader({
-  goal, isCollapsed, onToggle, strategyCount, onRefresh,
+  goal, flat = [], isCollapsed, onToggle, strategyCount, onRefresh,
 }: {
-  goal: Goal; isCollapsed: boolean; onToggle: () => void
+  goal: Goal; flat?: Goal[]; isCollapsed: boolean; onToggle: () => void
   strategyCount: number; onRefresh: () => void
 }) {
   const [showEdit, setShowEdit] = useState(false)
@@ -2108,7 +2145,7 @@ function VisionHeader({
       )}
       {showEdit && (
         <div className="ml-6 mt-2">
-          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
+          <GoalEditForm goal={goal} flat={flat} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
         </div>
       )}
       {showNotes && (
@@ -2133,9 +2170,9 @@ function VisionHeader({
 // ── Strategy Header ─────────────────────────────────────────────────────────────
 
 function StrategyHeader({
-  goal, isCollapsed, onToggle, milestoneCount, isDragOver, onRefresh,
+  goal, flat = [], isCollapsed, onToggle, milestoneCount, isDragOver, onRefresh,
 }: {
-  goal: Goal; isCollapsed: boolean; onToggle: () => void
+  goal: Goal; flat?: Goal[]; isCollapsed: boolean; onToggle: () => void
   milestoneCount: number; isDragOver: boolean; onRefresh: () => void
 }) {
   const [showEdit, setShowEdit] = useState(false)
@@ -2201,7 +2238,7 @@ function StrategyHeader({
       )}
       {showEdit && (
         <div className="ml-5 mt-2">
-          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
+          <GoalEditForm goal={goal} flat={flat} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
         </div>
       )}
       {showNotes && (
@@ -2291,7 +2328,7 @@ function HierarchyView({
         className="cursor-grab active:cursor-grabbing"
       >
         <GoalCard
-          goal={obj} depth={3}
+          goal={obj} flat={flat} depth={3}
           onTrigger={onTrigger} onFlag={onFlag}
           triggeredTaskId={triggeredTasks[obj.id]}
           taskStatus={taskStatuses[obj.id]}
@@ -2330,7 +2367,7 @@ function HierarchyView({
             title="Drag to move to a different strategy"
           >
             <GoalCard
-              goal={ms} depth={orphaned ? 0 : 2}
+              goal={ms} flat={flat} depth={orphaned ? 0 : 2}
               onTrigger={onTrigger} onFlag={onFlag}
               triggeredTaskId={triggeredTasks[ms.id]}
               taskStatus={taskStatuses[ms.id]}
@@ -2368,6 +2405,7 @@ function HierarchyView({
       >
         <StrategyHeader
           goal={strat}
+          flat={flat}
           isCollapsed={isCollapsed}
           onToggle={() => toggle(strat.id)}
           milestoneCount={milestones.length}
@@ -2398,6 +2436,7 @@ function HierarchyView({
       <div key={vision.id}>
         <VisionHeader
           goal={vision}
+          flat={flat}
           isCollapsed={isCollapsed}
           onToggle={() => toggle(vision.id)}
           strategyCount={strategies.length}
@@ -2450,8 +2489,8 @@ export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [showAddPanel, setShowAddPanel] = useState(false)
-  const [showAddVisionPanel, setShowAddVisionPanel] = useState(false)
+  const [addPanelLevel, setAddPanelLevel] = useState<Goal['level'] | null>(null)
+  const [showNewDropdown, setShowNewDropdown] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
 
@@ -2675,18 +2714,33 @@ export default function GoalsPage() {
           <p className="text-xs text-zinc-500">Track goals, trigger work, and schedule milestones</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowAddVisionPanel(true)}
-            className="text-xs px-3 py-1.5 rounded-full font-semibold bg-zinc-800/60 border border-purple-900/50 text-purple-400 hover:bg-purple-950/40 hover:text-purple-300 transition-all"
-          >
-            + Vision
-          </button>
-          <button
-            onClick={() => setShowAddPanel(true)}
-            className="text-xs px-3 py-1.5 rounded-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-300 hover:bg-purple-900/50 hover:text-purple-200 transition-all"
-          >
-            + Milestone / Task
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowNewDropdown(v => !v)}
+              className="text-xs px-3 py-1.5 rounded-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-300 hover:bg-purple-900/50 hover:text-purple-200 transition-all flex items-center gap-1.5"
+            >
+              + New <span className="text-purple-500 text-[10px]">▼</span>
+            </button>
+            {showNewDropdown && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowNewDropdown(false)} />
+                <div
+                  className="absolute right-0 top-full mt-1 rounded-xl border border-zinc-800 shadow-2xl z-50 overflow-hidden py-1 min-w-[140px]"
+                  style={{ background: 'rgba(14,14,16,0.98)' }}
+                >
+                  {(['vision', 'strategy', 'milestone', 'objective'] as Goal['level'][]).map(lv => (
+                    <button
+                      key={lv}
+                      onClick={() => { setAddPanelLevel(lv); setShowNewDropdown(false) }}
+                      className="w-full text-left px-4 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
+                    >
+                      {LEVEL_LABELS[lv]}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {loading && (
             <div className="w-3 h-3 border-2 border-zinc-700 border-t-blue-400 rounded-full animate-spin" />
           )}
@@ -2785,20 +2839,12 @@ export default function GoalsPage() {
       {/* Archived goals section */}
       <GoalsArchiveSection onRestore={handleGoalRestored} />
 
-      {showAddPanel && (
+      {addPanelLevel && (
         <AddGoalPanel
           flat={flat}
-          onClose={() => setShowAddPanel(false)}
+          onClose={() => setAddPanelLevel(null)}
           onCreated={handleGoalCreated}
-        />
-      )}
-
-      {showAddVisionPanel && (
-        <AddGoalPanel
-          flat={flat}
-          onClose={() => setShowAddVisionPanel(false)}
-          onCreated={handleGoalCreated}
-          initialLevel="vision"
+          initialLevel={addPanelLevel}
         />
       )}
     </div>

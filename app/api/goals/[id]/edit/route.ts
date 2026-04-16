@@ -7,7 +7,7 @@ const SUPA_HEADERS = (key: string) => ({
   Prefer: 'return=representation',
 })
 
-const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress', 'level']
+const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress', 'level', 'parent_id']
 
 export async function POST(
   req: NextRequest,
