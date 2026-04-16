@@ -873,16 +873,21 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         </div>
 
-        {cardExpanded && goal.description && (
+        {goal.description && (
           <div className="mb-3 max-h-40 overflow-y-auto pr-1">
             <MarkdownPreview content={goal.description} />
           </div>
         )}
 
-        {cardExpanded && <ProgressBar value={goal.progress} status={goal.status} taskStatus={taskStatus} />}
+        <ProgressBar value={goal.progress} status={goal.status} taskStatus={taskStatus} />
 
-        {cardExpanded && taskStatus?.counts && taskStatus.counts.total > 0 && (
+        {taskStatus?.counts && taskStatus.counts.total > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v); if (!cardExpanded) setCardExpanded(true) }}
+              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex-shrink-0 ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+              title="Notes"
+            >📓</button>
             <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">tasks</span>
             {taskStatus.counts.done > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/25 text-green-400 border border-green-800/30">
@@ -910,6 +915,17 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
+        {/* Notebook icon when no tasks exist — still show on its own line */}
+        {!(taskStatus?.counts && taskStatus.counts.total > 0) && (
+          <div className="flex items-center mt-1.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v); if (!cardExpanded) setCardExpanded(true) }}
+              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+              title="Notes"
+            >📓</button>
+          </div>
+        )}
+
         {cardExpanded && goal.tags && goal.tags.length > 0 && (
           <div className="flex gap-1.5 mt-2 flex-wrap">
             {goal.tags.map((t) => (
@@ -918,7 +934,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
-        {cardExpanded && (
+        {showNotes && (
           <>
             {showNotes ? (
               <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh?.() }} />
@@ -932,14 +948,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
                   ✎ Edit
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowNotes(true) }}
-                className="mt-2 text-[10px] text-zinc-600 hover:text-zinc-400 italic transition-colors"
-              >
-                + Add notes…
-              </button>
-            )}
+            ) : null}
           </>
         )}
 
@@ -958,12 +967,6 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
           >
             Schedule
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v) }}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'}`}
-          >
-            📓 Notes
           </button>
           {triggeredTaskId && (
             <button
