@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { TaskQueueData, TaskItem, ChecklistItem } from '@/app/api/taskqueue/route'
 import TaskDependencyGraph from './TaskDependencyGraph'
 import TaskDependencyModal from './TaskDependencyModal'
@@ -321,12 +323,22 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const [actionError, setActionError] = useState<string | null>(null)
   const [exportMenu, setExportMenu] = useState(false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editTitle, setEditTitle] = useState(task.title)
+  const [editDescription, setEditDescription] = useState(task.description ?? '')
+  const [editPriority, setEditPriority] = useState(task.priority)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   // Sync when parent task changes (e.g. after action)
   useEffect(() => {
     setTask(initialTask)
     setJeffNotes((initialTask.context?.jeff_notes ?? '') as string)
     setContextSummary((initialTask.context?.context_summary ?? '') as string)
+    setEditTitle(initialTask.title)
+    setEditDescription(initialTask.description ?? '')
+    setEditPriority(initialTask.priority)
+    setIsEditMode(false)
   }, [initialTask.id, initialTask.status])
 
   const c = getStatusColor(task.status)
@@ -336,6 +348,8 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   async function doAction(action: { label: string; status?: string; special?: string }) {
     setActionBusy(action.label)
     setActionError(null)
+    // Flush pending notes debounce immediately so notes are always included in status transitions
+    if (notesTimer.current) { clearTimeout(notesTimer.current); notesTimer.current = null }
     try {
       if (action.special === 'archive') {
         const res = await fetch(`/api/taskqueue/${task.id}/archive`, { method: 'POST' })
@@ -345,7 +359,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: action.status }),
+          body: JSON.stringify({
+            status: action.status,
+            jeff_notes: jeffNotes,
+            context_summary: contextSummary,
+          }),
         })
         const data = await res.json()
         if (res.ok && data.task) {
@@ -359,6 +377,30 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
       console.error('doAction failed:', err)
       setActionError('Network error')
     } finally { setActionBusy(null) }
+  }
+
+  async function saveEdit() {
+    setEditBusy(true)
+    setEditError(null)
+    try {
+      const res = await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editTitle, description: editDescription, priority: editPriority }),
+      })
+      const data = await res.json()
+      if (res.ok && data.task) {
+        setTask(data.task)
+        setIsEditMode(false)
+        onRefresh()
+      } else {
+        setEditError(data.error ?? `Failed (${res.status})`)
+      }
+    } catch {
+      setEditError('Network error')
+    } finally {
+      setEditBusy(false)
+    }
   }
 
   function saveNotes(notes: string, summary: string) {
@@ -407,7 +449,15 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
               </span>
             )}
           </div>
-          <h3 className="text-sm font-semibold text-zinc-100 leading-snug">{task.title}</h3>
+          {isEditMode ? (
+            <input
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              className="w-full mt-1 px-2 py-1 rounded-lg text-sm font-semibold bg-zinc-800/80 border border-blue-700/50 text-zinc-100 focus:outline-none focus:border-blue-500"
+            />
+          ) : (
+            <h3 className="text-sm font-semibold text-zinc-100 leading-snug">{task.title}</h3>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Export dropdown */}
@@ -438,6 +488,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
               title="Edit task dependencies"
             >🔗 Dependencies</button>
           )}
+          <button
+            onClick={() => { setIsEditMode(v => !v); setEditError(null) }}
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${isEditMode ? 'bg-blue-900/40 border-blue-700/50 text-blue-300' : 'border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700'}`}
+            title="Edit task fields"
+          >✎ Edit</button>
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg leading-none mt-0.5">✕</button>
         </div>
       </div>
@@ -466,8 +521,49 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           {task.claimed_by && <><span className="text-zinc-700">→</span><span className="text-blue-400">{task.claimed_by}</span></>}
         </div>
 
-        {/* Description */}
-        {task.description && (
+        {/* Description / Edit mode */}
+        {isEditMode ? (
+          <div className="space-y-3 p-3 rounded-xl border border-blue-900/40 bg-blue-950/10">
+            <div className="text-[10px] text-blue-400 uppercase tracking-widest">Editing Task</div>
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</div>
+              <textarea
+                value={editDescription}
+                onChange={e => setEditDescription(e.target.value)}
+                rows={5}
+                className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-blue-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-blue-500 resize-y"
+                placeholder="Task description…"
+              />
+            </div>
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Priority</div>
+              <select
+                value={editPriority}
+                onChange={e => setEditPriority(Number(e.target.value))}
+                className="px-2 py-1 rounded-lg text-xs bg-zinc-800/60 border border-blue-700/40 text-zinc-300 focus:outline-none focus:border-blue-500"
+              >
+                <option value={0}>0 — CRIT</option>
+                <option value={1}>1 — HIGH</option>
+                <option value={2}>2 — MED</option>
+                <option value={3}>3 — LOW</option>
+              </select>
+            </div>
+            {editError && (
+              <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">{editError}</div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveEdit}
+                disabled={editBusy || !editTitle.trim()}
+                className="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-blue-900/60 hover:bg-blue-800/80 text-blue-200 disabled:opacity-50 transition-colors"
+              >{editBusy ? 'Saving…' : 'Save Changes'}</button>
+              <button
+                onClick={() => { setIsEditMode(false); setEditError(null) }}
+                className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+              >Cancel</button>
+            </div>
+          </div>
+        ) : task.description && (
           <div>
             <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</div>
             <p className="text-zinc-300 leading-relaxed whitespace-pre-wrap">{task.description}</p>
@@ -490,13 +586,16 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
 
         {/* Jeff notes */}
         <div>
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Jeff Notes</div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[10px] text-zinc-600 uppercase tracking-widest">Jeff Notes</div>
+            <div className="text-[10px] text-zinc-700">auto-saves</div>
+          </div>
           <textarea
             value={jeffNotes}
             onChange={e => handleNotesChange(e.target.value)}
             placeholder="Notes visible to agents after handback…"
-            rows={3}
-            className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-none"
+            rows={5}
+            className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-y"
           />
         </div>
 
@@ -866,6 +965,94 @@ function ArchivedSection({ onRestore }: { onRestore: () => void }) {
   )
 }
 
+// ── New task modal — markdown helpers ─────────────────────────────────────────
+
+interface TaskMdToolbarProps {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  value: string
+  onChange: (v: string) => void
+}
+
+const TASK_MD_TOOLS = [
+  { label: 'B',   title: 'Bold',          wrap: ['**', '**'],      placeholder: 'bold text',  style: 'font-bold' },
+  { label: 'I',   title: 'Italic',        wrap: ['_', '_'],        placeholder: 'italic',     style: 'italic' },
+  { label: '<>',  title: 'Inline code',   wrap: ['`', '`'],        placeholder: 'code',       style: 'font-mono text-[10px]' },
+  { label: '```', title: 'Code block',    wrap: ['```\n', '\n```'], placeholder: 'code block', style: 'font-mono text-[9px]' },
+  { label: '•',   title: 'Bullet list',   prefix: '- ',            style: '' },
+  { label: '1.',  title: 'Numbered list', prefix: '1. ',           style: '' },
+  { label: '[ ]', title: 'Task item',     prefix: '- [ ] ',        style: 'font-mono text-[9px]' },
+] as const
+
+function applyTaskMarkdown(
+  tool: (typeof TASK_MD_TOOLS)[number],
+  textarea: HTMLTextAreaElement,
+  value: string,
+  onChange: (v: string) => void,
+) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = value.slice(start, end)
+  let newValue = value
+  let newCursorStart = start
+  let newCursorEnd = end
+
+  if ('insert' in tool) {
+    const ins = (tool as { insert: string }).insert
+    newValue = value.slice(0, start) + ins + value.slice(end)
+    newCursorStart = newCursorEnd = start + ins.length
+  } else if ('prefix' in tool) {
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    newValue = value.slice(0, lineStart) + tool.prefix + value.slice(lineStart)
+    newCursorStart = start + tool.prefix.length
+    newCursorEnd = end + tool.prefix.length
+  } else if ('wrap' in tool) {
+    const [open, close] = tool.wrap
+    const text = selected || tool.placeholder
+    newValue = value.slice(0, start) + open + text + close + value.slice(end)
+    newCursorStart = start + open.length
+    newCursorEnd = start + open.length + text.length
+  }
+
+  onChange(newValue)
+  requestAnimationFrame(() => {
+    textarea.focus()
+    textarea.setSelectionRange(newCursorStart, newCursorEnd)
+  })
+}
+
+function TaskMdToolbar({ textareaRef, value, onChange }: TaskMdToolbarProps) {
+  return (
+    <div className="flex items-center gap-0.5 flex-wrap px-2 py-1.5 bg-zinc-800/60 border border-zinc-700/60 border-b-0 rounded-t-md">
+      {TASK_MD_TOOLS.map((tool) => (
+        <button
+          key={tool.title}
+          type="button"
+          title={tool.title}
+          onClick={() => textareaRef.current && applyTaskMarkdown(tool, textareaRef.current, value, onChange)}
+          className={`text-[10px] px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 transition-colors ${tool.style}`}
+        >
+          {tool.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function TaskMdPreview({ content }: { content: string }) {
+  if (!content.trim()) return <p className="text-xs text-zinc-600 italic">Nothing to preview yet…</p>
+  return (
+    <div className="prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed
+      [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-2 [&_li]:mb-0.5
+      [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-blue-300 [&_code]:font-mono [&_code]:text-[10px]
+      [&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:mb-2 [&_pre_code]:bg-transparent [&_pre_code]:text-green-300
+      [&_strong]:text-zinc-100 [&_strong]:font-semibold [&_a]:text-blue-400 [&_a]:underline
+      [&_input[type=checkbox]]:mr-1.5
+    ">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  )
+}
+
 // ── New task modal ────────────────────────────────────────────────────────────
 
 function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -878,6 +1065,12 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
+  const descRef = useRef<HTMLTextAreaElement>(null)
+
+  function handleBackdrop(e: React.MouseEvent) {
+    if (e.target === e.currentTarget) onClose()
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -905,104 +1098,141 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     } catch { setError('Network error') } finally { setSaving(false) }
   }
 
+  const inputCls = 'w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-600 placeholder-zinc-600'
+  const labelCls = 'text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1'
+  const tabBtn = (active: boolean) =>
+    `text-[10px] px-2.5 py-1 rounded-t font-medium transition-colors ${active ? 'bg-zinc-900 text-zinc-200 border border-zinc-700 border-b-zinc-900' : 'text-zinc-500 hover:text-zinc-300'}`
+
   const PRIORITIES = [
-    { value: 0, label: 'Critical', cls: 'text-red-400' },
-    { value: 1, label: 'High',     cls: 'text-orange-400' },
-    { value: 2, label: 'Normal',   cls: 'text-zinc-300' },
-    { value: 3, label: 'Low',      cls: 'text-zinc-500' },
+    { value: 0, label: '0 — Critical' },
+    { value: 1, label: '1 — High' },
+    { value: 2, label: '2 — Normal' },
+    { value: 3, label: '3 — Low' },
   ]
   const AGENTS = ['claude-code', 'cowork', 'atlas', 'forge', 'volt', 'hermes', '']
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.75)' }}>
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-2xl border border-zinc-800 shadow-2xl p-5 w-full max-w-lg space-y-3"
-        style={{ background: 'rgba(12,12,14,0.98)' }}
+    <div
+      className="fixed inset-0 z-[200] flex items-stretch justify-end"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={handleBackdrop}
+    >
+      <div
+        className="w-full max-w-2xl bg-zinc-950 border-l border-zinc-800 flex flex-col h-full"
+        style={{ animation: 'slideInRight 0.2s ease-out' }}
       >
-        <div className="flex justify-between items-center">
-          <h3 className="text-sm font-semibold text-zinc-100">New Task</h3>
-          <button type="button" onClick={onClose} className="text-zinc-600 hover:text-zinc-300">✕</button>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-200">New Task</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
-        {/* Title */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Title *</label>
-          <input
-            autoFocus
-            value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            placeholder="What needs to be done?"
-            className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800/60 border border-zinc-700/50 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</label>
-          <textarea
-            value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            placeholder="Context, steps, links…"
-            rows={4}
-            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
-          />
-        </div>
-
-        {/* Priority + Target row */}
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Priority</label>
-            <select
-              value={form.priority}
-              onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              {PRIORITIES.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
+        <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
+          {/* Priority + Target Agent */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Priority</label>
+              <select
+                value={form.priority}
+                onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
+                className={inputCls}
+              >
+                {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Target Agent</label>
+              <select
+                value={form.target}
+                onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
+                className={inputCls}
+              >
+                {AGENTS.map(a => <option key={a} value={a}>{a || '— unassigned —'}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="flex-1">
-            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Target Agent</label>
-            <select
-              value={form.target}
-              onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              {AGENTS.map(a => (
-                <option key={a} value={a}>{a || '— unassigned —'}</option>
-              ))}
-            </select>
+
+          {/* Title */}
+          <div>
+            <label className={labelCls}>Title *</label>
+            <input
+              autoFocus
+              type="text"
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="What needs to be done?"
+              className={inputCls}
+              required
+            />
           </div>
-        </div>
 
-        {/* Tags */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Tags <span className="text-zinc-700 normal-case">(comma-separated)</span></label>
-          <input
-            value={form.tags}
-            onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-            placeholder="homelab, infra, security…"
-            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
+          {/* Description with markdown toolbar + preview */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Description</label>
+              <div className="flex gap-0.5 -mb-px relative z-10">
+                <button type="button" className={tabBtn(descTab === 'edit')} onClick={() => setDescTab('edit')}>Edit</button>
+                <button type="button" className={tabBtn(descTab === 'preview')} onClick={() => setDescTab('preview')}>Preview</button>
+              </div>
+            </div>
+            {descTab === 'edit' ? (
+              <>
+                <TaskMdToolbar textareaRef={descRef} value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} />
+                <textarea
+                  ref={descRef}
+                  value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Context, steps, links… (supports **markdown**)"
+                  rows={10}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-blue-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
+                />
+              </>
+            ) : (
+              <div className="min-h-[220px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+                <TaskMdPreview content={form.description} />
+              </div>
+            )}
+          </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+          {/* Tags */}
+          <div>
+            <label className={labelCls}>Tags <span className="text-zinc-700 normal-case font-normal">(comma-separated)</span></label>
+            <input
+              value={form.tags}
+              onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+              placeholder="homelab, infra, security…"
+              className={inputCls}
+            />
+          </div>
 
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-          >Cancel</button>
-          <button
-            type="submit"
-            disabled={saving || !form.title.trim()}
-            className="flex-1 py-2 rounded-lg text-xs bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-40 font-semibold"
-          >{saving ? 'Creating…' : 'Create Task'}</button>
-        </div>
-      </form>
+          {error && (
+            <p className="text-xs text-red-400 border border-red-900/50 rounded-md px-3 py-2 bg-red-950/20">{error}</p>
+          )}
+
+          <div className="flex gap-2 pt-2 pb-4">
+            <button
+              type="submit"
+              disabled={saving || !form.title.trim()}
+              className="flex-1 text-xs px-3 py-2 rounded-md border border-blue-700/60 bg-blue-900/40 text-blue-200 hover:bg-blue-900/60 disabled:opacity-50 font-semibold transition-colors"
+            >
+              {saving ? 'Creating…' : 'Create Task'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-xs px-3 py-2 rounded-md border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }
