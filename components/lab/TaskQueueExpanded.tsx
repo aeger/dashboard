@@ -54,48 +54,48 @@ const SECTIONS = [
 // Actions available for each status
 const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string; special?: string; cls?: string }>> = {
   pending_jeff_action: [
-    { label: "I'll Handle It",      status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Mark Complete',       status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Cancel',              status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: "I'll Handle It",            status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Return to Agent Queue',     status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   review_needed: [
-    { label: 'Approve & Complete',  status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'Reopen (Jeff)',        status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Cancel',              status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Approve & Complete',        status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Send Back to Agent',        status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   in_progress_jeff: [
-    { label: 'Hand Back to Agent',  status: 'in_progress_agent', cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
-    { label: 'Mark Complete',       status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Needs Review',        status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Block',               status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
+    { label: 'Hand Back to Agent Queue',  status: 'ready',             cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Flag for Review',           status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Block',                     status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
   ],
   in_progress_agent: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Request Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',     status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Mark Complete',       status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Needs My Input',            status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',           status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Queue for Agent',           status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   blocked: [
-    { label: 'Unblock → Ready',     status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Jeff Will Handle',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Unblock → Back to Queue',   status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   completed: [
     { label: 'Reopen',              status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
@@ -106,28 +106,29 @@ const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string;
     { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   failed: [
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Retry (Agent)',        status: 'ready',              cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Archive',              special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   escalated: [
     { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
     { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   claimed: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Request Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',     status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
   ],
   delegated: [
     { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   pending_eval: [
+    { label: 'Approve & Complete',  status: 'completed',          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'Split into Subtasks', special: 'split',             cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
     { label: 'Review Needed',       status: 'review_needed',      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Complete',            status: 'completed',          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Send Back to Agent',  status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   expired: [
     { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
@@ -310,6 +311,197 @@ function ChecklistPanel({ taskId, items, onUpdate }: {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
+type ActivityRow = { id: string; activity_type: string; content: string; created_at: string }
+
+function LiveActivityLog({ taskId }: { taskId: string }) {
+  const [rows, setRows] = useState<ActivityRow[]>([])
+  const [lastTs, setLastTs] = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  const poll = useCallback(async () => {
+    const params = new URLSearchParams({ task_id: taskId, limit: '30' })
+    if (lastTs) params.set('since', lastTs)
+    const res = await fetch(`/api/agent-activity?${params}`).catch(() => null)
+    if (!res?.ok) return
+    const data = await res.json()
+    const newRows: ActivityRow[] = data.rows ?? []
+    if (newRows.length) {
+      setRows(prev => {
+        const ids = new Set(prev.map(r => r.id))
+        const added = newRows.filter(r => !ids.has(r.id))
+        return added.length ? [...prev, ...added] : prev
+      })
+      setLastTs(newRows[newRows.length - 1].created_at)
+    }
+  }, [taskId, lastTs])
+
+  useEffect(() => { poll() }, [taskId])
+  useEffect(() => {
+    const t = setInterval(poll, 5000)
+    return () => clearInterval(t)
+  }, [poll])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [rows.length])
+
+  const typeStyle: Record<string, string> = {
+    thinking:  'text-zinc-500',
+    tool_call: 'text-blue-400',
+    result:    'text-emerald-400',
+    status:    'text-indigo-400',
+    error:     'text-red-400',
+  }
+
+  if (!rows.length) return (
+    <div className="text-[10px] text-zinc-600 italic animate-pulse">Waiting for agent activity…</div>
+  )
+
+  return (
+    <div className="space-y-1 max-h-48 overflow-y-auto font-mono">
+      {rows.map(r => (
+        <div key={r.id} className="flex gap-2 text-[10px] leading-relaxed">
+          <span className="text-zinc-700 flex-shrink-0 tabular-nums">
+            {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+          <span className={`flex-shrink-0 ${typeStyle[r.activity_type] ?? 'text-zinc-500'}`}>
+            [{r.activity_type}]
+          </span>
+          <span className="text-zinc-300 break-all">{r.content.slice(0, 200)}</span>
+        </div>
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
+// ── SplitModal ────────────────────────────────────────────────────────────────
+
+interface SubtaskDraft { title: string; description: string; priority: number }
+
+function SplitModal({ task, onClose, onDone }: {
+  task: TaskItem
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([
+    { title: '', description: '', priority: task.priority },
+    { title: '', description: '', priority: task.priority },
+  ])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function addRow() {
+    setSubtasks(prev => [...prev, { title: '', description: '', priority: task.priority }])
+  }
+  function removeRow(i: number) {
+    setSubtasks(prev => prev.filter((_, idx) => idx !== i))
+  }
+  function update(i: number, field: keyof SubtaskDraft, val: string | number) {
+    setSubtasks(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: val } : s))
+  }
+
+  async function handleSubmit() {
+    const valid = subtasks.filter(s => s.title.trim())
+    if (!valid.length) { setError('Add at least one subtask title'); return }
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/taskqueue/${task.id}/split`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtasks: valid }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        onDone()
+      } else {
+        setError(data.error ?? `Failed (${res.status})`)
+      }
+    } catch {
+      setError('Network error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-xl mx-4 rounded-2xl border border-indigo-900/60 shadow-2xl overflow-hidden"
+           style={{ background: 'rgba(12,12,16,0.98)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-indigo-900/40">
+          <div>
+            <div className="text-sm font-semibold text-indigo-300">Split into Subtasks</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-sm">{task.title}</div>
+          </div>
+          <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg">✕</button>
+        </div>
+
+        {/* Subtask list */}
+        <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
+            Define subtasks — each will be queued as Ready for the agent
+          </div>
+          {subtasks.map((s, i) => (
+            <div key={i} className="p-3 rounded-xl border border-zinc-800/60 bg-zinc-900/40 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-600 font-mono w-4 flex-shrink-0">{i + 1}.</span>
+                <input
+                  value={s.title}
+                  onChange={e => update(i, 'title', e.target.value)}
+                  placeholder="Subtask title…"
+                  autoFocus={i === 0}
+                  className="flex-1 px-2 py-1 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-700/60"
+                />
+                <select
+                  value={s.priority}
+                  onChange={e => update(i, 'priority', Number(e.target.value))}
+                  className="px-2 py-1 rounded-lg text-[10px] bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 focus:outline-none"
+                >
+                  <option value={0}>CRIT</option>
+                  <option value={1}>HIGH</option>
+                  <option value={2}>MED</option>
+                  <option value={3}>LOW</option>
+                </select>
+                {subtasks.length > 1 && (
+                  <button onClick={() => removeRow(i)} className="text-zinc-600 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                )}
+              </div>
+              <textarea
+                value={s.description}
+                onChange={e => update(i, 'description', e.target.value)}
+                placeholder="Description (optional)…"
+                rows={2}
+                className="w-full px-2 py-1.5 rounded-lg text-[11px] bg-zinc-800/40 border border-zinc-800/60 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-indigo-800/60 resize-none"
+              />
+            </div>
+          ))}
+          <button
+            onClick={addRow}
+            className="w-full py-2 rounded-xl border border-dashed border-zinc-700/60 text-zinc-600 hover:text-zinc-400 hover:border-zinc-600 text-xs transition-colors"
+          >+ Add subtask</button>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-zinc-800/40 space-y-2">
+          {error && (
+            <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">{error}</div>
+          )}
+          <div className="text-[10px] text-zinc-600">
+            Parent task will be marked <span className="text-emerald-500">completed</span>. Subtasks queued as <span className="text-zinc-400">ready</span>.
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={busy}
+              className="flex-1 py-2 rounded-xl text-xs font-semibold bg-indigo-900/70 hover:bg-indigo-800/90 text-indigo-200 disabled:opacity-50 transition-colors"
+            >{busy ? 'Creating…' : `Create ${subtasks.filter(s => s.title.trim()).length} Subtask${subtasks.filter(s => s.title.trim()).length !== 1 ? 's' : ''}`}</button>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies }: {
   task: TaskItem
   onClose: () => void
@@ -329,6 +521,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const [editPriority, setEditPriority] = useState(task.priority)
   const [editBusy, setEditBusy] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [showSplitModal, setShowSplitModal] = useState(false)
 
   // Sync when parent task changes (e.g. after action)
   useEffect(() => {
@@ -346,6 +539,10 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const checklist: ChecklistItem[] = Array.isArray(ctx.checklist) ? ctx.checklist as ChecklistItem[] : []
 
   async function doAction(action: { label: string; status?: string; special?: string }) {
+    if (action.special === 'split') {
+      setShowSplitModal(true)
+      return
+    }
     setActionBusy(action.label)
     setActionError(null)
     // Flush pending notes debounce immediately so notes are always included in status transitions
@@ -512,6 +709,17 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           />
         </div>
 
+        {/* Parent task indicator */}
+        {(task as TaskItem & { parent_task_id?: string | null }).parent_task_id && (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-indigo-950/30 border border-indigo-900/30">
+            <span className="text-indigo-500 text-[10px]">⤴</span>
+            <span className="text-[10px] text-indigo-400">Subtask of</span>
+            <span className="text-[10px] text-indigo-300 font-mono truncate">
+              {(task as TaskItem & { parent_task_id?: string | null }).parent_task_id?.slice(0, 8)}…
+            </span>
+          </div>
+        )}
+
         {/* Routing */}
         <div className="flex items-center gap-2">
           <span className="text-zinc-600">Route</span>
@@ -584,18 +792,34 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           </div>
         )}
 
-        {/* Jeff notes */}
-        <div>
+        {/* Live activity — shown while agent is running */}
+        {isRunning(task.status) && (
+          <div className="p-3 rounded-xl border border-blue-900/30 bg-blue-950/10">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-400" />
+              </span>
+              <div className="text-[10px] text-blue-500 uppercase tracking-widest">Live Activity</div>
+            </div>
+            <LiveActivityLog taskId={task.id} />
+          </div>
+        )}
+
+        {/* Jeff notes — highlighted when task needs handback context */}
+        <div className={`rounded-xl border p-3 ${jeffNotes ? 'border-amber-800/40 bg-amber-950/10' : 'border-zinc-800/40 bg-zinc-900/10'}`}>
           <div className="flex items-center justify-between mb-1">
-            <div className="text-[10px] text-zinc-600 uppercase tracking-widest">Jeff Notes</div>
+            <div className={`text-[10px] uppercase tracking-widest ${jeffNotes ? 'text-amber-500/80' : 'text-zinc-600'}`}>
+              {jeffNotes ? '📝 Jeff Notes (visible to agents)' : 'Jeff Notes'}
+            </div>
             <div className="text-[10px] text-zinc-700">auto-saves</div>
           </div>
           <textarea
             value={jeffNotes}
             onChange={e => handleNotesChange(e.target.value)}
-            placeholder="Notes visible to agents after handback…"
-            rows={5}
-            className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-y"
+            placeholder="Add context, direction, or feedback for the agent when sending this task back…"
+            rows={4}
+            className={`w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border text-zinc-300 placeholder-zinc-600 focus:outline-none resize-y ${jeffNotes ? 'border-amber-700/40 focus:border-amber-600' : 'border-zinc-700/40 focus:border-zinc-600'}`}
           />
         </div>
 
@@ -603,7 +827,9 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         {task.result && (
           <div>
             <div className="text-[10px] text-emerald-600/80 uppercase tracking-widest mb-1">Result</div>
-            <p className="text-zinc-300 leading-relaxed whitespace-pre-wrap bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30">{task.result}</p>
+            <div className="bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30 prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
+            </div>
           </div>
         )}
 
@@ -686,6 +912,15 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
             </button>
           ))}
         </div>
+      )}
+
+      {/* Split Modal */}
+      {showSplitModal && (
+        <SplitModal
+          task={task}
+          onClose={() => setShowSplitModal(false)}
+          onDone={() => { setShowSplitModal(false); onRefresh(); onClose() }}
+        />
       )}
     </div>
   )

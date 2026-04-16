@@ -22,6 +22,10 @@ export async function GET(req: NextRequest) {
       headers: sentinelHeaders(),
       next: { revalidate: 0 },
     })
+    if (!res.ok) {
+      console.error(`[notifications] Sentinel returned ${res.status}`)
+      return NextResponse.json({ notifications: [], unreadCount: 0, criticalCount: 0 })
+    }
     const data = await res.json()
     return NextResponse.json(data)
   } catch {

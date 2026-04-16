@@ -66,6 +66,13 @@ function nodeMatchesSearch(goal: Goal, text: string): boolean {
 const ALL_STATUSES = ['active', 'planned', 'paused', 'blocked', 'completed', 'archived'] as const
 const ALL_LEVELS   = ['vision', 'strategy', 'milestone', 'objective'] as const
 
+const LEVEL_DISPLAY: Record<string, string> = {
+  vision:    'Vision',
+  strategy:  'Goal',
+  milestone: 'Milestone',
+  objective: 'Task',
+}
+
 const STATUS_PILL: Record<string, { on: string; border: string; dim: string }> = {
   active:    { on: '#60a5fa', border: 'rgba(96,165,250,0.4)',   dim: 'rgba(96,165,250,0.07)'   },
   planned:   { on: '#a1a1aa', border: 'rgba(161,161,170,0.35)', dim: 'rgba(161,161,170,0.07)'  },
@@ -145,7 +152,7 @@ function FilterBar({ filterStatuses, filterLevels, onToggleStatus, onToggleLevel
               }}
               className="text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wide transition-all duration-150 hover:scale-105"
             >
-              {l}
+              {LEVEL_DISPLAY[l] ?? l}
             </button>
           )
         })}
@@ -242,25 +249,34 @@ function StatusBadge({ status }: { status: string }) {
 function LevelBadge({ level }: { level: string }) {
   return (
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide ${LEVEL_BADGE[level] ?? LEVEL_BADGE.milestone}`}>
-      {level}
+      {LEVEL_DISPLAY[level] ?? level}
     </span>
   )
 }
 
-function ProgressBar({ value, status }: { value: number; status: string }) {
-  const color = status === 'completed' ? 'bg-green-500' :
+const RUNNING_TASK_STATUSES = new Set(['in_progress_agent', 'claimed', 'in_progress_jeff'])
+
+function ProgressBar({ value, status, taskStatus }: { value: number; status: string; taskStatus?: TaskStatus }) {
+  const isRunning = taskStatus ? RUNNING_TASK_STATUSES.has(taskStatus.status) : false
+  const color = isRunning          ? 'bg-blue-500' :
+                status === 'completed' ? 'bg-green-500' :
                 status === 'blocked'   ? 'bg-amber-500' :
                 status === 'paused'    ? 'bg-yellow-500' : 'progress-purple'
   const fillStyle: React.CSSProperties = {
-    width: `${value}%`,
-    ...(status === 'active' ? { boxShadow: '0 0 6px rgba(167,139,250,0.4)' } : {}),
+    width: `${Math.max(value, isRunning ? 3 : 0)}%`,
+    ...(isRunning ? { boxShadow: '0 0 8px rgba(59,130,246,0.6)', animation: 'pulse 2s infinite' } :
+        status === 'active' ? { boxShadow: '0 0 6px rgba(167,139,250,0.4)' } : {}),
   }
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={fillStyle} />
       </div>
-      <span className="text-[10px] text-zinc-500 tabular-nums w-7 text-right">{value}%</span>
+      {isRunning ? (
+        <span className="text-[10px] text-blue-400 tabular-nums whitespace-nowrap">In Progress</span>
+      ) : (
+        <span className="text-[10px] text-zinc-500 tabular-nums w-7 text-right">{value}%</span>
+      )}
     </div>
   )
 }
@@ -277,6 +293,7 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
     title: goal.title,
     description: goal.description ?? '',
     notes: goal.notes ?? '',
+    level: goal.level,
     priority: goal.priority,
     target_date: goal.target_date ?? '',
     tags: (goal.tags ?? []).join(', '),
@@ -284,6 +301,7 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reviewAgent, setReviewAgent] = useState<string>('')
 
   async function handleSave() {
     setSaving(true)
@@ -298,6 +316,7 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
           target_date: form.target_date || null,
           description: form.description || null,
           notes: form.notes || null,
+          reviewAgent: reviewAgent || null,
         }),
       })
       if (res.ok) onSaved()
@@ -326,7 +345,17 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
         <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3}
                   className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500 resize-y font-mono" />
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Level</label>
+          <select value={form.level} onChange={e => setForm(f => ({ ...f, level: e.target.value as Goal['level'] }))}
+                  className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none">
+            <option value="vision">Vision</option>
+            <option value="strategy">Goal</option>
+            <option value="milestone">Milestone</option>
+            <option value="objective">Task</option>
+          </select>
+        </div>
         <div>
           <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Priority</label>
           <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: +e.target.value }))}
@@ -354,10 +383,18 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
                className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
-      <div className="flex gap-2 pt-1">
+      <div className="flex gap-2 pt-1 items-center">
+        <select value={reviewAgent} onChange={e => setReviewAgent(e.target.value)}
+                className="bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1.5 text-xs text-zinc-400 focus:outline-none">
+          <option value="">No review</option>
+          <option value="claude-code">Wren (Claude Code)</option>
+          <option value="iris">Iris (Cowork)</option>
+          <option value="atlas">Atlas (Desktop)</option>
+          <option value="forge">Forge</option>
+        </select>
         <button onClick={handleSave} disabled={saving}
                 className="flex-1 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
-          {saving ? 'Saving…' : 'Save — Wren will review'}
+          {saving ? 'Saving…' : 'Save'}
         </button>
         <button onClick={onClose} className="px-3 py-1.5 rounded text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-300">Cancel</button>
       </div>
@@ -463,12 +500,173 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
   )
 }
 
+// ── notes helpers ───────────────────────────────────────────────────────────────
+
+function parseNotes(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter(Boolean)
+  } catch {}
+  return [raw]
+}
+
+function serializeNotes(items: string[]): string | null {
+  const filtered = items.filter(s => s.trim())
+  return filtered.length ? JSON.stringify(filtered) : null
+}
+
+// ── notes popover (notebook icon + hover tooltip) ──────────────────────────────
+
+function NotesPopover({ notes }: { notes: string }) {
+  const [open, setOpen] = useState(false)
+  const items = parseNotes(notes)
+  const preview = items.map((n, i) => `${i + 1}. ${n.replace(/[#*`_~\[\]]/g, '').slice(0, 120)}`).join('\n')
+  return (
+    <div className="relative inline-flex items-center">
+      <button
+        className="text-[13px] leading-none text-zinc-500 hover:text-amber-400 transition-colors"
+        title="Has notes"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        📓
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full left-0 mb-1.5 z-50 w-72 max-h-48 overflow-y-auto bg-zinc-800 border border-zinc-700 rounded-lg p-2.5 text-[10px] text-zinc-300 shadow-2xl whitespace-pre-wrap"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+        >
+          {preview}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── read-only numbered notes display ────────────────────────────────────────────
+
+function NotesDisplay({ notes }: { notes: string }) {
+  const items = parseNotes(notes)
+  if (!items.length) return null
+  return (
+    <div className="space-y-1">
+      {items.map((item, i) => (
+        <div key={i} className="flex gap-1.5 text-xs text-zinc-400">
+          <span className="text-[10px] font-mono text-zinc-600 flex-shrink-0 mt-0.5 w-4 text-right">{i + 1}.</span>
+          <span className="leading-relaxed break-words">{item}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── individual numbered notes editor ────────────────────────────────────────────
+
+function NotesList({ goal, onSaved }: { goal: Goal; onSaved: () => void }) {
+  const [items, setItems] = useState<string[]>(() => parseNotes(goal.notes))
+  const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [editText, setEditText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function persist(nextItems: string[]) {
+    setSaving(true); setError(null)
+    try {
+      const res = await fetch(`/api/goals/${goal.id}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: serializeNotes(nextItems) }),
+      })
+      if (res.ok) { setItems(nextItems); onSaved() }
+      else { const d = await res.json(); setError(d.error ?? 'Save failed') }
+    } catch { setError('Save failed') } finally { setSaving(false) }
+  }
+
+  function startEdit(idx: number) { setEditIdx(idx); setEditText(items[idx]) }
+
+  function saveEdit() {
+    if (editIdx === null) return
+    const trimmed = editText.trim()
+    if (!trimmed) { deleteItem(editIdx); return }
+    const next = [...items]; next[editIdx] = trimmed
+    setEditIdx(null); persist(next)
+  }
+
+  function deleteItem(idx: number) {
+    setEditIdx(null)
+    persist(items.filter((_, i) => i !== idx))
+  }
+
+  function addNote() {
+    const next = [...items, '']
+    setItems(next); setEditIdx(next.length - 1); setEditText('')
+  }
+
+  return (
+    <div className="mt-2 p-2.5 rounded-lg bg-zinc-900/50 border border-zinc-700/40 space-y-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Notes</span>
+        <button onClick={addNote} disabled={saving}
+          className="text-[10px] px-2 py-0.5 rounded border border-zinc-600/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors disabled:opacity-40">
+          + Add note
+        </button>
+      </div>
+      {items.length === 0 && (
+        <p className="text-[10px] text-zinc-600 italic">No notes yet — click + Add note</p>
+      )}
+      {items.map((item, idx) => (
+        <div key={idx} className="flex gap-2 items-start group/note">
+          <span className="text-[10px] font-mono text-zinc-600 mt-0.5 flex-shrink-0 w-4 text-right">{idx + 1}.</span>
+          {editIdx === idx ? (
+            <div className="flex-1 space-y-1">
+              <textarea
+                autoFocus
+                value={editText}
+                onChange={e => setEditText(e.target.value)}
+                rows={3}
+                className="w-full bg-zinc-900/60 border border-zinc-600/50 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500 resize-y font-mono placeholder:text-zinc-600"
+                placeholder="Note text…"
+                onKeyDown={e => { if (e.key === 'Escape') setEditIdx(null) }}
+              />
+              <div className="flex gap-1">
+                <button onClick={saveEdit} disabled={saving}
+                  className="text-[10px] px-2 py-0.5 rounded bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
+                  {saving ? '…' : 'Save'}
+                </button>
+                <button onClick={() => setEditIdx(null)}
+                  className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 text-zinc-500 hover:text-zinc-300">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-start gap-1">
+              <span className="flex-1 text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">{item}</span>
+              <div className="flex gap-0.5 opacity-0 group-hover/note:opacity-100 transition-opacity flex-shrink-0">
+                <button onClick={() => startEdit(idx)}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-200">✎</button>
+                <button onClick={() => deleteItem(idx)} disabled={saving}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-red-900/50 text-red-600 hover:text-red-400 disabled:opacity-40">✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+      {error && <p className="text-[10px] text-red-400">{error}</p>}
+    </div>
+  )
+}
+
 // ── goal card ──────────────────────────────────────────────────────────────────
 
 interface TaskCounts {
   active: number
   done: number
   blocked: number
+  partial: number
   total: number
   pct_complete: number
 }
@@ -517,6 +715,8 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
     : null
   const hasChildren = (goal.children?.length ?? 0) > 0
   const [collapsed, setCollapsed] = useState(false)
+  const [cardExpanded, setCardExpanded] = useState(goal.level === 'vision' || goal.level === 'strategy')
+  const [showNotes, setShowNotes] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -655,22 +855,33 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         </div>
 
-        <h3
-          className={`font-semibold mb-1 ${
-            goal.level === 'vision' ? 'text-xl font-bold text-white' :
-            goal.level === 'strategy' ? 'text-base text-zinc-100' :
-            'text-sm text-zinc-200'
-          }`}
-          style={goal.level === 'vision' ? { textShadow: '0 0 20px rgba(167,139,250,0.3)' } : undefined}
-        >{goal.title}</h3>
+        <div
+          className="flex items-center justify-between gap-2 mb-1 cursor-pointer group"
+          onClick={() => setCardExpanded(v => !v)}
+        >
+          <h3
+            className={`font-semibold flex-1 group-hover:text-white transition-colors ${
+              goal.level === 'vision' ? 'text-xl font-bold text-white' :
+              goal.level === 'strategy' ? 'text-base text-zinc-100' :
+              'text-sm text-zinc-200'
+            }`}
+            style={goal.level === 'vision' ? { textShadow: '0 0 20px rgba(167,139,250,0.3)' } : undefined}
+          >{goal.title}</h3>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {!cardExpanded && goal.notes && <NotesPopover notes={goal.notes} />}
+            <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition-colors">{cardExpanded ? '▲' : '▼'}</span>
+          </div>
+        </div>
 
-        {goal.description && (
-          <p className="text-xs text-zinc-400 leading-relaxed mb-3">{goal.description}</p>
+        {cardExpanded && goal.description && (
+          <div className="mb-3 max-h-40 overflow-y-auto pr-1">
+            <MarkdownPreview content={goal.description} />
+          </div>
         )}
 
-        <ProgressBar value={goal.progress} status={goal.status} />
+        {cardExpanded && <ProgressBar value={goal.progress} status={goal.status} taskStatus={taskStatus} />}
 
-        {taskStatus?.counts && taskStatus.counts.total > 0 && (
+        {cardExpanded && taskStatus?.counts && taskStatus.counts.total > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">tasks</span>
             {taskStatus.counts.done > 0 && (
@@ -681,6 +892,11 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             {taskStatus.counts.active > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/25 text-blue-400 border border-blue-800/30">
                 ● {taskStatus.counts.active}
+              </span>
+            )}
+            {(taskStatus.counts.partial ?? 0) > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-900/25 text-sky-400 border border-sky-800/30">
+                ½ {taskStatus.counts.partial}
               </span>
             )}
             {taskStatus.counts.blocked > 0 && (
@@ -694,7 +910,7 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
-        {goal.tags && goal.tags.length > 0 && (
+        {cardExpanded && goal.tags && goal.tags.length > 0 && (
           <div className="flex gap-1.5 mt-2 flex-wrap">
             {goal.tags.map((t) => (
               <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500">{t}</span>
@@ -702,11 +918,33 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
-        {goal.notes && (
-          <div className="mt-2 text-[11px] text-zinc-500 italic border-l-2 border-zinc-700 pl-2">{goal.notes}</div>
+        {cardExpanded && (
+          <>
+            {showNotes ? (
+              <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh?.() }} />
+            ) : goal.notes ? (
+              <div className="mt-2 group/notes relative border-l-2 border-zinc-700/60 pl-2 max-h-28 overflow-y-auto">
+                <NotesDisplay notes={goal.notes} />
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowNotes(true) }}
+                  className="absolute top-0 right-0 hidden group-hover/notes:inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/90 border border-zinc-700/60 text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  ✎ Edit
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowNotes(true) }}
+                className="mt-2 text-[10px] text-zinc-600 hover:text-zinc-400 italic transition-colors"
+              >
+                + Add notes…
+              </button>
+            )}
+          </>
         )}
 
         {/* Action buttons */}
+        {cardExpanded && (
         <div className="mt-3 pt-3 border-t border-zinc-800/40 flex items-center gap-2 flex-wrap">
           <button
             onClick={handleTrigger}
@@ -720,6 +958,12 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
           >
             Schedule
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v) }}
+            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'}`}
+          >
+            📓 Notes
           </button>
           {triggeredTaskId && (
             <button
@@ -755,18 +999,20 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
                 {archiving ? '…' : 'Restore'}
               </button>
             ) : (<>
-              {goal.status !== 'completed' && (
-                <button onClick={() => handleStatusChange('completed')} disabled={!!actionBusy}
-                        className="text-[10px] px-2 py-0.5 rounded border border-green-800/50 bg-green-900/20 text-green-400 hover:bg-green-900/40 disabled:opacity-50">
-                  {actionBusy === 'completed' ? '…' : '✓ Complete'}
-                </button>
-              )}
-              {goal.status !== 'cancelled' && (
-                <button onClick={() => handleStatusChange('cancelled')} disabled={!!actionBusy}
-                        className="text-[10px] px-2 py-0.5 rounded border border-amber-800/50 bg-amber-900/20 text-amber-400 hover:bg-amber-900/40 disabled:opacity-50">
-                  {actionBusy === 'cancelled' ? '…' : '✕ Cancel'}
-                </button>
-              )}
+              <select
+                value={goal.status}
+                onChange={e => handleStatusChange(e.target.value)}
+                disabled={!!actionBusy}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/60 text-zinc-300 focus:outline-none focus:border-zinc-500 disabled:opacity-50 cursor-pointer"
+              >
+                <option value="active">Active</option>
+                <option value="planned">Planned</option>
+                <option value="paused">Paused</option>
+                <option value="blocked">Blocked</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              {actionBusy && <span className="text-[10px] text-zinc-500">…</span>}
               <button onClick={() => handleStatusChange('archived')} disabled={archiving || !!actionBusy}
                       className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-400 disabled:opacity-50">
                 {archiving ? '…' : 'Archive'}
@@ -793,11 +1039,12 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             </div>
           )}
         </div>
+        )}
 
-        {showSchedule && (
+        {cardExpanded && showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
         )}
-        {showEdit && (
+        {cardExpanded && showEdit && (
           <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
         )}
       </div>
@@ -855,7 +1102,7 @@ function SummaryTable({ flat, onClickStatus, onClickLevel, onClickAll }: Summary
     { label: 'Blocked', value: byStatus.blocked ?? 0, color: (byStatus.blocked ?? 0) > 0 ? 'text-amber-400' : 'text-zinc-600', onClick: () => onClickStatus?.('blocked'), hint: 'Filter blocked goals' },
     { label: 'Avg Progress', value: `${avgProgress}%`, color: 'text-zinc-300' },
     { label: 'Milestones', value: byLevel.milestone ?? 0, color: 'text-zinc-300', onClick: () => onClickLevel?.('milestone'), hint: 'Filter milestones' },
-    { label: 'Strategies', value: byLevel.strategy ?? 0, color: 'text-indigo-300', onClick: () => onClickLevel?.('strategy'), hint: 'Filter strategies' },
+    { label: 'Goals', value: byLevel.strategy ?? 0, color: 'text-indigo-300', onClick: () => onClickLevel?.('strategy'), hint: 'Filter goals' },
     { label: 'Vision Items', value: byLevel.vision ?? 0, color: 'text-purple-300', onClick: () => onClickLevel?.('vision'), hint: 'Filter vision items' },
   ]
 
@@ -1170,13 +1417,15 @@ interface AddGoalPanelProps {
   flat: Goal[]
   onClose: () => void
   onCreated: () => void
+  initialLevel?: Goal['level']
 }
 
-function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
+function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelProps) {
+  const isVision = initialLevel === 'vision'
   const [form, setForm] = useState({
     title: '',
     description: '',
-    level: 'milestone' as Goal['level'],
+    level: (initialLevel ?? 'milestone') as Goal['level'],
     parent_id: '',
     status: 'planned' as Goal['status'],
     priority: 2,
@@ -1190,6 +1439,43 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
   const descRef = useRef<HTMLTextAreaElement>(null)
   const notesRef = useRef<HTMLTextAreaElement>(null)
 
+  // Inline new-goal (strategy) creation
+  const [showNewGoalForm, setShowNewGoalForm] = useState(false)
+  const [newGoalForm, setNewGoalForm] = useState({ title: '', description: '' })
+  const [newGoalSaving, setNewGoalSaving] = useState(false)
+  const [localStrategies, setLocalStrategies] = useState<{ id: string; title: string }[]>([])
+
+  const strategies = flat.filter(g => g.level === 'strategy')
+  const allStrategies = [...strategies, ...localStrategies.filter(ls => !strategies.find(s => s.id === ls.id))]
+
+  async function handleCreateNewGoal() {
+    if (!newGoalForm.title.trim()) return
+    setNewGoalSaving(true)
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newGoalForm.title.trim(),
+          level: 'strategy',
+          status: 'planned',
+          priority: 2,
+          ...(newGoalForm.description.trim() && { description: newGoalForm.description.trim() }),
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const newId = data.id ?? data.goal?.id
+        if (newId) {
+          setLocalStrategies(prev => [...prev, { id: newId, title: newGoalForm.title.trim() }])
+          setForm(f => ({ ...f, parent_id: newId }))
+        }
+        setShowNewGoalForm(false)
+        setNewGoalForm({ title: '', description: '' })
+      }
+    } catch { /* ignore */ } finally { setNewGoalSaving(false) }
+  }
+
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose()
   }
@@ -1197,6 +1483,7 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.title.trim()) { setError('Title is required'); return }
+    if (!isVision && !form.parent_id) { setError('Parent goal is required'); return }
     setSaving(true)
     setError(null)
     try {
@@ -1246,22 +1533,22 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
         style={{ animation: 'slideInRight 0.2s ease-out' }}
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-200">Add New Goal</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">{isVision ? 'Add New Vision' : 'Add Milestone / Task'}</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
-          {/* Row: Level + Status + Priority */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls}>Level</label>
-              <select value={form.level} onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))} className={inputCls}>
-                <option value="vision">Vision</option>
-                <option value="strategy">Strategy</option>
-                <option value="milestone">Milestone</option>
-                <option value="objective">Objective</option>
-              </select>
-            </div>
+          {/* Row: Level (hidden for vision) + Status + Priority */}
+          <div className={`grid gap-3 ${isVision ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {!isVision && (
+              <div>
+                <label className={labelCls}>Level</label>
+                <select value={form.level} onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))} className={inputCls}>
+                  <option value="milestone">Milestone</option>
+                  <option value="objective">Task</option>
+                </select>
+              </div>
+            )}
             <div>
               <label className={labelCls}>Status</label>
               <select value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as Goal['status'] }))} className={inputCls}>
@@ -1282,17 +1569,67 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
             </div>
           </div>
 
-          {/* Row: Parent + Target Date */}
+          {/* Row: Parent Goal (required, strategies only) + Target Date */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Parent Goal (optional)</label>
-              <select value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))} className={inputCls}>
-                <option value="">— None —</option>
-                {flat.map((g) => (
-                  <option key={g.id} value={g.id}>[{g.level}] {g.title}</option>
-                ))}
-              </select>
-            </div>
+            {!isVision && (
+              <div>
+                <label className={labelCls}>Parent Goal *</label>
+                <select
+                  value={form.parent_id}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') {
+                      setShowNewGoalForm(true)
+                    } else {
+                      setForm((f) => ({ ...f, parent_id: e.target.value }))
+                      setShowNewGoalForm(false)
+                    }
+                  }}
+                  className={inputCls}
+                  required
+                >
+                  <option value="" disabled>Select a Goal...</option>
+                  {allStrategies.map((g) => (
+                    <option key={g.id} value={g.id}>{g.title}</option>
+                  ))}
+                  <option value="__new__">+ Create new Goal...</option>
+                </select>
+                {showNewGoalForm && (
+                  <div className="mt-2 p-3 rounded-lg bg-indigo-950/30 border border-indigo-800/40 space-y-2">
+                    <div className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider">New Goal</div>
+                    <input
+                      value={newGoalForm.title}
+                      onChange={(e) => setNewGoalForm((f) => ({ ...f, title: e.target.value }))}
+                      placeholder="Goal name..."
+                      className={inputCls}
+                    />
+                    <textarea
+                      value={newGoalForm.description}
+                      onChange={(e) => setNewGoalForm((f) => ({ ...f, description: e.target.value }))}
+                      placeholder="Description (optional)"
+                      rows={2}
+                      className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-600 placeholder-zinc-600 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCreateNewGoal}
+                        disabled={newGoalSaving || !newGoalForm.title.trim()}
+                        className="flex-1 text-xs px-2 py-1.5 rounded border border-indigo-700/60 bg-indigo-900/40 text-indigo-200 hover:bg-indigo-900/60 disabled:opacity-50 font-semibold"
+                      >
+                        {newGoalSaving ? 'Creating...' : 'Create Goal'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewGoalForm(false); setNewGoalForm({ title: '', description: '' }) }}
+                        className="text-xs px-2 py-1.5 rounded border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <label className={labelCls}>Target Date</label>
               <input type="date" value={form.target_date} onChange={(e) => setForm((f) => ({ ...f, target_date: e.target.value }))} className={inputCls} />
@@ -1697,6 +2034,412 @@ function GoalsArchiveSection({ onRestore }: { onRestore: () => void }) {
   )
 }
 
+// ── Vision Header (collapsible section header for vision-level goals) ──────────
+
+function VisionHeader({
+  goal, isCollapsed, onToggle, strategyCount, onRefresh,
+}: {
+  goal: Goal; isCollapsed: boolean; onToggle: () => void
+  strategyCount: number; onRefresh: () => void
+}) {
+  const [showEdit, setShowEdit] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  async function updateStatus(status: string) {
+    setBusy(status)
+    await fetch(`/api/goals/${goal.id}/status`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch(() => {})
+    onRefresh(); setBusy(null)
+  }
+
+  async function handleDelete() {
+    setBusy('delete')
+    const res = await fetch(`/api/goals/${goal.id}/delete`, { method: 'POST' }).catch(() => null)
+    if (res?.ok) onRefresh()
+    setBusy(null); setShowDelete(false)
+  }
+
+  const [showNotes, setShowNotes] = useState(false)
+
+  return (
+    <div className="mb-10">
+      <div className="flex items-center gap-3 pb-3 border-b-2 border-purple-900/40 group">
+        <button onClick={onToggle} className="flex items-center gap-2.5 flex-1 text-left min-w-0">
+          <span className="text-xs text-purple-700 group-hover:text-purple-500 flex-shrink-0">{isCollapsed ? '▶' : '▼'}</span>
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-900/40 text-purple-400 border border-purple-800/40 uppercase tracking-wider flex-shrink-0">Vision</span>
+          <h2 className="text-xl font-bold text-white truncate" style={{ textShadow: '0 0 24px rgba(167,139,250,0.3)' }}>{goal.title}</h2>
+          <StatusBadge status={goal.status} />
+          {strategyCount > 0 && <span className="text-[10px] text-zinc-600 flex-shrink-0">{strategyCount} {strategyCount === 1 ? 'goal' : 'goals'}</span>}
+          {goal.notes && !showNotes && <NotesPopover notes={goal.notes} />}
+        </button>
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => { setShowNotes(v => !v); setShowEdit(false) }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-amber-300'}`}
+                  title="Notes">
+            📓
+          </button>
+          <button onClick={() => { setShowEdit(v => !v); setShowNotes(false) }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
+            ✎
+          </button>
+          <select value={goal.status} onChange={e => updateStatus(e.target.value)} disabled={!!busy}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/60 text-zinc-300 focus:outline-none disabled:opacity-50 cursor-pointer">
+            {['active','planned','paused','blocked','completed','cancelled'].map(s => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
+            ))}
+          </select>
+          <button onClick={() => setShowDelete(v => !v)}
+                  className="text-[10px] px-2 py-0.5 rounded border border-red-900/50 bg-red-950/20 text-red-500 hover:text-red-400">🗑</button>
+        </div>
+      </div>
+      {goal.description && (
+        <p className="text-sm text-zinc-500 mt-2 mb-1 ml-6 leading-relaxed">{goal.description}</p>
+      )}
+      {goal.notes && !showNotes && (
+        <div className="ml-6 mt-1 mb-1 border-l-2 border-zinc-700/60 pl-2 max-h-20 overflow-y-auto">
+          <NotesDisplay notes={goal.notes} />
+        </div>
+      )}
+      {showEdit && (
+        <div className="ml-6 mt-2">
+          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
+        </div>
+      )}
+      {showNotes && (
+        <div className="ml-6 mt-2">
+          <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh() }} />
+        </div>
+      )}
+      {showDelete && (
+        <div className="ml-6 mt-2 p-2 rounded-lg bg-red-950/30 border border-red-800/50 flex items-center gap-2">
+          <span className="text-xs text-red-300 flex-1">Delete &quot;{goal.title}&quot; permanently?</span>
+          <button onClick={handleDelete} disabled={busy === 'delete'}
+                  className="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50">
+            {busy === 'delete' ? '…' : 'Delete'}
+          </button>
+          <button onClick={() => setShowDelete(false)} className="text-xs px-3 py-1 rounded bg-zinc-700 text-zinc-300">Cancel</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Strategy Header ─────────────────────────────────────────────────────────────
+
+function StrategyHeader({
+  goal, isCollapsed, onToggle, milestoneCount, isDragOver, onRefresh,
+}: {
+  goal: Goal; isCollapsed: boolean; onToggle: () => void
+  milestoneCount: number; isDragOver: boolean; onRefresh: () => void
+}) {
+  const [showEdit, setShowEdit] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  async function updateStatus(status: string) {
+    setBusy(status)
+    await fetch(`/api/goals/${goal.id}/status`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch(() => {})
+    onRefresh(); setBusy(null)
+  }
+
+  async function handleDelete() {
+    setBusy('delete')
+    const res = await fetch(`/api/goals/${goal.id}/delete`, { method: 'POST' }).catch(() => null)
+    if (res?.ok) onRefresh()
+    setBusy(null); setShowDelete(false)
+  }
+
+  return (
+    <div className={`mb-4 rounded-xl p-3 border transition-all duration-150 ${isDragOver ? 'border-indigo-600/50 bg-indigo-900/15 ring-1 ring-indigo-500/30' : 'border-zinc-800/40 bg-zinc-900/20'}`}>
+      <div className="flex items-center gap-2 group">
+        <button onClick={onToggle} className="flex items-center gap-2 flex-1 text-left min-w-0">
+          <span className="text-[10px] text-indigo-700 group-hover:text-indigo-500 flex-shrink-0">{isCollapsed ? '▶' : '▼'}</span>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-400 border border-indigo-800/40 uppercase tracking-wider flex-shrink-0">Goal</span>
+          <h3 className="text-base font-semibold text-zinc-200 truncate">{goal.title}</h3>
+          <StatusBadge status={goal.status} />
+          {milestoneCount > 0 && <span className="text-[10px] text-zinc-600 flex-shrink-0">{milestoneCount} milestone{milestoneCount !== 1 ? 's' : ''}</span>}
+          {isDragOver && <span className="text-[10px] text-indigo-400 animate-pulse flex-shrink-0">↓ drop here</span>}
+          {goal.notes && !showNotes && <NotesPopover notes={goal.notes} />}
+        </button>
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => { setShowNotes(v => !v); setShowEdit(false) }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-amber-300'}`}
+                  title="Notes">
+            📓
+          </button>
+          <button onClick={() => { setShowEdit(v => !v); setShowNotes(false) }}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
+            ✎
+          </button>
+          <select value={goal.status} onChange={e => updateStatus(e.target.value)} disabled={!!busy}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/60 text-zinc-300 focus:outline-none disabled:opacity-50 cursor-pointer">
+            {['active','planned','paused','blocked','completed','cancelled'].map(s => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
+            ))}
+          </select>
+          <button onClick={() => setShowDelete(v => !v)}
+                  className="text-[10px] px-2 py-0.5 rounded border border-red-900/50 bg-red-950/20 text-red-500 hover:text-red-400">🗑</button>
+        </div>
+      </div>
+      {goal.description && (
+        <p className="text-xs text-zinc-500 mt-1.5 ml-5 leading-relaxed line-clamp-3">{goal.description}</p>
+      )}
+      {goal.notes && !showNotes && (
+        <div className="ml-5 mt-1 border-l-2 border-zinc-700/60 pl-2 max-h-16 overflow-y-auto">
+          <NotesDisplay notes={goal.notes} />
+        </div>
+      )}
+      {showEdit && (
+        <div className="ml-5 mt-2">
+          <GoalEditForm goal={goal} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh() }} />
+        </div>
+      )}
+      {showNotes && (
+        <div className="ml-5 mt-2">
+          <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh() }} />
+        </div>
+      )}
+      {showDelete && (
+        <div className="ml-5 mt-2 p-2 rounded-lg bg-red-950/30 border border-red-800/50 flex items-center gap-2">
+          <span className="text-xs text-red-300 flex-1">Delete &quot;{goal.title}&quot; permanently?</span>
+          <button onClick={handleDelete} disabled={busy === 'delete'}
+                  className="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white disabled:opacity-50">
+            {busy === 'delete' ? '…' : 'Delete'}
+          </button>
+          <button onClick={() => setShowDelete(false)} className="text-xs px-3 py-1 rounded bg-zinc-700 text-zinc-300">Cancel</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── HierarchyView ──────────────────────────────────────────────────────────────
+
+interface HierarchyViewProps {
+  flat: Goal[]
+  onTrigger: (goal: Goal) => Promise<string>
+  onFlag: (taskId: string) => Promise<void>
+  triggeredTasks: Record<string, string>
+  taskStatuses: Record<string, TaskStatus>
+  filterStatuses: Set<string>
+  filterLevels: Set<string>
+  searchText: string
+  onRefresh: () => void
+}
+
+function HierarchyView({
+  flat, onTrigger, onFlag, triggeredTasks, taskStatuses,
+  filterStatuses, filterLevels, searchText, onRefresh,
+}: HierarchyViewProps) {
+  const [dragItem, setDragItem] = useState<{ id: string; level: string } | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
+
+  function toggle(id: string) {
+    setCollapsedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
+  async function reparent(itemId: string, newParentId: string) {
+    await fetch('/api/goals', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: itemId, parent_id: newParentId }),
+    }).catch(() => {})
+    onRefresh()
+  }
+
+  // Build parent → sorted children map (exclude archived)
+  const byParent = new Map<string | null, Goal[]>()
+  for (const g of flat) {
+    if (g.status === 'archived') continue
+    const key = g.parent_id ?? null
+    if (!byParent.has(key)) byParent.set(key, [])
+    byParent.get(key)!.push(g)
+  }
+  for (const ch of byParent.values()) ch.sort((a, b) => a.sort_order - b.sort_order || a.priority - b.priority)
+
+  const roots = byParent.get(null) ?? []
+  const visions = roots.filter(g => g.level === 'vision')
+  const orphanedStrategies = roots.filter(g => g.level === 'strategy')
+  const orphanedMilestones = roots.filter(g => g.level === 'milestone')
+
+  function passes(g: Goal) {
+    if (!filterStatuses.has(g.status)) return false
+    if (!filterLevels.has(g.level)) return false
+    if (searchText && !nodeMatchesSearch(g, searchText)) return false
+    return true
+  }
+
+  function renderObjective(obj: Goal) {
+    if (!passes(obj)) return null
+    return (
+      <div
+        key={obj.id}
+        draggable
+        onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: obj.id, level: 'objective' }) }}
+        onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
+        className="cursor-grab active:cursor-grabbing"
+      >
+        <GoalCard
+          goal={obj} depth={3}
+          onTrigger={onTrigger} onFlag={onFlag}
+          triggeredTaskId={triggeredTasks[obj.id]}
+          taskStatus={taskStatuses[obj.id]}
+          allTaskStatuses={taskStatuses}
+          onRefresh={onRefresh}
+        />
+      </div>
+    )
+  }
+
+  function renderMilestone(ms: Goal, orphaned = false) {
+    const objectives = (byParent.get(ms.id) ?? []).filter(g => g.level === 'objective')
+    const isDragTarget = dragItem?.level === 'objective' && dragOverId === ms.id
+    const msVisible = passes(ms)
+    const hasVisibleObj = objectives.some(passes)
+    if (!msVisible && !hasVisibleObj) return null
+
+    return (
+      <div
+        key={ms.id}
+        className={`mb-2 rounded-lg transition-all duration-150 ${isDragTarget ? 'ring-1 ring-blue-500/50 bg-blue-900/5' : ''}`}
+        onDragOver={dragItem?.level === 'objective' ? (e) => { e.preventDefault(); setDragOverId(ms.id) } : undefined}
+        onDragLeave={dragItem?.level === 'objective' ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null) } : undefined}
+        onDrop={dragItem?.level === 'objective' ? async (e) => {
+          e.preventDefault(); e.stopPropagation(); setDragOverId(null)
+          if (dragItem && dragItem.id !== ms.id) await reparent(dragItem.id, ms.id)
+          setDragItem(null)
+        } : undefined}
+      >
+        {msVisible && (
+          <div
+            draggable
+            onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: ms.id, level: 'milestone' }) }}
+            onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
+            className="cursor-grab active:cursor-grabbing"
+            title="Drag to move to a different strategy"
+          >
+            <GoalCard
+              goal={ms} depth={orphaned ? 0 : 2}
+              onTrigger={onTrigger} onFlag={onFlag}
+              triggeredTaskId={triggeredTasks[ms.id]}
+              taskStatus={taskStatuses[ms.id]}
+              allTaskStatuses={taskStatuses}
+              onRefresh={onRefresh}
+            />
+          </div>
+        )}
+        {isDragTarget && <div className="mx-4 mb-1 h-0.5 bg-blue-500/40 rounded-full" />}
+        {objectives.length > 0 && (
+          <div className="ml-6 space-y-0">
+            {objectives.map(renderObjective)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderStrategy(strat: Goal, orphaned = false) {
+    const milestones = (byParent.get(strat.id) ?? []).filter(g => g.level === 'milestone')
+    const isCollapsed = collapsedIds.has(strat.id)
+    const isDragTarget = dragItem?.level === 'milestone' && dragOverId === strat.id
+
+    return (
+      <div
+        key={strat.id}
+        className={orphaned ? 'mb-4' : 'mb-4 ml-4'}
+        onDragOver={dragItem?.level === 'milestone' ? (e) => { e.preventDefault(); setDragOverId(strat.id) } : undefined}
+        onDragLeave={dragItem?.level === 'milestone' ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null) } : undefined}
+        onDrop={dragItem?.level === 'milestone' ? async (e) => {
+          e.preventDefault(); e.stopPropagation(); setDragOverId(null)
+          if (dragItem && dragItem.id !== strat.id) await reparent(dragItem.id, strat.id)
+          setDragItem(null)
+        } : undefined}
+      >
+        <StrategyHeader
+          goal={strat}
+          isCollapsed={isCollapsed}
+          onToggle={() => toggle(strat.id)}
+          milestoneCount={milestones.length}
+          isDragOver={isDragTarget}
+          onRefresh={onRefresh}
+        />
+        {!isCollapsed && (
+          <div className="ml-4 space-y-0">
+            {milestones.map(ms => renderMilestone(ms))}
+            {milestones.length === 0 && (
+              <div className={`py-3 text-center text-[11px] rounded-lg border border-dashed transition-colors ${isDragTarget ? 'border-indigo-600/50 text-indigo-500' : 'border-zinc-800/50 text-zinc-700'}`}>
+                {isDragTarget ? 'Drop milestone here' : 'No milestones — drag one here or add below'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderVision(vision: Goal) {
+    const children = byParent.get(vision.id) ?? []
+    const strategies = children.filter(g => g.level === 'strategy')
+    const directMilestones = children.filter(g => g.level === 'milestone')
+    const isCollapsed = collapsedIds.has(vision.id)
+
+    return (
+      <div key={vision.id}>
+        <VisionHeader
+          goal={vision}
+          isCollapsed={isCollapsed}
+          onToggle={() => toggle(vision.id)}
+          strategyCount={strategies.length}
+          onRefresh={onRefresh}
+        />
+        {!isCollapsed && (
+          <div>
+            {strategies.map(s => renderStrategy(s))}
+            {directMilestones.map(ms => renderMilestone(ms))}
+            {strategies.length === 0 && directMilestones.length === 0 && (
+              <div className="ml-6 py-4 text-center text-xs text-zinc-700">
+                No strategies or milestones yet — add one using the + Add Goal button
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const hasOrphans = orphanedStrategies.length > 0 || orphanedMilestones.length > 0
+
+  if (visions.length === 0 && orphanedStrategies.length === 0 && orphanedMilestones.length === 0) {
+    return <div className="text-zinc-600 text-sm text-center py-12">No goals match the current filters</div>
+  }
+
+  return (
+    <div>
+      {visions.map(renderVision)}
+      {hasOrphans && (
+        <div className={visions.length > 0 ? 'mt-6 pt-6 border-t border-zinc-800/40' : ''}>
+          {visions.length > 0 && <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-4">Uncategorized</div>}
+          {orphanedStrategies.map(s => renderStrategy(s, true))}
+          {orphanedMilestones.map(ms => renderMilestone(ms, true))}
+        </div>
+      )}
+      {dragItem && (
+        <div className="fixed bottom-4 right-4 z-50 px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-[11px] text-zinc-400 shadow-lg">
+          Dragging {LEVEL_DISPLAY[dragItem.level] ?? dragItem.level} — drop on a {dragItem.level === 'milestone' ? 'goal' : 'milestone'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── page ───────────────────────────────────────────────────────────────────────
 
 export default function GoalsPage() {
@@ -1705,15 +2448,28 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showAddPanel, setShowAddPanel] = useState(false)
+  const [showAddVisionPanel, setShowAddVisionPanel] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
 
-  // filters — completed hidden by default
-  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(
-    new Set(['active', 'planned', 'paused', 'blocked'])
-  )
-  const [filterLevels, setFilterLevels] = useState<Set<string>>(new Set(ALL_LEVELS))
-  const [sortBy, setSortBy] = useState<SortBy>('priority')
+  // filters — persisted in localStorage
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('goals_filterStatuses')
+      return saved ? new Set(JSON.parse(saved)) : new Set(['active', 'planned', 'paused', 'blocked'])
+    } catch { return new Set(['active', 'planned', 'paused', 'blocked']) }
+  })
+  const [filterLevels, setFilterLevels] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('goals_filterLevels')
+      return saved ? new Set(JSON.parse(saved)) : new Set(ALL_LEVELS)
+    } catch { return new Set(ALL_LEVELS) }
+  })
+  const [sortBy, setSortBy] = useState<SortBy>(() => {
+    try {
+      return (localStorage.getItem('goals_sortBy') as SortBy) ?? 'priority'
+    } catch { return 'priority' }
+  })
   const [searchText, setSearchText] = useState('')
 
   // section collapse state
@@ -1727,6 +2483,17 @@ export default function GoalsPage() {
       return next
     })
   }
+
+  // Persist filter state to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('goals_filterStatuses', JSON.stringify([...filterStatuses])) } catch { /* ignore */ }
+  }, [filterStatuses])
+  useEffect(() => {
+    try { localStorage.setItem('goals_filterLevels', JSON.stringify([...filterLevels])) } catch { /* ignore */ }
+  }, [filterLevels])
+  useEffect(() => {
+    try { localStorage.setItem('goals_sortBy', sortBy) } catch { /* ignore */ }
+  }, [sortBy])
 
   function toggleStatus(s: string) {
     setFilterStatuses((prev) => {
@@ -1826,27 +2593,23 @@ export default function GoalsPage() {
         const data: { tasks: Record<string, TaskStatus> } = await res.json()
         setTaskStatuses(data.tasks ?? {})
 
-        // Auto-advance milestones where all tasks are completed
-        const candidates = flat.filter((g) =>
-          g.level === 'milestone' &&
-          g.status !== 'completed' &&
-          g.status !== 'archived' &&
-          (data.tasks[g.id]?.counts?.total ?? 0) > 0 &&
-          (data.tasks[g.id]?.counts?.active ?? 1) === 0 &&
-          (data.tasks[g.id]?.counts?.blocked ?? 1) === 0
-        )
-        for (const goal of candidates) {
-          fetch('/api/goals', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: goal.id,
-              status: 'completed',
-              progress: 100,
-              completed_at: new Date().toISOString(),
-            }),
-          }).catch(() => {/* non-fatal */})
+        // Sync goal.progress from task completion counts
+        for (const goal of flat) {
+          if (goal.status === 'completed' || goal.status === 'archived') continue
+          const ts = data.tasks[goal.id]
+          if (!ts?.counts || ts.counts.total === 0) continue
+          const calcPct = ts.counts.pct_complete
+          // Only write back if different by more than 1% (avoid thrashing)
+          if (Math.abs(calcPct - goal.progress) > 1) {
+            fetch('/api/goals', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: goal.id, progress: calcPct }),
+            }).catch(() => {/* non-fatal */})
+          }
         }
+
+        // Goal status is NOT auto-changed here — Jeff sets status manually.
       } catch { /* silent */ }
     }
 
@@ -1859,7 +2622,7 @@ export default function GoalsPage() {
     const res = await fetch('/api/goals/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goalId: goal.id, title: goal.title, description: goal.description }),
+      body: JSON.stringify({ goalId: goal.id, title: goal.title, description: goal.description, notes: goal.notes }),
     })
     if (!res.ok) throw new Error('Failed to trigger')
     const data = await res.json()
@@ -1893,11 +2656,6 @@ export default function GoalsPage() {
     window.location.reload()
   }
 
-  const filteredGoals = goals.filter((g) =>
-    nodeMatchesFilter(g, filterStatuses, filterLevels, searchText)
-  )
-  const visibleGoals = sortGoals(filteredGoals, sortBy)
-
   const calendarCollapsed = collapsedSections.has('calendar')
   const summaryCollapsed = collapsedSections.has('summary')
   const statusCollapsed = collapsedSections.has('status')
@@ -1915,10 +2673,16 @@ export default function GoalsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowAddVisionPanel(true)}
+            className="text-xs px-3 py-1.5 rounded-full font-semibold bg-zinc-800/60 border border-purple-900/50 text-purple-400 hover:bg-purple-950/40 hover:text-purple-300 transition-all"
+          >
+            + Vision
+          </button>
+          <button
             onClick={() => setShowAddPanel(true)}
             className="text-xs px-3 py-1.5 rounded-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-300 hover:bg-purple-900/50 hover:text-purple-200 transition-all"
           >
-            + Add Goal
+            + Milestone / Task
           </button>
           {loading && (
             <div className="w-3 h-3 border-2 border-zinc-700 border-t-blue-400 rounded-full animate-spin" />
@@ -1996,40 +2760,20 @@ export default function GoalsPage() {
               title="Goal Hierarchy"
               collapsed={hierarchyCollapsed}
               onToggle={() => toggleSection('hierarchy')}
-              count={visibleGoals.length !== goals.length ? visibleGoals.length : goals.length}
+              count={flat.filter(g => g.status !== 'archived').length}
             />
-            {visibleGoals.length !== goals.length && !hierarchyCollapsed && (
-              <p className="text-[10px] text-zinc-600 mb-3 -mt-2">
-                Showing {visibleGoals.length} of {goals.length} root goals
-              </p>
-            )}
             {!hierarchyCollapsed && (
-              visibleGoals.length === 0 ? (
-                <div className="text-zinc-600 text-sm text-center py-12">
-                  No goals match the current filters
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {visibleGoals.map((g) => (
-                    <GoalCard
-                      key={g.id}
-                      goal={g}
-                      depth={0}
-                      onTrigger={handleTrigger}
-                      onFlag={handleFlag}
-                      triggeredTaskId={triggeredTasks[g.id]}
-                      taskStatus={taskStatuses[g.id]}
-                      allTaskStatuses={taskStatuses}
-                      filterStatuses={filterStatuses}
-                      filterLevels={filterLevels}
-                      searchText={searchText}
-                      onArchive={handleGoalArchived}
-                      onRestore={handleGoalRestored}
-                      onRefresh={handleGoalRestored}
-                    />
-                  ))}
-                </div>
-              )
+              <HierarchyView
+                flat={flat}
+                onTrigger={handleTrigger}
+                onFlag={handleFlag}
+                triggeredTasks={triggeredTasks}
+                taskStatuses={taskStatuses}
+                filterStatuses={filterStatuses}
+                filterLevels={filterLevels}
+                searchText={searchText}
+                onRefresh={handleGoalRestored}
+              />
             )}
           </div>
         </>
@@ -2043,6 +2787,15 @@ export default function GoalsPage() {
           flat={flat}
           onClose={() => setShowAddPanel(false)}
           onCreated={handleGoalCreated}
+        />
+      )}
+
+      {showAddVisionPanel && (
+        <AddGoalPanel
+          flat={flat}
+          onClose={() => setShowAddVisionPanel(false)}
+          onCreated={handleGoalCreated}
+          initialLevel="vision"
         />
       )}
     </div>
