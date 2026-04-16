@@ -256,6 +256,13 @@ function LevelBadge({ level }: { level: string }) {
 
 const RUNNING_TASK_STATUSES = new Set(['in_progress_agent', 'claimed', 'in_progress_jeff'])
 
+function computeChildProgress(goal: Goal): number {
+  const objectives = (goal.children ?? []).filter(c => c.level === 'objective')
+  if (!objectives.length) return goal.progress
+  const sum = objectives.reduce((acc, c) => acc + (c.status === 'completed' ? 100 : c.progress), 0)
+  return Math.round(sum / objectives.length)
+}
+
 function ProgressBar({ value, status, taskStatus }: { value: number; status: string; taskStatus?: TaskStatus }) {
   const isRunning = taskStatus ? RUNNING_TASK_STATUSES.has(taskStatus.status) : false
   const color = isRunning          ? 'bg-blue-500' :
@@ -945,7 +952,11 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
           </div>
         )}
 
-        <ProgressBar value={goal.progress} status={goal.status} taskStatus={taskStatus} />
+        <ProgressBar
+          value={goal.level === 'milestone' ? computeChildProgress(goal) : goal.progress}
+          status={goal.status}
+          taskStatus={taskStatus}
+        />
 
         {taskStatus?.counts && taskStatus.counts.total > 0 && (
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -1480,6 +1491,83 @@ function MarkdownPreview({ content }: { content: string }) {
   )
 }
 
+// ── notes editor (stateful, no DB — for creation forms) ──────────────────────
+
+function NotesEditorField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [items, setItems] = useState<string[]>(() => parseNotes(value))
+  const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [editText, setEditText] = useState('')
+
+  function commit(next: string[]) {
+    setItems(next)
+    onChange(serializeNotes(next) ?? '')
+  }
+
+  function startEdit(idx: number) { setEditIdx(idx); setEditText(items[idx]) }
+
+  function saveEdit() {
+    if (editIdx === null) return
+    const trimmed = editText.trim()
+    const next = trimmed ? [...items] : items.filter((_, i) => i !== editIdx)
+    if (trimmed) next[editIdx] = trimmed
+    setEditIdx(null); commit(next)
+  }
+
+  function deleteItem(idx: number) { setEditIdx(null); commit(items.filter((_, i) => i !== idx)) }
+
+  function addNote() {
+    const next = [...items, '']
+    setItems(next); setEditIdx(next.length - 1); setEditText('')
+  }
+
+  return (
+    <div className="p-2.5 rounded-lg bg-zinc-900/50 border border-zinc-700/40 space-y-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Notes</span>
+        <button type="button" onClick={addNote}
+          className="text-[10px] px-2 py-0.5 rounded border border-zinc-600/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors">
+          + Add note
+        </button>
+      </div>
+      {items.length === 0 && (
+        <p className="text-[10px] text-zinc-600 italic">No notes yet — click + Add note</p>
+      )}
+      {items.map((item, idx) => (
+        <div key={idx} className="flex gap-2 items-start group/note">
+          <span className="text-[10px] font-mono text-zinc-600 mt-0.5 flex-shrink-0 w-4 text-right">{idx + 1}.</span>
+          {editIdx === idx ? (
+            <div className="flex-1 space-y-1">
+              <textarea
+                autoFocus
+                value={editText}
+                onChange={e => setEditText(e.target.value)}
+                rows={2}
+                className="w-full bg-zinc-900/60 border border-zinc-600/50 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500 resize-none font-mono placeholder:text-zinc-600"
+                placeholder="Note text…"
+                onKeyDown={e => { if (e.key === 'Escape') setEditIdx(null); if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit() } }}
+              />
+              <div className="flex gap-1">
+                <button type="button" onClick={saveEdit}
+                  className="text-[10px] px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300">Save</button>
+                <button type="button" onClick={() => setEditIdx(null)}
+                  className="text-[10px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-start justify-between gap-1 group/item">
+              <span className="text-xs text-zinc-400 leading-relaxed flex-1 break-words">{item || <span className="italic text-zinc-600">empty</span>}</span>
+              <div className="flex gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0">
+                <button type="button" onClick={() => startEdit(idx)} className="text-[10px] text-zinc-500 hover:text-zinc-300">✎</button>
+                <button type="button" onClick={() => deleteItem(idx)} className="text-[10px] text-zinc-600 hover:text-red-400">✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── add goal modal ─────────────────────────────────────────────────────────────
 
 interface AddGoalPanelProps {
@@ -1507,9 +1595,7 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
-  const [notesTab, setNotesTab] = useState<'edit' | 'preview'>('edit')
   const descRef = useRef<HTMLTextAreaElement>(null)
-  const notesRef = useRef<HTMLTextAreaElement>(null)
 
   // Parent options derived from level
   const visions    = flat.filter(g => g.level === 'vision'    && g.status !== 'archived')
@@ -1720,33 +1806,8 @@ function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelPr
             )}
           </div>
 
-          {/* Notes */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className={labelCls}>Notes</label>
-              <div className="flex gap-0.5 -mb-px relative z-10">
-                <button type="button" className={tabBtn(notesTab === 'edit')} onClick={() => setNotesTab('edit')}>Edit</button>
-                <button type="button" className={tabBtn(notesTab === 'preview')} onClick={() => setNotesTab('preview')}>Preview</button>
-              </div>
-            </div>
-            {notesTab === 'edit' ? (
-              <>
-                <MarkdownToolbar textareaRef={notesRef} value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
-                <textarea
-                  ref={notesRef}
-                  value={form.notes}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Internal notes, blockers, context…"
-                  rows={4}
-                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-purple-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
-                />
-              </>
-            ) : (
-              <div className="min-h-[80px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
-                <MarkdownPreview content={form.notes} />
-              </div>
-            )}
-          </div>
+          {/* Notes — numbered list */}
+          <NotesEditorField value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
 
           {error && (
             <p className="text-xs text-red-400 border border-red-900/50 rounded-md px-3 py-2 bg-red-950/20">{error}</p>
