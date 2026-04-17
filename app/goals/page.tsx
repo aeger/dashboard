@@ -231,6 +231,27 @@ const LEVEL_DISPLAY: Record<string, string> = {
   objective: 'Task',
 }
 
+// ── notes types + helpers ──────────────────────────────────────────────────────
+
+type GoalNote = { id: string; text: string; created_at: string }
+
+function parseGoalNotes(raw: string | null): GoalNote[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed as GoalNote[]
+  } catch {}
+  return [{ id: Math.random().toString(36).slice(2), text: raw, created_at: new Date().toISOString() }]
+}
+
+const REVIEW_AGENTS = [
+  { label: 'Wren (Claude Code)',  value: 'claude-code' },
+  { label: 'Iris (Cowork)',       value: 'cowork' },
+  { label: 'Atlas (Desktop)',     value: 'atlas' },
+  { label: 'Forge (Desktop CC)',  value: 'forge' },
+  { label: 'Volt (Nemotron)',     value: 'volt' },
+]
+
 const STATUS_ICON: Record<string, string> = {
   active:    '● ',
   completed: '✓ ',
@@ -252,6 +273,27 @@ function LevelBadge({ level }: { level: string }) {
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide ${LEVEL_BADGE[level] ?? LEVEL_BADGE.milestone}`}>
       {LEVEL_DISPLAY[level] ?? level}
     </span>
+  )
+}
+
+function calculateAggregateProgress(goal: Goal): number {
+  if (!goal.children || goal.children.length === 0) return goal.progress
+  const childProgress = goal.children.map(c => calculateAggregateProgress(c))
+  return Math.round(childProgress.reduce((sum, p) => sum + p, 0) / childProgress.length)
+}
+
+function TitleProgressBar({ goal }: { goal: Goal }) {
+  const isVisionOrStrategy = goal.level === 'vision' || goal.level === 'strategy'
+  const displayProgress = isVisionOrStrategy ? calculateAggregateProgress(goal) : goal.progress
+  const color = goal.status === 'completed' ? 'bg-green-400' : 'bg-amber-400'
+
+  return (
+    <div className="h-0.5 bg-zinc-800/50 rounded-full overflow-hidden mt-1.5 mb-2">
+      <div
+        className={`h-full rounded-full ${color} transition-all duration-300 opacity-60`}
+        style={{ width: `${displayProgress}%` }}
+      />
+    </div>
   )
 }
 
@@ -694,6 +736,8 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           }`}
           style={goal.level === 'vision' ? { textShadow: '0 0 20px rgba(167,139,250,0.3)' } : undefined}
         >{goal.title}</h3>
+
+        <TitleProgressBar goal={goal} />
 
         {goal.description && (
           <p className="text-xs text-zinc-400 leading-relaxed mb-3">{goal.description}</p>
