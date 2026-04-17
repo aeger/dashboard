@@ -7,7 +7,7 @@ const SUPA_HEADERS = (key: string) => ({
   Prefer: 'return=representation',
 })
 
-const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress']
+const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress', 'parent_id']
 
 export async function POST(
   req: NextRequest,
@@ -43,24 +43,6 @@ export async function POST(
   }
 
   const updated = await res.json()
-
-  // Queue a Wren review task for the edited goal
-  const supaKey = key
-  const supaUrl = url
-  fetch(`${supaUrl}/rest/v1/task_queue`, {
-    method: 'POST',
-    headers: { ...SUPA_HEADERS(supaKey), Prefer: 'return=minimal' },
-    body: JSON.stringify({
-      title: `Review updated goal: ${body.title ?? '(untitled)'}`,
-      description: `Goal was edited via dashboard. Review for alignment, completeness, and any follow-up tasks needed. Goal ID: ${id}`,
-      status: 'ready',
-      priority: 3,
-      source: 'dashboard',
-      target: 'claude-code',
-      goal_id: id,
-      tags: ['goal-review', 'edited'],
-    }),
-  }).catch(() => {})
 
   return NextResponse.json({ ok: true, goal: Array.isArray(updated) ? updated[0] : updated })
 }

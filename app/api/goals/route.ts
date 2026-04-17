@@ -126,7 +126,7 @@ export async function PUT(req: Request) {
     const { id, ...fields } = body
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const allowed = ['title', 'description', 'status', 'priority', 'target_date', 'progress', 'notes', 'tags', 'sort_order', 'completed_at', 'implementation_prompt', 'auto_queue', 'last_queued_at']
+    const allowed = ['title', 'description', 'status', 'priority', 'target_date', 'progress', 'notes', 'tags', 'sort_order', 'parent_id', 'completed_at', 'implementation_prompt', 'auto_queue', 'last_queued_at']
     const patch: Record<string, unknown> = {}
     for (const k of allowed) {
       if (k in fields) patch[k] = fields[k]
