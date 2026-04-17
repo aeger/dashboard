@@ -34,6 +34,8 @@ services:
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-}
+      - SENTINEL_API_URL=${SENTINEL_API_URL:-http://sentinel-api:3200}
+      - SENTINEL_API_KEY=${SENTINEL_API_KEY:-}
       - TRAEFIK_DYNAMIC_DIR=/traefik-dynamic
       - TERMINAL_SSH_KEY=/run/secrets/terminal_ssh_key
       - TERMINAL_SSH_HOST=192.168.1.181
