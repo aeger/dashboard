@@ -14,6 +14,7 @@ export interface TaskContext {
   archived_at?: string
   pre_archive_status?: string
   action_required?: string
+  recurring_schedule?: string   // 'daily' | 'weekly' | cron expr | null
   [key: string]: unknown
 }
 
@@ -149,8 +150,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { title, description, priority, source, target, tags, status } = body
+    const { title, description, priority, source, target, tags, status, recurring_schedule, context } = body
     if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+
+    // Merge recurring_schedule into context JSONB (no schema migration required)
+    const taskContext: TaskContext = { ...(context ?? {}) }
+    if (recurring_schedule?.trim()) {
+      taskContext.recurring_schedule = recurring_schedule.trim()
+    }
 
     const res = await fetch(`${url}/rest/v1/task_queue`, {
       method: 'POST',
@@ -168,6 +175,7 @@ export async function POST(req: NextRequest) {
         source: source?.trim() || 'dashboard',
         target: target?.trim() || null,
         tags: tags ?? [],
+        context: Object.keys(taskContext).length ? taskContext : null,
       }),
     })
 
