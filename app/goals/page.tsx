@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import LabSubNav from '@/components/lab/LabSubNav'
+import { useKeyboard, getShortcutLabel } from '@/lib/hooks/useKeyboard'
 import type { Goal } from '@/app/api/goals/route'
 
 // ── tree builder ───────────────────────────────────────────────────────────────
@@ -909,7 +910,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
 
   return (
     <div className={`${depth > 0 ? 'ml-4 border-l border-zinc-800/60 pl-4' : ''}`}>
-      <div className={`card-lift rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-4 mb-3 ${levelStripe} ${statusMod}`}>
+      <div data-goal-id={goal.id} className={`card-lift rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-4 mb-3 ${levelStripe} ${statusMod}`}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-2 flex-wrap">
             <LevelBadge level={goal.level} />
@@ -941,6 +942,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             )}
             {hasChildren && (
               <button
+                data-action="toggle-details"
                 onClick={() => setCollapsed((v) => !v)}
                 className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-1.5 py-0.5 rounded border border-zinc-800/60 hover:border-zinc-600 bg-zinc-900/50 flex items-center gap-1"
                 title={collapsed ? 'Expand children' : 'Collapse children'}
@@ -1098,7 +1100,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             {actionError && <span className="text-[10px] text-red-400 mr-1">{actionError}</span>}
             <a href={`/api/goals/${goal.id}/export?format=json`} download
                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300">↓</a>
-            <button onClick={() => setShowEdit(!showEdit)}
+            <button data-action="edit" onClick={() => setShowEdit(!showEdit)}
                     className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
               ✎ Edit
             </button>
@@ -2584,6 +2586,11 @@ export default function GoalsPage() {
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
 
+  // keyboard shortcuts
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false)
+  const keyboardHelpTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   // filters — persisted in localStorage
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(() => {
     try {
@@ -2607,6 +2614,111 @@ export default function GoalsPage() {
   // section collapse state
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const hierarchyRef = useRef<HTMLDivElement>(null)
+
+  // keyboard handlers
+  const allVisibleGoals = goals.length > 0
+    ? sortGoals(goals.filter((g) => nodeMatchesFilter(g, filterStatuses, filterLevels, searchText)), sortBy)
+    : []
+
+  const handleKeyboardHelp = useCallback(() => {
+    setShowKeyboardHelp(true)
+    if (keyboardHelpTimeoutRef.current) clearTimeout(keyboardHelpTimeoutRef.current)
+    keyboardHelpTimeoutRef.current = setTimeout(() => setShowKeyboardHelp(false), 3000)
+  }, [])
+
+  const handleOpenNewGoal = useCallback(() => {
+    setShowNewDropdown(true)
+    handleKeyboardHelp()
+  }, [handleKeyboardHelp])
+
+  const handleEditSelected = useCallback(() => {
+    if (!selectedGoalId) {
+      handleKeyboardHelp()
+      return
+    }
+    const goal = flat.find((g) => g.id === selectedGoalId)
+    if (goal) {
+      const editBtn = document.querySelector(`[data-goal-id="${goal.id}"] [data-action="edit"]`) as HTMLButtonElement
+      if (editBtn) editBtn.click()
+      handleKeyboardHelp()
+    }
+  }, [selectedGoalId, flat, handleKeyboardHelp])
+
+  const handleToggleDetails = useCallback(() => {
+    if (!selectedGoalId) {
+      handleKeyboardHelp()
+      return
+    }
+    const goal = flat.find((g) => g.id === selectedGoalId)
+    if (goal) {
+      const toggleBtn = document.querySelector(`[data-goal-id="${goal.id}"] [data-action="toggle-details"]`) as HTMLButtonElement
+      if (toggleBtn) toggleBtn.click()
+      handleKeyboardHelp()
+    }
+  }, [selectedGoalId, flat, handleKeyboardHelp])
+
+  const handleNavigateGoals = useCallback((direction: 'up' | 'down') => {
+    if (allVisibleGoals.length === 0) {
+      handleKeyboardHelp()
+      return
+    }
+
+    setSelectedGoalId((currentId) => {
+      const currentIndex = currentId
+        ? allVisibleGoals.findIndex((g) => g.id === currentId)
+        : -1
+
+      let nextIndex: number
+      if (direction === 'down') {
+        nextIndex = currentIndex < allVisibleGoals.length - 1 ? currentIndex + 1 : 0
+      } else {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : allVisibleGoals.length - 1
+      }
+
+      const nextGoal = allVisibleGoals[nextIndex]
+      if (nextGoal) {
+        setTimeout(() => {
+          const elem = document.querySelector(`[data-goal-id="${nextGoal.id}"]`)
+          if (elem) {
+            elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          }
+        }, 0)
+        return nextGoal.id
+      }
+      return currentId
+    })
+    handleKeyboardHelp()
+  }, [allVisibleGoals, handleKeyboardHelp])
+
+  useKeyboard({
+    shortcuts: [
+      {
+        key: 'n',
+        callback: handleOpenNewGoal,
+        description: 'Open new goal'
+      },
+      {
+        key: 'e',
+        callback: handleEditSelected,
+        description: 'Edit selected'
+      },
+      {
+        key: 'd',
+        callback: handleToggleDetails,
+        description: 'Toggle details'
+      },
+      {
+        key: 'ArrowDown',
+        callback: () => handleNavigateGoals('down'),
+        description: 'Next goal'
+      },
+      {
+        key: 'ArrowUp',
+        callback: () => handleNavigateGoals('up'),
+        description: 'Previous goal'
+      }
+    ]
+  })
 
   function toggleSection(s: string) {
     setCollapsedSections((prev) => {
@@ -2939,6 +3051,31 @@ export default function GoalsPage() {
           onCreated={handleGoalCreated}
           initialLevel={addPanelLevel}
         />
+      )}
+
+      {/* Keyboard help tooltip */}
+      {showKeyboardHelp && (
+        <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg p-3 max-w-xs text-xs z-50 animate-in fade-in duration-200">
+          <div className="font-semibold text-zinc-300 mb-2">Keyboard Shortcuts</div>
+          <div className="space-y-1 text-zinc-400">
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">N</kbd>
+              <span>Open new goal</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">E</kbd>
+              <span>Edit selected</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">D</kbd>
+              <span>Toggle details</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">↑↓</kbd>
+              <span>Navigate goals</span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
