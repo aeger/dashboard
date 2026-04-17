@@ -10,11 +10,12 @@ import type { Goal } from '@/app/api/goals/route'
 
 function buildTree(flat: Goal[]): Goal[] {
   const map = new Map<string, Goal>()
-  flat.forEach((g) => { g.children = []; map.set(g.id, g) })
+  flat.forEach((g) => { map.set(g.id, { ...g, children: [] }) })
   const roots: Goal[] = []
   flat.forEach((g) => {
-    if (g.parent_id && map.has(g.parent_id)) map.get(g.parent_id)!.children!.push(g)
-    else roots.push(g)
+    const node = map.get(g.id)!
+    if (g.parent_id && map.has(g.parent_id)) map.get(g.parent_id)!.children!.push(node)
+    else roots.push(node)
   })
   const sort = (nodes: Goal[]) => {
     nodes.sort((a, b) => a.sort_order - b.sort_order)
@@ -520,12 +521,35 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
   const [showSchedule, setShowSchedule] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
+  const [notesText, setNotesText] = useState(goal.notes ?? '')
+  const [notesSaving, setNotesSaving] = useState(false)
+  const [notesError, setNotesError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
   const [flagging, setFlagging] = useState(false)
   const [archiving, setArchiving] = useState(false)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null)
+
+  async function handleSaveNotes() {
+    setNotesSaving(true)
+    setNotesError(null)
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: goal.id, notes: notesText || null }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      goal.notes = notesText || null
+      setShowNotes(false)
+    } catch {
+      setNotesError('Save failed')
+    } finally {
+      setNotesSaving(false)
+    }
+  }
 
   async function handleTrigger() {
     setTriggering(true)
@@ -597,8 +621,8 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
   const LEVEL_STRIPE: Record<string, string> = {
     vision:    'border-l-4 border-l-purple-500 bg-purple-950/10',
     strategy:  'border-l-4 border-l-indigo-500',
-    milestone: 'border-l-4 border-l-blue-700/60',
-    objective: 'border-l-4 border-l-zinc-700',
+    milestone: 'border-l-4 border-l-cyan-500',
+    objective: 'border-l-4 border-l-emerald-600',
   }
   const levelStripe = LEVEL_STRIPE[goal.level] ?? LEVEL_STRIPE.milestone
   const statusMod = goal.status === 'blocked' ? 'ring-1 ring-amber-800/40' :
@@ -702,8 +726,19 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
-        {goal.notes && (
-          <div className="mt-2 text-[11px] text-zinc-500 italic border-l-2 border-zinc-700 pl-2">{goal.notes}</div>
+        {goal.notes && !showNotes && (
+          <div className="mt-2 text-[11px] text-zinc-500 italic border-l-2 border-zinc-700 pl-2 group relative">
+            {goal.notes}
+            <button
+              onClick={() => setShowNotes(true)}
+              className="ml-2 text-[10px] text-zinc-600 hover:text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"
+            >✎ edit</button>
+          </div>
+        )}
+        {!goal.notes && !showNotes && (
+          <button onClick={() => setShowNotes(true)} className="mt-2 text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
+            + Add notes…
+          </button>
         )}
 
         {/* Action buttons */}
@@ -745,6 +780,10 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             {actionError && <span className="text-[10px] text-red-400 mr-1">{actionError}</span>}
             <a href={`/api/goals/${goal.id}/export?format=json`} download
                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300">↓</a>
+            <button onClick={() => { setShowNotes(!showNotes); setNotesError(null) }}
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
+              📓 Notes{goal.notes ? ' ✓' : ''}
+            </button>
             <button onClick={() => setShowEdit(!showEdit)}
                     className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
               ✎ Edit
@@ -794,6 +833,43 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           )}
         </div>
 
+        {showNotes && (
+          <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">📓 Notes</span>
+              {notesError && <span className="text-[10px] text-red-400">{notesError}</span>}
+            </div>
+            <textarea
+              value={notesText}
+              onChange={(e) => setNotesText(e.target.value)}
+              rows={4}
+              placeholder="Internal notes, blockers, context…"
+              className="w-full text-xs bg-zinc-950 border border-zinc-700/50 rounded p-2 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-amber-700/50 resize-y"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={handleSaveNotes}
+                disabled={notesSaving}
+                className="text-[10px] px-3 py-1 rounded bg-amber-800/60 hover:bg-amber-700/60 text-amber-200 disabled:opacity-50 transition-colors"
+              >
+                {notesSaving ? 'Saving…' : 'Save Notes'}
+              </button>
+              <button
+                onClick={async () => { setNotesText(''); setNotesSaving(true); setNotesError(null); try { const r = await fetch('/api/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: goal.id, notes: null }) }); if (!r.ok) throw new Error(); goal.notes = null; setShowNotes(false) } catch { setNotesError('Save failed') } finally { setNotesSaving(false) } }}
+                disabled={notesSaving}
+                className="text-[10px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:opacity-50 transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => { setNotesText(goal.notes ?? ''); setShowNotes(false); setNotesError(null) }}
+                className="text-[10px] px-2 py-1 rounded text-zinc-600 hover:text-zinc-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
         )}
@@ -1718,6 +1794,7 @@ export default function GoalsPage() {
 
   // section collapse state
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const [sseRevision, setSseRevision] = useState(0)
   const hierarchyRef = useRef<HTMLDivElement>(null)
 
   function toggleSection(s: string) {
@@ -1813,7 +1890,7 @@ export default function GoalsPage() {
     es.onerror = () => { setLoading(false) }
 
     return () => es.close()
-  }, [applyUpdate])
+  }, [applyUpdate, sseRevision])
 
   // Poll task statuses every 10s + auto-advance milestones
   useEffect(() => {
@@ -1882,15 +1959,11 @@ export default function GoalsPage() {
   }
 
   function handleGoalRestored() {
-    // Reload from server to get updated state
-    fetch('/api/goals').then(r => r.json()).then(d => {
-      if (d.flat) setFlat(d.flat)
-      if (d.goals) setGoals(d.goals)
-    }).catch(() => {})
+    setSseRevision((v) => v + 1)
   }
 
   function handleGoalCreated() {
-    window.location.reload()
+    setSseRevision((v) => v + 1)
   }
 
   const filteredGoals = goals.filter((g) =>

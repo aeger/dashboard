@@ -7,12 +7,6 @@ const VALID_ACTIONS = ['update_now', 'schedule', 'skip', 'ignore', 'unignore'] a
 
 export async function POST(req: NextRequest) {
   // Auth is enforced at Traefik level (lan-allow@file middleware).
-  // Cookie presence check as basic sanity — real auth is at the reverse proxy.
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
     const { container, action } = await req.json()
 
