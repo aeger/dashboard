@@ -146,7 +146,7 @@ function FilterBar({ filterStatuses, filterLevels, onToggleStatus, onToggleLevel
               }}
               className="text-[10px] font-semibold px-2.5 py-1 rounded-full uppercase tracking-wide transition-all duration-150 hover:scale-105"
             >
-              {l}
+              {LEVEL_DISPLAY[l] ?? l}
             </button>
           )
         })}
@@ -224,6 +224,13 @@ const LEVEL_BADGE: Record<string, string> = {
   objective: 'bg-zinc-800/50 text-zinc-500',
 }
 
+const LEVEL_DISPLAY: Record<string, string> = {
+  vision:    'Vision',
+  strategy:  'Goal',
+  milestone: 'Milestone',
+  objective: 'Task',
+}
+
 const STATUS_ICON: Record<string, string> = {
   active:    '● ',
   completed: '✓ ',
@@ -243,7 +250,7 @@ function StatusBadge({ status }: { status: string }) {
 function LevelBadge({ level }: { level: string }) {
   return (
     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide ${LEVEL_BADGE[level] ?? LEVEL_BADGE.milestone}`}>
-      {level}
+      {LEVEL_DISPLAY[level] ?? level}
     </span>
   )
 }
@@ -1333,9 +1340,9 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
               <label className={labelCls}>Level</label>
               <select value={form.level} onChange={(e) => setForm((f) => ({ ...f, level: e.target.value as Goal['level'] }))} className={inputCls}>
                 <option value="vision">Vision</option>
-                <option value="strategy">Strategy</option>
+                <option value="strategy">Goal</option>
                 <option value="milestone">Milestone</option>
-                <option value="objective">Objective</option>
+                <option value="objective">Task</option>
               </select>
             </div>
             <div>
@@ -1365,7 +1372,7 @@ function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
               <select value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))} className={inputCls}>
                 <option value="">— None —</option>
                 {flat.map((g) => (
-                  <option key={g.id} value={g.id}>[{g.level}] {g.title}</option>
+                  <option key={g.id} value={g.id}>[{LEVEL_DISPLAY[g.level] ?? g.level}] {g.title}</option>
                 ))}
               </select>
             </div>
@@ -1755,7 +1762,7 @@ function GoalsArchiveSection({ onRestore }: { onRestore: () => void }) {
             <div className="space-y-1.5">
               {goals.map(g => (
                 <div key={g.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-zinc-900/40 border border-zinc-800/40">
-                  <span className={`text-[10px] font-semibold uppercase ${LEVEL_COLOR[g.level] ?? 'text-zinc-500'}`}>{g.level}</span>
+                  <span className={`text-[10px] font-semibold uppercase ${LEVEL_COLOR[g.level] ?? 'text-zinc-500'}`}>{LEVEL_DISPLAY[g.level] ?? g.level}</span>
                   <span className="text-xs text-zinc-400 flex-1 truncate">{g.title}</span>
                   <a href={`/api/goals/${g.id}/export?format=json`} download
                      className="text-[10px] text-zinc-600 hover:text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-800">↓</a>
