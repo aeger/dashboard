@@ -240,6 +240,14 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
       {/* Detail panel */}
       {showDetail && (
         <div className="px-4 py-3 bg-zinc-800/40 border-t border-zinc-800/60 space-y-3">
+          <div className="flex items-center gap-2 mb-1" onClick={(e) => e.stopPropagation()}>
+            <a
+              href={`/lab/containers/logs?name=${encodeURIComponent(c.name)}`}
+              className="text-[10px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 border border-zinc-700/50 transition-colors"
+            >
+              📋 Logs
+            </a>
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">Image</div>
