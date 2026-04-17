@@ -78,17 +78,20 @@ const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string;
     { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: 'Queue for Agent',           status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'Queue for Agent',           status: 'ready',               cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
@@ -552,6 +555,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         const res = await fetch(`/api/taskqueue/${task.id}/archive`, { method: 'POST' })
         if (res.ok) { onRefresh(); onClose() }
         else setActionError('Archive failed')
+      } else if (action.special === 'run') {
+        const res = await fetch(`/api/taskqueue/${task.id}/run`, { method: 'POST' })
+        const data = await res.json()
+        if (res.ok) { onRefresh() }
+        else setActionError(data.error ?? 'Failed to trigger poller')
       } else if (action.status) {
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
@@ -1297,6 +1305,8 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     priority: 2,
     target: 'claude-code',
     tags: '',
+    recurring_schedule: '',
+    custom_cron: '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1314,6 +1324,9 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setError(null)
     try {
       const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
+      const schedule = form.recurring_schedule === 'custom'
+        ? form.custom_cron.trim()
+        : form.recurring_schedule
       const res = await fetch('/api/taskqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1323,6 +1336,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           priority: form.priority,
           target: form.target || null,
           tags: tags.length ? tags : [],
+          recurring_schedule: schedule || null,
         }),
       })
       if (res.ok) { onCreated(); onClose() }
@@ -1437,6 +1451,29 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
               placeholder="homelab, infra, security…"
               className={inputCls}
             />
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <label className={labelCls}>Schedule <span className="text-zinc-700 normal-case font-normal">(optional repeat)</span></label>
+            <select
+              value={form.recurring_schedule}
+              onChange={e => setForm(f => ({ ...f, recurring_schedule: e.target.value, custom_cron: '' }))}
+              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
+            >
+              <option value="">One-time (default)</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="custom">Custom cron…</option>
+            </select>
+            {form.recurring_schedule === 'custom' && (
+              <input
+                value={form.custom_cron}
+                onChange={e => setForm(f => ({ ...f, custom_cron: e.target.value }))}
+                placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
+                className="mt-1 w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
+              />
+            )}
           </div>
 
           {error && (
