@@ -62,5 +62,6 @@ export async function POST(
     }).catch(() => {})
   }
 
+
   return NextResponse.json({ ok: true, goal: Array.isArray(updated) ? updated[0] : updated })
 }
