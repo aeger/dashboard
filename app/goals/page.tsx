@@ -876,6 +876,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
   const levelStripe = LEVEL_STRIPE[goal.level] ?? LEVEL_STRIPE.milestone
   const statusMod = goal.status === 'blocked' ? 'ring-1 ring-amber-800/40' :
                     goal.status === 'completed' ? 'opacity-70' : ''
+  const noteCount = parseNotes(goal.notes).length
 
   const visibleChildren = (goal.children ?? []).filter((child) =>
     !filterStatuses || !filterLevels
@@ -962,9 +963,9 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             <button
               onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v); if (!cardExpanded) setCardExpanded(true) }}
-              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex-shrink-0 ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
-              title="Notes"
-            >📓</button>
+              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex-shrink-0 flex items-center gap-0.5 ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+              title={noteCount > 0 ? `${noteCount} note${noteCount > 1 ? 's' : ''}` : 'Notes'}
+            >📓{noteCount > 0 && <span className="text-[9px] font-bold leading-none px-1 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 min-w-[14px] text-center">{noteCount}</span>}</button>
             <span className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider">tasks</span>
             {taskStatus.counts.done > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/25 text-green-400 border border-green-800/30">
@@ -997,9 +998,9 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
           <div className="flex items-center mt-1.5">
             <button
               onClick={(e) => { e.stopPropagation(); setShowNotes(v => !v); if (!cardExpanded) setCardExpanded(true) }}
-              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
-              title="Notes"
-            >📓</button>
+              className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5 ${showNotes ? 'text-amber-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+              title={noteCount > 0 ? `${noteCount} note${noteCount > 1 ? 's' : ''}` : 'Notes'}
+            >📓{noteCount > 0 && <span className="text-[9px] font-bold leading-none px-1 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 min-w-[14px] text-center">{noteCount}</span>}</button>
           </div>
         )}
 
@@ -1014,7 +1015,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         {showNotes && (
           <>
             {showNotes ? (
-              <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh?.() }} />
+              <NotesList goal={goal} onSaved={() => { onRefresh?.() }} />
             ) : goal.notes ? (
               <div className="mt-2 group/notes relative border-l-2 border-zinc-700/60 pl-2 max-h-28 overflow-y-auto">
                 <NotesDisplay notes={goal.notes} />
@@ -2211,7 +2212,7 @@ function VisionHeader({
       )}
       {showNotes && (
         <div className="ml-6 mt-2">
-          <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh() }} />
+          <NotesList goal={goal} onSaved={() => { onRefresh() }} />
         </div>
       )}
       {showDelete && (
@@ -2304,7 +2305,7 @@ function StrategyHeader({
       )}
       {showNotes && (
         <div className="ml-5 mt-2">
-          <NotesList goal={goal} onSaved={() => { setShowNotes(false); onRefresh() }} />
+          <NotesList goal={goal} onSaved={() => { onRefresh() }} />
         </div>
       )}
       {showDelete && (
@@ -2756,7 +2757,10 @@ export default function GoalsPage() {
   }
 
   function handleGoalCreated() {
-    window.location.reload()
+    fetch('/api/goals').then(r => r.json()).then(d => {
+      if (d.flat) setFlat(d.flat)
+      if (d.goals) setGoals(d.goals)
+    }).catch(() => {})
   }
 
   const calendarCollapsed = collapsedSections.has('calendar')
