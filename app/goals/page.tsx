@@ -335,6 +335,8 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notifyReview, setNotifyReview] = useState(false)
+  const [notifyAgent, setNotifyAgent] = useState('claude-code')
 
   async function handleSave() {
     setSaving(true)
@@ -351,8 +353,16 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
           notes: form.notes || null,
         }),
       })
-      if (res.ok) onSaved()
-      else { const d = await res.json(); setError(d.error ?? 'Save failed') }
+      if (res.ok) {
+        if (notifyReview) {
+          fetch(`/api/goals/${goal.id}/review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agent: notifyAgent, notes: form.notes }),
+          }).catch(() => {})
+        }
+        onSaved()
+      } else { const d = await res.json(); setError(d.error ?? 'Save failed') }
     } catch { setError('Save failed') } finally { setSaving(false) }
   }
 
@@ -405,12 +415,27 @@ function GoalEditForm({ goal, onClose, onSaved }: { goal: Goal; onClose: () => v
                className="w-full bg-zinc-900/60 border border-zinc-700/50 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500" />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
-      <div className="flex gap-2 pt-1">
-        <button onClick={handleSave} disabled={saving}
-                className="flex-1 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
-          {saving ? 'Saving…' : 'Save — Wren will review'}
-        </button>
-        <button onClick={onClose} className="px-3 py-1.5 rounded text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-300">Cancel</button>
+      <div className="flex items-center gap-2 pt-1 flex-wrap">
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none">
+          <input type="checkbox" checked={notifyReview} onChange={e => setNotifyReview(e.target.checked)}
+                 className="accent-amber-500 w-3 h-3" />
+          Notify for review
+        </label>
+        {notifyReview && (
+          <select value={notifyAgent} onChange={e => setNotifyAgent(e.target.value)}
+                  className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-2 py-0.5 text-zinc-300 focus:outline-none">
+            {REVIEW_AGENTS.map(a => (
+              <option key={a.value} value={a.value}>{a.label}</option>
+            ))}
+          </select>
+        )}
+        <div className="flex gap-2 ml-auto">
+          <button onClick={handleSave} disabled={saving}
+                  className="px-4 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-300">Cancel</button>
+        </div>
       </div>
     </div>
   )
@@ -572,7 +597,15 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
-  const [notesText, setNotesText] = useState(goal.notes ?? '')
+  const [notesList, setNotesList] = useState<GoalNote[]>(() => parseGoalNotes(goal.notes ?? null))
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
+  const [newNoteText, setNewNoteText] = useState('')
+  const [showNewNote, setShowNewNote] = useState(false)
+  const [confirmDeleteNoteId, setConfirmDeleteNoteId] = useState<string | null>(null)
+  const [showReview, setShowReview] = useState(false)
+  const [reviewAgent, setReviewAgent] = useState('claude-code')
+  const [reviewSending, setReviewSending] = useState(false)
   const [notesSaving, setNotesSaving] = useState(false)
   const [notesError, setNotesError] = useState<string | null>(null)
   const [triggering, setTriggering] = useState(false)
@@ -582,23 +615,66 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
   const [actionError, setActionError] = useState<string | null>(null)
   const [triggerMsg, setTriggerMsg] = useState<string | null>(null)
 
-  async function handleSaveNotes() {
+  async function persistNotes(list: GoalNote[]) {
+    const raw = list.length ? JSON.stringify(list) : null
+    await fetch('/api/goals', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: goal.id, notes: raw }),
+    })
+    goal.notes = raw
+  }
+
+  async function addNote() {
+    if (!newNoteText.trim()) return
     setNotesSaving(true)
     setNotesError(null)
     try {
-      const res = await fetch('/api/goals', {
-        method: 'PUT',
+      const note: GoalNote = { id: Math.random().toString(36).slice(2), text: newNoteText.trim(), created_at: new Date().toISOString() }
+      const next = [...notesList, note]
+      await persistNotes(next)
+      setNotesList(next)
+      setNewNoteText('')
+      setShowNewNote(false)
+    } catch { setNotesError('Save failed') } finally { setNotesSaving(false) }
+  }
+
+  async function saveEditedNote() {
+    if (!editingNoteId || !editingNoteText.trim()) return
+    setNotesSaving(true)
+    setNotesError(null)
+    try {
+      const next = notesList.map(n => n.id === editingNoteId ? { ...n, text: editingNoteText.trim() } : n)
+      await persistNotes(next)
+      setNotesList(next)
+      setEditingNoteId(null)
+      setEditingNoteText('')
+    } catch { setNotesError('Save failed') } finally { setNotesSaving(false) }
+  }
+
+  async function deleteNote(id: string) {
+    setNotesSaving(true)
+    setNotesError(null)
+    try {
+      const next = notesList.filter(n => n.id !== id)
+      await persistNotes(next)
+      setNotesList(next)
+    } catch { setNotesError('Delete failed') } finally { setNotesSaving(false) }
+  }
+
+  async function handleNotifyReview() {
+    setReviewSending(true)
+    try {
+      const notesContent = notesList.map((n, i) => `${i + 1}. ${n.text}`).join('\n')
+      await fetch(`/api/goals/${goal.id}/review`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: goal.id, notes: notesText || null }),
+        body: JSON.stringify({ agent: reviewAgent, notes: notesContent }),
       })
-      if (!res.ok) throw new Error('Save failed')
-      goal.notes = notesText || null
-      setShowNotes(false)
-    } catch {
-      setNotesError('Save failed')
-    } finally {
-      setNotesSaving(false)
-    }
+      setShowReview(false)
+      setNotesError('Review queued')
+      setTimeout(() => setNotesError(null), 3000)
+    } catch { setNotesError('Failed to queue review') } finally { setReviewSending(false) }
   }
 
   async function handleTrigger() {
@@ -779,21 +855,6 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           </div>
         )}
 
-        {goal.notes && !showNotes && (
-          <div className="mt-2 text-[11px] text-zinc-500 italic border-l-2 border-zinc-700 pl-2 group relative">
-            {goal.notes}
-            <button
-              onClick={() => setShowNotes(true)}
-              className="ml-2 text-[10px] text-zinc-600 hover:text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity"
-            >✎ edit</button>
-          </div>
-        )}
-        {!goal.notes && !showNotes && (
-          <button onClick={() => setShowNotes(true)} className="mt-2 text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
-            + Add notes…
-          </button>
-        )}
-
         {/* Action buttons */}
         <div className="mt-3 pt-3 border-t border-zinc-800/40 flex items-center gap-2 flex-wrap">
           <button
@@ -834,8 +895,9 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
             <a href={`/api/goals/${goal.id}/export?format=json`} download
                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300">↓</a>
             <button onClick={() => { setShowNotes(!showNotes); setNotesError(null) }}
-                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
-              📓 Notes{goal.notes ? ' ✓' : ''}
+                    title="Notes"
+                    className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
+              📓{notesList.length > 0 && <span className="text-amber-400 font-semibold">{notesList.length}</span>}
             </button>
             <button data-action="edit" onClick={() => setShowEdit(!showEdit)}
                     className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
@@ -890,36 +952,119 @@ function GoalCard({ goal, depth = 0, onTrigger, onFlag, triggeredTaskId, taskSta
           <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] text-zinc-500 uppercase tracking-wider">📓 Notes</span>
-              {notesError && <span className="text-[10px] text-red-400">{notesError}</span>}
+              <div className="flex items-center gap-2">
+                {notesError && <span className={`text-[10px] ${notesError.includes('queued') ? 'text-green-400' : 'text-red-400'}`}>{notesError}</span>}
+                {!showNewNote && (
+                  <button onClick={() => { setShowNewNote(true); setEditingNoteId(null); setConfirmDeleteNoteId(null) }}
+                          title="Add note"
+                          className="text-[10px] px-2 py-0.5 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-400 border border-amber-800/40 transition-colors">
+                    + Add
+                  </button>
+                )}
+                <button onClick={() => { setShowNotes(false); setEditingNoteId(null); setShowNewNote(false); setShowReview(false); setNotesError(null); setConfirmDeleteNoteId(null) }}
+                        className="text-zinc-600 hover:text-zinc-400 text-sm leading-none">✕</button>
+              </div>
             </div>
-            <textarea
-              value={notesText}
-              onChange={(e) => setNotesText(e.target.value)}
-              rows={4}
-              placeholder="Internal notes, blockers, context…"
-              className="w-full text-xs bg-zinc-950 border border-zinc-700/50 rounded p-2 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-amber-700/50 resize-y"
-            />
-            <div className="flex items-center gap-2 mt-2">
-              <button
-                onClick={handleSaveNotes}
-                disabled={notesSaving}
-                className="text-[10px] px-3 py-1 rounded bg-amber-800/60 hover:bg-amber-700/60 text-amber-200 disabled:opacity-50 transition-colors"
-              >
-                {notesSaving ? 'Saving…' : 'Save Notes'}
-              </button>
-              <button
-                onClick={async () => { setNotesText(''); setNotesSaving(true); setNotesError(null); try { const r = await fetch('/api/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: goal.id, notes: null }) }); if (!r.ok) throw new Error(); goal.notes = null; setShowNotes(false) } catch { setNotesError('Save failed') } finally { setNotesSaving(false) } }}
-                disabled={notesSaving}
-                className="text-[10px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 disabled:opacity-50 transition-colors"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => { setNotesText(goal.notes ?? ''); setShowNotes(false); setNotesError(null) }}
-                className="text-[10px] px-2 py-1 rounded text-zinc-600 hover:text-zinc-400 transition-colors"
-              >
-                Cancel
-              </button>
+
+            {/* Numbered notes list */}
+            <div className="space-y-1.5 mb-2">
+              {notesList.map((note, i) => (
+                <div key={note.id}>
+                  <div className="group flex items-start gap-2">
+                    <span className="text-[10px] text-zinc-600 font-mono mt-1 w-4 shrink-0 text-right">{i + 1}.</span>
+                    {editingNoteId === note.id ? (
+                      <div className="flex-1 space-y-1">
+                        <textarea
+                          value={editingNoteText}
+                          onChange={e => setEditingNoteText(e.target.value)}
+                          rows={2}
+                          autoFocus
+                          className="w-full text-xs bg-zinc-950 border border-amber-700/50 rounded p-1.5 text-zinc-200 placeholder-zinc-600 focus:outline-none resize-y"
+                        />
+                        <div className="flex gap-1.5">
+                          <button onClick={saveEditedNote} disabled={notesSaving}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-amber-800/60 hover:bg-amber-700/60 text-amber-200 disabled:opacity-50">
+                            {notesSaving ? 'Saving…' : 'Save'}
+                          </button>
+                          <button onClick={() => { setEditingNoteId(null); setEditingNoteText('') }}
+                                  className="text-[10px] px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-400">Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-xs text-zinc-300 leading-relaxed">{note.text}</span>
+                        <div className="opacity-0 group-hover:opacity-100 flex gap-1.5 shrink-0 transition-opacity">
+                          <button onClick={() => { setEditingNoteId(note.id); setEditingNoteText(note.text); setConfirmDeleteNoteId(null) }}
+                                  title="Edit note"
+                                  className="text-base text-zinc-500 hover:text-zinc-200 transition-colors leading-none">✏️</button>
+                          <button onClick={() => setConfirmDeleteNoteId(confirmDeleteNoteId === note.id ? null : note.id)}
+                                  title="Delete note"
+                                  className="text-sm font-bold text-zinc-500 hover:text-red-400 transition-colors leading-none">✕</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {confirmDeleteNoteId === note.id && (
+                    <div className="ml-6 mt-1 flex items-center gap-2">
+                      <span className="text-[10px] text-red-400">Delete this note?</span>
+                      <button onClick={() => { deleteNote(note.id); setConfirmDeleteNoteId(null) }} disabled={notesSaving}
+                              className="text-[10px] px-2 py-0.5 rounded bg-red-700/60 hover:bg-red-600/80 text-red-200 disabled:opacity-50">Yes</button>
+                      <button onClick={() => setConfirmDeleteNoteId(null)}
+                              className="text-[10px] px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-400">No</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {notesList.length === 0 && !showNewNote && (
+                <p className="text-[10px] text-zinc-600 italic">No notes yet.</p>
+              )}
+            </div>
+
+            {/* Add new note */}
+            {showNewNote && (
+              <div className="space-y-1 mb-2">
+                <textarea
+                  value={newNoteText}
+                  onChange={e => setNewNoteText(e.target.value)}
+                  rows={2}
+                  autoFocus
+                  placeholder="Note text…"
+                  className="w-full text-xs bg-zinc-950 border border-zinc-700/50 rounded p-1.5 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-700/50 resize-y"
+                />
+                <div className="flex gap-1.5">
+                  <button onClick={addNote} disabled={notesSaving || !newNoteText.trim()}
+                          className="text-[10px] px-2 py-0.5 rounded bg-amber-800/60 hover:bg-amber-700/60 text-amber-200 disabled:opacity-40">
+                    {notesSaving ? 'Saving…' : 'Add'}
+                  </button>
+                  <button onClick={() => { setShowNewNote(false); setNewNoteText('') }}
+                          className="text-[10px] px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-400">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Agent review section */}
+            <div className="border-t border-zinc-800/60 pt-2 mt-2">
+              {showReview ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select value={reviewAgent} onChange={e => setReviewAgent(e.target.value)}
+                          className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-zinc-300 focus:outline-none">
+                    {REVIEW_AGENTS.map(a => (
+                      <option key={a.value} value={a.value}>{a.label}</option>
+                    ))}
+                  </select>
+                  <button onClick={handleNotifyReview} disabled={reviewSending || notesList.length === 0}
+                          className="text-[10px] px-2 py-1 rounded bg-purple-900/50 hover:bg-purple-800/60 text-purple-300 border border-purple-700/50 disabled:opacity-40">
+                    {reviewSending ? 'Sending…' : 'Notify'}
+                  </button>
+                  <button onClick={() => setShowReview(false)}
+                          className="text-[10px] text-zinc-600 hover:text-zinc-400">Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setShowReview(true)} disabled={notesList.length === 0}
+                        className="text-[10px] text-zinc-600 hover:text-purple-400 transition-colors disabled:opacity-30">
+                  ▸ Notify agent for review…
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1299,13 +1444,14 @@ interface AddGoalPanelProps {
   flat: Goal[]
   onClose: () => void
   onCreated: () => void
+  initialLevel?: Goal['level']
 }
 
-function AddGoalPanel({ flat, onClose, onCreated }: AddGoalPanelProps) {
+function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelProps) {
   const [form, setForm] = useState({
     title: '',
     description: '',
-    level: 'milestone' as Goal['level'],
+    level: (initialLevel ?? 'milestone') as Goal['level'],
     parent_id: '',
     status: 'planned' as Goal['status'],
     priority: 2,
@@ -1834,6 +1980,7 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [showAddPanel, setShowAddPanel] = useState(false)
+  const [newGoalLevel, setNewGoalLevel] = useState<Goal['level']>('milestone')
   const [showNewDropdown, setShowNewDropdown] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
@@ -2151,12 +2298,40 @@ export default function GoalsPage() {
           <p className="text-xs text-zinc-500">Track goals, trigger work, and schedule milestones</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowAddPanel(true)}
-            className="text-xs px-3 py-1.5 rounded-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-300 hover:bg-purple-900/50 hover:text-purple-200 transition-all"
-          >
-            + Add Goal
-          </button>
+          {/* Split add button with level dropdown */}
+          <div className="relative flex">
+            <button
+              onClick={() => { setNewGoalLevel('milestone'); setShowAddPanel(true); setShowNewDropdown(false) }}
+              className="text-xs px-3 py-1.5 rounded-l-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-300 hover:bg-purple-900/50 hover:text-purple-200 transition-all border-r-0"
+            >
+              + Add Goal
+            </button>
+            <button
+              onClick={() => setShowNewDropdown((v) => !v)}
+              className="text-xs px-2 py-1.5 rounded-r-full font-semibold bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 hover:text-purple-200 transition-all"
+              title="Choose goal type"
+            >
+              ▾
+            </button>
+            {showNewDropdown && (
+              <div className="absolute top-full right-0 mt-1 z-50 bg-zinc-900 border border-zinc-700/70 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
+                {([
+                  { level: 'vision' as Goal['level'], label: 'Vision', color: 'text-purple-300' },
+                  { level: 'strategy' as Goal['level'], label: 'Strategy', color: 'text-indigo-300' },
+                  { level: 'milestone' as Goal['level'], label: 'Milestone', color: 'text-zinc-300' },
+                  { level: 'objective' as Goal['level'], label: 'Task', color: 'text-zinc-500' },
+                ] as const).map(({ level, label, color }) => (
+                  <button
+                    key={level}
+                    onClick={() => { setNewGoalLevel(level); setShowAddPanel(true); setShowNewDropdown(false) }}
+                    className={`w-full text-left text-xs px-3 py-2 hover:bg-zinc-800 transition-colors ${color}`}
+                  >
+                    + {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {loading && (
             <div className="w-3 h-3 border-2 border-zinc-700 border-t-blue-400 rounded-full animate-spin" />
           )}
@@ -2280,6 +2455,7 @@ export default function GoalsPage() {
           flat={flat}
           onClose={() => setShowAddPanel(false)}
           onCreated={handleGoalCreated}
+          initialLevel={newGoalLevel}
         />
       )}
 
