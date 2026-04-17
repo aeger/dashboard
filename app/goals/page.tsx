@@ -230,6 +230,8 @@ const LEVEL_BADGE: Record<string, string> = {
   objective: 'bg-zinc-800/50 text-zinc-500',
 }
 
+
+
 const STATUS_ICON: Record<string, string> = {
   active:    '● ',
   completed: '✓ ',
@@ -261,6 +263,27 @@ function computeChildProgress(goal: Goal): number {
   if (!objectives.length) return goal.progress
   const sum = objectives.reduce((acc, c) => acc + (c.status === 'completed' ? 100 : c.progress), 0)
   return Math.round(sum / objectives.length)
+}
+
+function calculateAggregateProgress(goal: Goal): number {
+  if (!goal.children || goal.children.length === 0) return goal.progress
+  const childProgress = goal.children.map(c => calculateAggregateProgress(c))
+  return Math.round(childProgress.reduce((sum, p) => sum + p, 0) / childProgress.length)
+}
+
+function TitleProgressBar({ goal }: { goal: Goal }) {
+  const isVisionOrStrategy = goal.level === 'vision' || goal.level === 'strategy'
+  const displayProgress = isVisionOrStrategy ? calculateAggregateProgress(goal) : goal.progress
+  const color = goal.status === 'completed' ? 'bg-green-400' : 'bg-amber-400'
+
+  return (
+    <div className="h-0.5 bg-zinc-800/50 rounded-full overflow-hidden mt-1.5 mb-2">
+      <div
+        className={`h-full rounded-full ${color} transition-all duration-300 opacity-60`}
+        style={{ width: `${displayProgress}%` }}
+      />
+    </div>
+  )
 }
 
 function ProgressBar({ value, status, taskStatus }: { value: number; status: string; taskStatus?: TaskStatus }) {
@@ -941,11 +964,16 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             }`}
             style={goal.level === 'vision' ? { textShadow: '0 0 20px rgba(167,139,250,0.3)' } : undefined}
           >{goal.title}</h3>
+
+          <TitleProgressBar goal={goal} />
+
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {!cardExpanded && goal.notes && <NotesPopover notes={goal.notes} />}
             <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition-colors">{cardExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
+
+        <TitleProgressBar goal={goal} />
 
         {goal.description && (
           <div className="mb-3 max-h-40 overflow-y-auto pr-1">
