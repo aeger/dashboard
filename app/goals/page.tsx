@@ -2592,23 +2592,21 @@ export default function GoalsPage() {
   const keyboardHelpTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // filters — persisted in localStorage
-  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(() => {
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(['active', 'planned', 'paused', 'blocked']))
+  const [filterLevels, setFilterLevels] = useState<Set<string>>(new Set(ALL_LEVELS))
+  const [sortBy, setSortBy] = useState<SortBy>('priority')
+
+  // restore persisted filter state after hydration
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem('goals_filterStatuses')
-      return saved ? new Set(JSON.parse(saved)) : new Set(['active', 'planned', 'paused', 'blocked'])
-    } catch { return new Set(['active', 'planned', 'paused', 'blocked']) }
-  })
-  const [filterLevels, setFilterLevels] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('goals_filterLevels')
-      return saved ? new Set(JSON.parse(saved)) : new Set(ALL_LEVELS)
-    } catch { return new Set(ALL_LEVELS) }
-  })
-  const [sortBy, setSortBy] = useState<SortBy>(() => {
-    try {
-      return (localStorage.getItem('goals_sortBy') as SortBy) ?? 'priority'
-    } catch { return 'priority' }
-  })
+      const savedStatuses = localStorage.getItem('goals_filterStatuses')
+      if (savedStatuses) setFilterStatuses(new Set(JSON.parse(savedStatuses)))
+      const savedLevels = localStorage.getItem('goals_filterLevels')
+      if (savedLevels) setFilterLevels(new Set(JSON.parse(savedLevels)))
+      const savedSort = localStorage.getItem('goals_sortBy') as SortBy
+      if (savedSort) setSortBy(savedSort)
+    } catch {}
+  }, [])
   const [searchText, setSearchText] = useState('')
 
   // section collapse state
