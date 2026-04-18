@@ -134,7 +134,7 @@ function ActionBtn({ label, icon, onClick, disabled, color }: {
   )
 }
 
-function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, onAction, onUpdateAction }: {
+function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, updateResult, onAction, onUpdateAction }: {
   c: Container
   update?: UpdateInfo
   metrics?: ContainerMetrics
@@ -142,6 +142,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
   rebuilding: string | null
   forceRestarting: string | null
   actionLoading: string | null
+  updateResult: { name: string; ok: boolean; msg: string } | null
   onAction: (c: Container, action: string) => void
   onUpdateAction: (name: string, action: string) => void
 }) {
@@ -344,6 +345,9 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                     <button onClick={() => onUpdateAction(c.name, 'unignore')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Unignore</button>
                   )}
                   {actionLoading === c.name && <div className="w-4 h-4 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin self-center" />}
+                  {updateResult?.name === c.name && (
+                    <span className={`text-xs self-center ${updateResult.ok ? 'text-green-400' : 'text-red-400'}`}>{updateResult.msg}</span>
+                  )}
                 </div>
               </div>
             ) : (
@@ -376,6 +380,7 @@ export default function ContainerListExpanded() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [stackUpdating, setStackUpdating] = useState<string | null>(null)
   const [stackError, setStackError] = useState<string | null>(null)
+  const [updateResult, setUpdateResult] = useState<{ name: string; ok: boolean; msg: string } | null>(null)
   const [forceRestarting, setForceRestarting] = useState<string | null>(null)
   const [rollingRestart, setRollingRestart] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -437,8 +442,25 @@ export default function ContainerListExpanded() {
 
   async function handleUpdateAction(name: string, action: string) {
     setActionLoading(name)
-    await fetch('/api/containers/updates/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ container: name, action }) }).catch(() => {})
-    setTimeout(refreshUpdates, 5000)
+    setUpdateResult(null)
+    try {
+      const res = await fetch('/api/containers/updates/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ container: name, action }) })
+      const data = await res.json().catch(() => ({}))
+      if (action === 'update_now') {
+        if (res.ok && data.success) {
+          setUpdateResult({ name, ok: true, msg: `✓ Updated successfully` })
+        } else {
+          setUpdateResult({ name, ok: false, msg: data.error || `Update failed (${res.status})` })
+        }
+        setTimeout(() => setUpdateResult(null), 10000)
+      }
+    } catch {
+      if (action === 'update_now') {
+        setUpdateResult({ name, ok: false, msg: 'Network error — update failed' })
+        setTimeout(() => setUpdateResult(null), 10000)
+      }
+    }
+    refreshUpdates()
     setActionLoading(null)
   }
 
@@ -699,6 +721,7 @@ export default function ContainerListExpanded() {
                     rebuilding={rebuilding}
                     forceRestarting={forceRestarting}
                     actionLoading={actionLoading}
+                    updateResult={updateResult}
                     onAction={handleAction}
                     onUpdateAction={handleUpdateAction}
                   />
