@@ -65,9 +65,7 @@ const SOURCE_EMOJI: Record<string, string> = {
 }
 
 function categoryLabel(category: string): string {
-  return category
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
+  return category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function timeAgo(ts: string): string {
@@ -98,7 +96,10 @@ export default function NotificationBell() {
   const [soundPanelOpen, setSoundPanelOpen] = useState(false)
   const [data, setData] = useState<NotifResponse>({ notifications: [], unreadCount: 0, criticalCount: 0 })
   const [loading, setLoading] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [displayLimit, setDisplayLimit] = useState(25)
+  const bellRef = useRef<HTMLDivElement>(null)
+  const portalRef = useRef<HTMLDivElement>(null)
 
   // Sound system
   const { settings: soundSettings } = useSoundSettings()
@@ -106,7 +107,6 @@ export default function NotificationBell() {
   const initialLoad = useRef(true)
   const interacted = useRef(false)
 
-  // Mark audio context ready on first user interaction
   const handleInteraction = useCallback(() => {
     if (!interacted.current) {
       interacted.current = true
@@ -121,32 +121,21 @@ export default function NotificationBell() {
 
   const playAlertsForNew = useCallback((notifications: Notification[]) => {
     if (initialLoad.current) {
-      // On first load, seed seen IDs without playing sounds
       notifications.forEach(n => seenIds.current.add(n.id))
       initialLoad.current = false
       return
     }
-
-    const newNotifs = notifications.filter(
-      n => n.status === 'unread' && !seenIds.current.has(n.id)
-    )
+    const newNotifs = notifications.filter(n => n.status === 'unread' && !seenIds.current.has(n.id))
     if (newNotifs.length === 0) return
-
-    // Add to seen
     newNotifs.forEach(n => seenIds.current.add(n.id))
-
-    // Find highest urgency notification
     const sorted = [...newNotifs].sort(
       (a, b) => URGENCY_ORDER[normalizeUrgency(b)] - URGENCY_ORDER[normalizeUrgency(a)]
     )
     const top = sorted[0]
     const urgency = normalizeUrgency(top)
     const cfg = soundSettings[urgency]
-
     if (!cfg?.enabled || !interacted.current) return
-
     const engine = getSoundEngine()
-
     if (cfg.sound.startsWith('custom:')) {
       const customId = cfg.sound.slice(7)
       const req = indexedDB.open('sentinel-sounds', 1)
@@ -162,42 +151,48 @@ export default function NotificationBell() {
     } else {
       engine.play(cfg.sound, cfg.volume)
     }
-
-    // TTS for critical
     if (urgency === 'critical' && cfg.tts) {
       setTimeout(() => engine.speakTTS(top.title, cfg.volume), 600)
     }
   }, [soundSettings])
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (limit = 25) => {
     try {
-      const res = await fetch('/api/notifications?limit=10&status=unread')
+      const res = await fetch(`/api/notifications?limit=${limit}&status=unread`)
       if (res.ok) {
         const d: NotifResponse = await res.json()
-        setData(d)
-        playAlertsForNew(d.notifications)
+        const safe: NotifResponse = {
+          notifications: Array.isArray(d.notifications) ? d.notifications : [],
+          unreadCount: d.unreadCount ?? 0,
+          criticalCount: d.criticalCount ?? 0,
+        }
+        setData(safe)
+        playAlertsForNew(safe.notifications)
       }
     } catch { /* sentinel may be down */ }
   }, [playAlertsForNew])
 
-  // Initial load + interval polling
   useEffect(() => {
-    fetchNotifications()
-    const interval = setInterval(fetchNotifications, 30_000)
+    fetchNotifications(25)
+    const interval = setInterval(() => fetchNotifications(25), 30_000)
     return () => clearInterval(interval)
   }, [fetchNotifications])
 
-  // Close on outside click
+  // Close on outside click — checks both bell wrapper and portal panel
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      const inBell = bellRef.current?.contains(target)
+      const inPanel = portalRef.current?.contains(target)
+      if (!inBell && !inPanel) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  async function markRead(id: string) {
+  async function markRead(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
     await fetch(`/api/notifications/${id}/read`, { method: 'POST' })
     setData(prev => ({
       ...prev,
@@ -209,20 +204,32 @@ export default function NotificationBell() {
     }))
   }
 
-  async function markAllRead() {
+  async function markAllRead(e: React.MouseEvent) {
+    e.stopPropagation()
     setLoading(true)
     await fetch('/api/notifications/read-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     setData({ notifications: [], unreadCount: 0, criticalCount: 0 })
+    setDisplayLimit(25)
     setLoading(false)
+  }
+
+  async function loadMore(e: React.MouseEvent) {
+    e.stopPropagation()
+    const nextLimit = displayLimit + 25
+    setLoadingMore(true)
+    setDisplayLimit(nextLimit)
+    await fetchNotifications(nextLimit)
+    setLoadingMore(false)
   }
 
   const { notifications, unreadCount, criticalCount } = data
   const badgeColor = bellBadgeBg(criticalCount, unreadCount)
   const showBadge = unreadCount > 0
+  const hasMore = notifications.length < unreadCount
 
   return (
     <>
-      <div ref={dropdownRef} className="relative">
+      <div ref={bellRef} className="relative">
         {/* Bell button */}
         <button
           onClick={() => setOpen(o => !o)}
@@ -262,15 +269,16 @@ export default function NotificationBell() {
           )}
         </button>
 
-        {/* Dropdown */}
+        {/* Dropdown — rendered via portal so it escapes stacking contexts */}
         {open && typeof document !== 'undefined' && createPortal(
           <div
+            ref={portalRef}
             className="fixed rounded-xl border overflow-hidden"
             style={{
               top: '72px',
               right: '12px',
-              width: '360px',
-              maxHeight: '520px',
+              width: '380px',
+              maxHeight: '560px',
               zIndex: 99999,
               background: 'rgba(9,9,11,0.97)',
               backdropFilter: 'blur(20px)',
@@ -297,10 +305,9 @@ export default function NotificationBell() {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                {/* Sound settings trigger */}
+              <div className="flex items-center gap-3">
                 <button
-                  onClick={() => { setSoundPanelOpen(true); setOpen(false) }}
+                  onClick={(e) => { e.stopPropagation(); setSoundPanelOpen(true); setOpen(false) }}
                   className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors"
                   title="Sound settings"
                 >
@@ -310,87 +317,113 @@ export default function NotificationBell() {
                   <button
                     onClick={markAllRead}
                     disabled={loading}
-                    className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                    className="text-[10px] text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-40"
                   >
                     Mark all read
                   </button>
                 )}
                 <Link
                   href="/notifications"
-                  onClick={() => setOpen(false)}
+                  onClick={(e) => { e.stopPropagation(); setOpen(false) }}
                   className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors no-underline"
                 >
                   View all →
                 </Link>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setOpen(false) }}
+                  className="text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none"
+                  title="Close"
+                >
+                  ✕
+                </button>
               </div>
             </div>
 
             {/* Notification list */}
-            <div style={{ overflowY: 'auto', flex: 1 }}>
+            <div style={{ overflowY: 'auto', flex: 1 }} onClick={(e) => e.stopPropagation()}>
               {notifications.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
                   <span style={{ fontSize: '28px', marginBottom: '8px' }}>✅</span>
                   <p className="text-sm text-zinc-500">All clear — no unread alerts</p>
                 </div>
               ) : (
-                notifications.map((n) => {
-                  const urgency = normalizeUrgency(n)
-                  const color = URGENCY_COLOR[urgency]
-                  const emoji = SOURCE_EMOJI[n.source] || '🔔'
-                  return (
-                    <div
-                      key={n.id}
-                      className="flex gap-3 px-4 py-3 transition-colors group"
-                      style={{
-                        borderBottom: '1px solid rgba(255,255,255,0.04)',
-                        borderLeft: `3px solid ${color}`,
-                        background: n.status === 'unread' ? 'rgba(255,255,255,0.02)' : 'transparent',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = n.status === 'unread' ? 'rgba(255,255,255,0.02)' : 'transparent')}
-                    >
-                      <span style={{ fontSize: '16px', flexShrink: 0, marginTop: '2px' }}>{emoji}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p
-                            className="text-sm font-medium leading-tight"
-                            style={{ color: n.status === 'unread' ? '#e4e4e7' : '#71717a' }}
-                          >
-                            {n.title}
-                          </p>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <span
-                              className="px-1 py-0.5 rounded text-[9px] font-bold"
-                              style={{
-                                background: URGENCY_BADGE_BG[urgency],
-                                color: color,
-                              }}
+                <>
+                  {notifications.map((n) => {
+                    const urgency = normalizeUrgency(n)
+                    const color = URGENCY_COLOR[urgency]
+                    const emoji = SOURCE_EMOJI[n.source] || '🔔'
+                    return (
+                      <div
+                        key={n.id}
+                        className="flex gap-3 px-4 py-3 transition-colors group"
+                        style={{
+                          borderBottom: '1px solid rgba(255,255,255,0.04)',
+                          borderLeft: `3px solid ${color}`,
+                          background: n.status === 'unread' ? 'rgba(255,255,255,0.02)' : 'transparent',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = n.status === 'unread' ? 'rgba(255,255,255,0.02)' : 'transparent')}
+                      >
+                        <span style={{ fontSize: '16px', flexShrink: 0, marginTop: '2px' }}>{emoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p
+                              className="text-sm font-medium leading-tight"
+                              style={{ color: n.status === 'unread' ? '#e4e4e7' : '#71717a' }}
                             >
-                              {URGENCY_LABEL[urgency]}
-                            </span>
-                            <button
-                              onClick={() => markRead(n.id)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300 text-xs"
-                              title="Mark read"
-                            >
-                              ✕
-                            </button>
+                              {n.title}
+                            </p>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span
+                                className="px-1 py-0.5 rounded text-[9px] font-bold"
+                                style={{ background: URGENCY_BADGE_BG[urgency], color }}
+                              >
+                                {URGENCY_LABEL[urgency]}
+                              </span>
+                              <button
+                                onClick={(e) => markRead(n.id, e)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300 text-xs px-1"
+                                title="Mark read"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                          {n.body && (
+                            <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">
+                              {n.body}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-zinc-700">{categoryLabel(n.category)}</span>
+                            <span className="text-zinc-800">·</span>
+                            <span className="text-[10px] text-zinc-700">{timeAgo(n.timestamp)}</span>
                           </div>
                         </div>
-                        {n.body && (
-                          <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">
-                            {n.body}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] text-zinc-700">{categoryLabel(n.category)}</span>
-                          <span className="text-zinc-800">·</span>
-                          <span className="text-[10px] text-zinc-700">{timeAgo(n.timestamp)}</span>
-                        </div>
                       </div>
+                    )
+                  })}
+
+                  {/* Load more */}
+                  {hasMore && (
+                    <div className="px-4 py-3 flex items-center justify-center" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <button
+                        onClick={loadMore}
+                        disabled={loadingMore}
+                        className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors disabled:opacity-40 flex items-center gap-1.5"
+                      >
+                        {loadingMore ? (
+                          <>
+                            <span className="w-3 h-3 border border-zinc-600 border-t-zinc-300 rounded-full animate-spin inline-block" />
+                            Loading…
+                          </>
+                        ) : (
+                          `Load more (${unreadCount - notifications.length} remaining)`
+                        )}
+                      </button>
                     </div>
-                  )
-                })
+                  )}
+                </>
               )}
             </div>
 
@@ -403,12 +436,12 @@ export default function NotificationBell() {
                 {criticalCount > 0 ? (
                   <span style={{ color: '#ef4444' }}>⚠ {criticalCount} critical</span>
                 ) : (
-                  'JeffSentinel v2'
+                  `Showing ${notifications.length} of ${unreadCount}`
                 )}
               </span>
               <Link
                 href="/notifications"
-                onClick={() => setOpen(false)}
+                onClick={(e) => { e.stopPropagation(); setOpen(false) }}
                 className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors no-underline"
               >
                 Full history →

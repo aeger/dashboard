@@ -7,7 +7,7 @@ const SUPA_HEADERS = (key: string) => ({
   Prefer: 'return=representation',
 })
 
-const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress', 'parent_id']
+const ALLOWED_FIELDS = ['title', 'description', 'notes', 'priority', 'target_date', 'tags', 'progress', 'level', 'parent_id']
 
 export async function POST(
   req: NextRequest,
@@ -43,6 +43,25 @@ export async function POST(
   }
 
   const updated = await res.json()
+
+  // Queue a review task only if the user requested one
+  if (body.reviewAgent) {
+    fetch(`${url}/rest/v1/task_queue`, {
+      method: 'POST',
+      headers: { ...SUPA_HEADERS(key), Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        title: `Review updated goal: ${body.title ?? '(untitled)'}`,
+        description: `Goal was edited via dashboard. Review for alignment, completeness, and any follow-up tasks needed. Goal ID: ${id}`,
+        status: 'ready',
+        priority: 3,
+        source: 'dashboard',
+        target: body.reviewAgent,
+        goal_id: id,
+        tags: ['goal-review', 'edited'],
+      }),
+    }).catch(() => {})
+  }
+
 
   return NextResponse.json({ ok: true, goal: Array.isArray(updated) ? updated[0] : updated })
 }

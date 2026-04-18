@@ -37,6 +37,11 @@ export async function GET(req: NextRequest) {
       error: string | null
     }[] = await res.json()
 
+    // Statuses that count as "actively running" — turns progress bar blue
+    const RUNNING_STATUSES = new Set(['in_progress_agent', 'claimed', 'in_progress_jeff'])
+    // Statuses that count as partial (50% credit)
+    const PARTIAL_STATUSES = new Set(['review_needed', 'pending_jeff_action', 'pending_eval'])
+
     type TaskEntry = {
       id: string
       goal_id: string
@@ -44,11 +49,11 @@ export async function GET(req: NextRequest) {
       updated_at: string
       claimed_by: string | null
       error: string | null
-      counts: { active: number; done: number; blocked: number; total: number; pct_complete: number }
+      counts: { active: number; done: number; blocked: number; partial: number; total: number; pct_complete: number }
     }
 
     const tasks: Record<string, TaskEntry> = {}
-    const countsMap: Record<string, { active: number; done: number; blocked: number }> = {}
+    const countsMap: Record<string, { active: number; done: number; blocked: number; partial: number }> = {}
 
     for (const row of rows) {
       // Track most recent task per goal (rows are desc by created_at)
@@ -60,19 +65,23 @@ export async function GET(req: NextRequest) {
           updated_at: row.updated_at,
           claimed_by: row.claimed_by,
           error: row.error,
-          counts: { active: 0, done: 0, blocked: 0, total: 0, pct_complete: 0 },
+          counts: { active: 0, done: 0, blocked: 0, partial: 0, total: 0, pct_complete: 0 },
         }
       }
 
       // Skip archived tasks from counts
       if (row.status === 'archived') continue
 
-      if (!countsMap[row.goal_id]) countsMap[row.goal_id] = { active: 0, done: 0, blocked: 0 }
+      if (!countsMap[row.goal_id]) countsMap[row.goal_id] = { active: 0, done: 0, blocked: 0, partial: 0 }
 
       if (row.status === 'completed') {
         countsMap[row.goal_id].done++
       } else if (['blocked', 'failed', 'escalated'].includes(row.status)) {
         countsMap[row.goal_id].blocked++
+      } else if (PARTIAL_STATUSES.has(row.status)) {
+        countsMap[row.goal_id].partial++
+      } else if (RUNNING_STATUSES.has(row.status)) {
+        countsMap[row.goal_id].active++
       } else {
         countsMap[row.goal_id].active++
       }
@@ -80,12 +89,14 @@ export async function GET(req: NextRequest) {
 
     // Attach counts to each task entry
     for (const goalId of Object.keys(tasks)) {
-      const c = countsMap[goalId] ?? { active: 0, done: 0, blocked: 0 }
-      const total = c.active + c.done + c.blocked
+      const c = countsMap[goalId] ?? { active: 0, done: 0, blocked: 0, partial: 0 }
+      const total = c.active + c.done + c.blocked + c.partial
+      // partial tasks count as 50% complete for progress calculation
+      const effectiveDone = c.done + c.partial * 0.5
       tasks[goalId].counts = {
         ...c,
         total,
-        pct_complete: total > 0 ? Math.round((c.done / total) * 100) : 0,
+        pct_complete: total > 0 ? Math.round((effectiveDone / total) * 100) : 0,
       }
     }
 

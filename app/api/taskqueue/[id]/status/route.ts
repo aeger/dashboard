@@ -142,5 +142,47 @@ export async function POST(
     }).catch(() => {})
   }
 
+  // Sync goal progress whenever a linked task changes status (fire-and-forget)
+  const goalId = (updatedTask as unknown as Record<string, unknown>)?.goal_id as string | null
+  if (goalId) {
+    syncGoalProgress(url, key, goalId).catch(() => {})
+  }
+
   return NextResponse.json({ ok: true, task: updatedTask })
+}
+
+async function syncGoalProgress(url: string, key: string, goalId: string): Promise<void> {
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
+  const PARTIAL = new Set(['review_needed', 'pending_jeff_action', 'pending_eval'])
+  const RUNNING = new Set(['in_progress_agent', 'claimed', 'in_progress_jeff'])
+
+  const res = await fetch(
+    `${url}/rest/v1/task_queue?goal_id=eq.${goalId}&status=neq.archived&select=status`,
+    { headers, cache: 'no-store' }
+  )
+  if (!res.ok) return
+
+  const rows: { status: string }[] = await res.json()
+  if (!rows.length) return
+
+  let done = 0, partial = 0, total = 0
+  for (const r of rows) {
+    total++
+    if (r.status === 'completed') done++
+    else if (PARTIAL.has(r.status)) partial++
+    else if (RUNNING.has(r.status)) { /* active — no progress credit yet */ }
+    // blocked/failed count toward total but not done
+  }
+
+  const pct = total > 0 ? Math.round(((done + partial * 0.5) / total) * 100) : 0
+
+  // Only update progress percentage — never auto-change goal status.
+  // Status must be set manually by Jeff to prevent overriding intentional resets.
+  const patch: Record<string, unknown> = { progress: pct }
+
+  await fetch(`${url}/rest/v1/goals?id=eq.${goalId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(patch),
+  })
 }

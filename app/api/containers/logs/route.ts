@@ -1,33 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchContainers } from '@/lib/portainer'
+import { sshExec } from '@/lib/ssh-exec'
+
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 export async function GET(req: NextRequest) {
+  const cookie = req.headers.get('cookie') || ''
+  if (!cookie.includes('authelia_session')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const name = req.nextUrl.searchParams.get('name')
-  const tail = req.nextUrl.searchParams.get('tail') ?? '200'
-  if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
+  const tail = req.nextUrl.searchParams.get('tail') ?? '100'
 
-  const baseUrl = process.env.PORTAINER_URL
-  const apiKey = process.env.PORTAINER_API_KEY
-  if (!baseUrl || !apiKey) return NextResponse.json({ error: 'Portainer not configured' }, { status: 503 })
+  if (!name || !NAME_RE.test(name)) {
+    return NextResponse.json({ error: 'Invalid container name' }, { status: 400 })
+  }
 
-  const containers = await fetchContainers()
-  const c = containers.find((ct) => ct.name === name)
-  if (!c) return NextResponse.json({ error: `Container not found: ${name}` }, { status: 404 })
+  const tailNum = Math.min(500, Math.max(10, parseInt(tail, 10) || 100))
 
   try {
-    const res = await fetch(
-      `${baseUrl}/api/endpoints/${c.endpointId}/docker/containers/${c.id}/logs?stdout=1&stderr=1&tail=${tail}&timestamps=1`,
-      { headers: { 'X-API-Key': apiKey }, cache: 'no-store' }
-    )
-    if (!res.ok) return NextResponse.json({ error: 'Failed to fetch logs' }, { status: 500 })
-    const raw = await res.text()
-    // Strip Docker log multiplexing headers (8-byte binary prefix per line)
-    const lines = raw.split('\n').map((line) => {
-      if (line.length > 8 && line.charCodeAt(0) <= 2) return line.slice(8)
-      return line
-    }).join('\n')
-    return NextResponse.json({ name, logs: lines })
-  } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    const output = await sshExec(`podman logs --tail ${tailNum} --timestamps ${name} 2>&1`, 15_000)
+    return NextResponse.json({ logs: output, name })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: `Failed to fetch logs: ${msg}` }, { status: 500 })
   }
 }

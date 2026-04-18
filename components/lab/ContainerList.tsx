@@ -214,8 +214,8 @@ export default function ContainerList() {
   const skippedCount = activeUpdates.filter((u) => u.user_status === 'skipped').length
   const totalUpdates = activeUpdates.length
 
-  // Find stacks with pending updates (exclude ignored)
-  const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').map((u) => u.name))
+  // Find stacks with pending updates (exclude ignored and completed)
+  const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed').map((u) => u.name))
   const stacksWithUpdates = Object.entries(STACKS).filter(([, def]) =>
     def.containers.some((c) => updateNames.has(c))
   )

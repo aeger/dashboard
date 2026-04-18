@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { TaskQueueData, TaskItem, ChecklistItem } from '@/app/api/taskqueue/route'
 import TaskDependencyGraph from './TaskDependencyGraph'
 import TaskDependencyModal from './TaskDependencyModal'
@@ -52,51 +54,51 @@ const SECTIONS = [
 // Actions available for each status
 const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string; special?: string; cls?: string }>> = {
   pending_jeff_action: [
-    { label: "I'll Handle It",      status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Mark Complete',       status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Cancel',              status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: "I'll Handle It",            status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Return to Agent Queue',     status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   review_needed: [
-    { label: 'Approve & Complete',  status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'Reopen (Jeff)',        status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Cancel',              status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Approve & Complete',        status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Send Back to Agent',        status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   in_progress_jeff: [
-    { label: 'Hand Back to Agent',  status: 'in_progress_agent', cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
-    { label: 'Mark Complete',       status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Needs Review',        status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Block',               status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
+    { label: 'Hand Back to Agent Queue',  status: 'ready',             cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Flag for Review',           status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Block',                     status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
   ],
   in_progress_agent: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Request Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',     status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Mark Complete',       status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Needs My Input',            status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',           status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: '▶ Run Now',           special: 'run',               cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: '▶ Run Now',           special: 'run',               cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'Queue for Agent',           status: 'ready',               cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: '▶ Run Now',           special: 'run',               cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'Start (Jeff)',        status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   blocked: [
-    { label: 'Unblock → Ready',     status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Jeff Will Handle',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',              status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Unblock → Back to Queue',   status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   completed: [
     { label: 'Reopen',              status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
@@ -107,28 +109,29 @@ const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string;
     { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   failed: [
-    { label: 'Send to Agent',       status: 'in_progress_agent', cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Retry (Agent)',        status: 'ready',              cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Archive',              special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   escalated: [
     { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
     { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   claimed: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Request Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',     status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
   ],
   delegated: [
     { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   pending_eval: [
+    { label: 'Approve & Complete',  status: 'completed',          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'Split into Subtasks', special: 'split',             cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
     { label: 'Review Needed',       status: 'review_needed',      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Complete',            status: 'completed',          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Send Back to Agent',  status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   expired: [
     { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
@@ -311,6 +314,197 @@ function ChecklistPanel({ taskId, items, onUpdate }: {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
+type ActivityRow = { id: string; activity_type: string; content: string; created_at: string }
+
+function LiveActivityLog({ taskId }: { taskId: string }) {
+  const [rows, setRows] = useState<ActivityRow[]>([])
+  const [lastTs, setLastTs] = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  const poll = useCallback(async () => {
+    const params = new URLSearchParams({ task_id: taskId, limit: '30' })
+    if (lastTs) params.set('since', lastTs)
+    const res = await fetch(`/api/agent-activity?${params}`).catch(() => null)
+    if (!res?.ok) return
+    const data = await res.json()
+    const newRows: ActivityRow[] = data.rows ?? []
+    if (newRows.length) {
+      setRows(prev => {
+        const ids = new Set(prev.map(r => r.id))
+        const added = newRows.filter(r => !ids.has(r.id))
+        return added.length ? [...prev, ...added] : prev
+      })
+      setLastTs(newRows[newRows.length - 1].created_at)
+    }
+  }, [taskId, lastTs])
+
+  useEffect(() => { poll() }, [taskId])
+  useEffect(() => {
+    const t = setInterval(poll, 5000)
+    return () => clearInterval(t)
+  }, [poll])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [rows.length])
+
+  const typeStyle: Record<string, string> = {
+    thinking:  'text-zinc-500',
+    tool_call: 'text-blue-400',
+    result:    'text-emerald-400',
+    status:    'text-indigo-400',
+    error:     'text-red-400',
+  }
+
+  if (!rows.length) return (
+    <div className="text-[10px] text-zinc-600 italic animate-pulse">Waiting for agent activity…</div>
+  )
+
+  return (
+    <div className="space-y-1 max-h-48 overflow-y-auto font-mono">
+      {rows.map(r => (
+        <div key={r.id} className="flex gap-2 text-[10px] leading-relaxed">
+          <span className="text-zinc-700 flex-shrink-0 tabular-nums">
+            {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+          <span className={`flex-shrink-0 ${typeStyle[r.activity_type] ?? 'text-zinc-500'}`}>
+            [{r.activity_type}]
+          </span>
+          <span className="text-zinc-300 break-all">{r.content.slice(0, 200)}</span>
+        </div>
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
+// ── SplitModal ────────────────────────────────────────────────────────────────
+
+interface SubtaskDraft { title: string; description: string; priority: number }
+
+function SplitModal({ task, onClose, onDone }: {
+  task: TaskItem
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([
+    { title: '', description: '', priority: task.priority },
+    { title: '', description: '', priority: task.priority },
+  ])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function addRow() {
+    setSubtasks(prev => [...prev, { title: '', description: '', priority: task.priority }])
+  }
+  function removeRow(i: number) {
+    setSubtasks(prev => prev.filter((_, idx) => idx !== i))
+  }
+  function update(i: number, field: keyof SubtaskDraft, val: string | number) {
+    setSubtasks(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: val } : s))
+  }
+
+  async function handleSubmit() {
+    const valid = subtasks.filter(s => s.title.trim())
+    if (!valid.length) { setError('Add at least one subtask title'); return }
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/taskqueue/${task.id}/split`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subtasks: valid }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        onDone()
+      } else {
+        setError(data.error ?? `Failed (${res.status})`)
+      }
+    } catch {
+      setError('Network error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-xl mx-4 rounded-2xl border border-indigo-900/60 shadow-2xl overflow-hidden"
+           style={{ background: 'rgba(12,12,16,0.98)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-indigo-900/40">
+          <div>
+            <div className="text-sm font-semibold text-indigo-300">Split into Subtasks</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-sm">{task.title}</div>
+          </div>
+          <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg">✕</button>
+        </div>
+
+        {/* Subtask list */}
+        <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">
+            Define subtasks — each will be queued as Ready for the agent
+          </div>
+          {subtasks.map((s, i) => (
+            <div key={i} className="p-3 rounded-xl border border-zinc-800/60 bg-zinc-900/40 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-600 font-mono w-4 flex-shrink-0">{i + 1}.</span>
+                <input
+                  value={s.title}
+                  onChange={e => update(i, 'title', e.target.value)}
+                  placeholder="Subtask title…"
+                  autoFocus={i === 0}
+                  className="flex-1 px-2 py-1 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-700/60"
+                />
+                <select
+                  value={s.priority}
+                  onChange={e => update(i, 'priority', Number(e.target.value))}
+                  className="px-2 py-1 rounded-lg text-[10px] bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 focus:outline-none"
+                >
+                  <option value={0}>CRIT</option>
+                  <option value={1}>HIGH</option>
+                  <option value={2}>MED</option>
+                  <option value={3}>LOW</option>
+                </select>
+                {subtasks.length > 1 && (
+                  <button onClick={() => removeRow(i)} className="text-zinc-600 hover:text-red-400 text-sm flex-shrink-0">✕</button>
+                )}
+              </div>
+              <textarea
+                value={s.description}
+                onChange={e => update(i, 'description', e.target.value)}
+                placeholder="Description (optional)…"
+                rows={2}
+                className="w-full px-2 py-1.5 rounded-lg text-[11px] bg-zinc-800/40 border border-zinc-800/60 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-indigo-800/60 resize-none"
+              />
+            </div>
+          ))}
+          <button
+            onClick={addRow}
+            className="w-full py-2 rounded-xl border border-dashed border-zinc-700/60 text-zinc-600 hover:text-zinc-400 hover:border-zinc-600 text-xs transition-colors"
+          >+ Add subtask</button>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-zinc-800/40 space-y-2">
+          {error && (
+            <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">{error}</div>
+          )}
+          <div className="text-[10px] text-zinc-600">
+            Parent task will be marked <span className="text-emerald-500">completed</span>. Subtasks queued as <span className="text-zinc-400">ready</span>.
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={busy}
+              className="flex-1 py-2 rounded-xl text-xs font-semibold bg-indigo-900/70 hover:bg-indigo-800/90 text-indigo-200 disabled:opacity-50 transition-colors"
+            >{busy ? 'Creating…' : `Create ${subtasks.filter(s => s.title.trim()).length} Subtask${subtasks.filter(s => s.title.trim()).length !== 1 ? 's' : ''}`}</button>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies }: {
   task: TaskItem
   onClose: () => void
@@ -324,12 +518,23 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const [actionError, setActionError] = useState<string | null>(null)
   const [exportMenu, setExportMenu] = useState(false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editTitle, setEditTitle] = useState(task.title)
+  const [editDescription, setEditDescription] = useState(task.description ?? '')
+  const [editPriority, setEditPriority] = useState(task.priority)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [showSplitModal, setShowSplitModal] = useState(false)
 
   // Sync when parent task changes (e.g. after action)
   useEffect(() => {
     setTask(initialTask)
     setJeffNotes((initialTask.context?.jeff_notes ?? '') as string)
     setContextSummary((initialTask.context?.context_summary ?? '') as string)
+    setEditTitle(initialTask.title)
+    setEditDescription(initialTask.description ?? '')
+    setEditPriority(initialTask.priority)
+    setIsEditMode(false)
   }, [initialTask.id, initialTask.status])
 
   const c = getStatusColor(task.status)
@@ -337,8 +542,14 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const checklist: ChecklistItem[] = Array.isArray(ctx.checklist) ? ctx.checklist as ChecklistItem[] : []
 
   async function doAction(action: { label: string; status?: string; special?: string }) {
+    if (action.special === 'split') {
+      setShowSplitModal(true)
+      return
+    }
     setActionBusy(action.label)
     setActionError(null)
+    // Flush pending notes debounce immediately so notes are always included in status transitions
+    if (notesTimer.current) { clearTimeout(notesTimer.current); notesTimer.current = null }
     try {
       if (action.special === 'archive') {
         const res = await fetch(`/api/taskqueue/${task.id}/archive`, { method: 'POST' })
@@ -353,7 +564,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: action.status }),
+          body: JSON.stringify({
+            status: action.status,
+            jeff_notes: jeffNotes,
+            context_summary: contextSummary,
+          }),
         })
         const data = await res.json()
         if (res.ok && data.task) {
@@ -367,6 +582,30 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
       console.error('doAction failed:', err)
       setActionError('Network error')
     } finally { setActionBusy(null) }
+  }
+
+  async function saveEdit() {
+    setEditBusy(true)
+    setEditError(null)
+    try {
+      const res = await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editTitle, description: editDescription, priority: editPriority }),
+      })
+      const data = await res.json()
+      if (res.ok && data.task) {
+        setTask(data.task)
+        setIsEditMode(false)
+        onRefresh()
+      } else {
+        setEditError(data.error ?? `Failed (${res.status})`)
+      }
+    } catch {
+      setEditError('Network error')
+    } finally {
+      setEditBusy(false)
+    }
   }
 
   function saveNotes(notes: string, summary: string) {
@@ -415,7 +654,15 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
               </span>
             )}
           </div>
-          <h3 className="text-sm font-semibold text-zinc-100 leading-snug">{task.title}</h3>
+          {isEditMode ? (
+            <input
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              className="w-full mt-1 px-2 py-1 rounded-lg text-sm font-semibold bg-zinc-800/80 border border-blue-700/50 text-zinc-100 focus:outline-none focus:border-blue-500"
+            />
+          ) : (
+            <h3 className="text-sm font-semibold text-zinc-100 leading-snug">{task.title}</h3>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Export dropdown */}
@@ -446,6 +693,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
               title="Edit task dependencies"
             >🔗 Dependencies</button>
           )}
+          <button
+            onClick={() => { setIsEditMode(v => !v); setEditError(null) }}
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${isEditMode ? 'bg-blue-900/40 border-blue-700/50 text-blue-300' : 'border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700'}`}
+            title="Edit task fields"
+          >✎ Edit</button>
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg leading-none mt-0.5">✕</button>
         </div>
       </div>
@@ -465,6 +717,17 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           />
         </div>
 
+        {/* Parent task indicator */}
+        {(task as TaskItem & { parent_task_id?: string | null }).parent_task_id && (
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-indigo-950/30 border border-indigo-900/30">
+            <span className="text-indigo-500 text-[10px]">⤴</span>
+            <span className="text-[10px] text-indigo-400">Subtask of</span>
+            <span className="text-[10px] text-indigo-300 font-mono truncate">
+              {(task as TaskItem & { parent_task_id?: string | null }).parent_task_id?.slice(0, 8)}…
+            </span>
+          </div>
+        )}
+
         {/* Routing */}
         <div className="flex items-center gap-2">
           <span className="text-zinc-600">Route</span>
@@ -474,8 +737,49 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           {task.claimed_by && <><span className="text-zinc-700">→</span><span className="text-blue-400">{task.claimed_by}</span></>}
         </div>
 
-        {/* Description */}
-        {task.description && (
+        {/* Description / Edit mode */}
+        {isEditMode ? (
+          <div className="space-y-3 p-3 rounded-xl border border-blue-900/40 bg-blue-950/10">
+            <div className="text-[10px] text-blue-400 uppercase tracking-widest">Editing Task</div>
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</div>
+              <textarea
+                value={editDescription}
+                onChange={e => setEditDescription(e.target.value)}
+                rows={5}
+                className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-blue-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-blue-500 resize-y"
+                placeholder="Task description…"
+              />
+            </div>
+            <div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Priority</div>
+              <select
+                value={editPriority}
+                onChange={e => setEditPriority(Number(e.target.value))}
+                className="px-2 py-1 rounded-lg text-xs bg-zinc-800/60 border border-blue-700/40 text-zinc-300 focus:outline-none focus:border-blue-500"
+              >
+                <option value={0}>0 — CRIT</option>
+                <option value={1}>1 — HIGH</option>
+                <option value={2}>2 — MED</option>
+                <option value={3}>3 — LOW</option>
+              </select>
+            </div>
+            {editError && (
+              <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">{editError}</div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={saveEdit}
+                disabled={editBusy || !editTitle.trim()}
+                className="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-blue-900/60 hover:bg-blue-800/80 text-blue-200 disabled:opacity-50 transition-colors"
+              >{editBusy ? 'Saving…' : 'Save Changes'}</button>
+              <button
+                onClick={() => { setIsEditMode(false); setEditError(null) }}
+                className="px-3 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+              >Cancel</button>
+            </div>
+          </div>
+        ) : task.description && (
           <div>
             <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</div>
             <p className="text-zinc-300 leading-relaxed whitespace-pre-wrap">{task.description}</p>
@@ -496,15 +800,34 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           </div>
         )}
 
-        {/* Jeff notes */}
-        <div>
-          <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Jeff Notes</div>
+        {/* Live activity — shown while agent is running */}
+        {isRunning(task.status) && (
+          <div className="p-3 rounded-xl border border-blue-900/30 bg-blue-950/10">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-400" />
+              </span>
+              <div className="text-[10px] text-blue-500 uppercase tracking-widest">Live Activity</div>
+            </div>
+            <LiveActivityLog taskId={task.id} />
+          </div>
+        )}
+
+        {/* Jeff notes — highlighted when task needs handback context */}
+        <div className={`rounded-xl border p-3 ${jeffNotes ? 'border-amber-800/40 bg-amber-950/10' : 'border-zinc-800/40 bg-zinc-900/10'}`}>
+          <div className="flex items-center justify-between mb-1">
+            <div className={`text-[10px] uppercase tracking-widest ${jeffNotes ? 'text-amber-500/80' : 'text-zinc-600'}`}>
+              {jeffNotes ? '📝 Jeff Notes (visible to agents)' : 'Jeff Notes'}
+            </div>
+            <div className="text-[10px] text-zinc-700">auto-saves</div>
+          </div>
           <textarea
             value={jeffNotes}
             onChange={e => handleNotesChange(e.target.value)}
-            placeholder="Notes visible to agents after handback…"
-            rows={3}
-            className="w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/40 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-none"
+            placeholder="Add context, direction, or feedback for the agent when sending this task back…"
+            rows={4}
+            className={`w-full px-2 py-1.5 rounded-lg text-xs bg-zinc-800/60 border text-zinc-300 placeholder-zinc-600 focus:outline-none resize-y ${jeffNotes ? 'border-amber-700/40 focus:border-amber-600' : 'border-zinc-700/40 focus:border-zinc-600'}`}
           />
         </div>
 
@@ -512,7 +835,9 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         {task.result && (
           <div>
             <div className="text-[10px] text-emerald-600/80 uppercase tracking-widest mb-1">Result</div>
-            <p className="text-zinc-300 leading-relaxed whitespace-pre-wrap bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30">{task.result}</p>
+            <div className="bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30 prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
+            </div>
           </div>
         )}
 
@@ -595,6 +920,15 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
             </button>
           ))}
         </div>
+      )}
+
+      {/* Split Modal */}
+      {showSplitModal && (
+        <SplitModal
+          task={task}
+          onClose={() => setShowSplitModal(false)}
+          onDone={() => { setShowSplitModal(false); onRefresh(); onClose() }}
+        />
       )}
     </div>
   )
@@ -874,6 +1208,94 @@ function ArchivedSection({ onRestore }: { onRestore: () => void }) {
   )
 }
 
+// ── New task modal — markdown helpers ─────────────────────────────────────────
+
+interface TaskMdToolbarProps {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  value: string
+  onChange: (v: string) => void
+}
+
+const TASK_MD_TOOLS = [
+  { label: 'B',   title: 'Bold',          wrap: ['**', '**'],      placeholder: 'bold text',  style: 'font-bold' },
+  { label: 'I',   title: 'Italic',        wrap: ['_', '_'],        placeholder: 'italic',     style: 'italic' },
+  { label: '<>',  title: 'Inline code',   wrap: ['`', '`'],        placeholder: 'code',       style: 'font-mono text-[10px]' },
+  { label: '```', title: 'Code block',    wrap: ['```\n', '\n```'], placeholder: 'code block', style: 'font-mono text-[9px]' },
+  { label: '•',   title: 'Bullet list',   prefix: '- ',            style: '' },
+  { label: '1.',  title: 'Numbered list', prefix: '1. ',           style: '' },
+  { label: '[ ]', title: 'Task item',     prefix: '- [ ] ',        style: 'font-mono text-[9px]' },
+] as const
+
+function applyTaskMarkdown(
+  tool: (typeof TASK_MD_TOOLS)[number],
+  textarea: HTMLTextAreaElement,
+  value: string,
+  onChange: (v: string) => void,
+) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = value.slice(start, end)
+  let newValue = value
+  let newCursorStart = start
+  let newCursorEnd = end
+
+  if ('insert' in tool) {
+    const ins = (tool as { insert: string }).insert
+    newValue = value.slice(0, start) + ins + value.slice(end)
+    newCursorStart = newCursorEnd = start + ins.length
+  } else if ('prefix' in tool) {
+    const lineStart = value.lastIndexOf('\n', start - 1) + 1
+    newValue = value.slice(0, lineStart) + tool.prefix + value.slice(lineStart)
+    newCursorStart = start + tool.prefix.length
+    newCursorEnd = end + tool.prefix.length
+  } else if ('wrap' in tool) {
+    const [open, close] = tool.wrap
+    const text = selected || tool.placeholder
+    newValue = value.slice(0, start) + open + text + close + value.slice(end)
+    newCursorStart = start + open.length
+    newCursorEnd = start + open.length + text.length
+  }
+
+  onChange(newValue)
+  requestAnimationFrame(() => {
+    textarea.focus()
+    textarea.setSelectionRange(newCursorStart, newCursorEnd)
+  })
+}
+
+function TaskMdToolbar({ textareaRef, value, onChange }: TaskMdToolbarProps) {
+  return (
+    <div className="flex items-center gap-0.5 flex-wrap px-2 py-1.5 bg-zinc-800/60 border border-zinc-700/60 border-b-0 rounded-t-md">
+      {TASK_MD_TOOLS.map((tool) => (
+        <button
+          key={tool.title}
+          type="button"
+          title={tool.title}
+          onClick={() => textareaRef.current && applyTaskMarkdown(tool, textareaRef.current, value, onChange)}
+          className={`text-[10px] px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60 transition-colors ${tool.style}`}
+        >
+          {tool.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function TaskMdPreview({ content }: { content: string }) {
+  if (!content.trim()) return <p className="text-xs text-zinc-600 italic">Nothing to preview yet…</p>
+  return (
+    <div className="prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed
+      [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-2 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-2 [&_li]:mb-0.5
+      [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-blue-300 [&_code]:font-mono [&_code]:text-[10px]
+      [&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:mb-2 [&_pre_code]:bg-transparent [&_pre_code]:text-green-300
+      [&_strong]:text-zinc-100 [&_strong]:font-semibold [&_a]:text-blue-400 [&_a]:underline
+      [&_input[type=checkbox]]:mr-1.5
+    ">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  )
+}
+
 // ── New task modal ────────────────────────────────────────────────────────────
 
 function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -888,6 +1310,12 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
+  const descRef = useRef<HTMLTextAreaElement>(null)
+
+  function handleBackdrop(e: React.MouseEvent) {
+    if (e.target === e.currentTarget) onClose()
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -919,127 +1347,164 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     } catch { setError('Network error') } finally { setSaving(false) }
   }
 
+  const inputCls = 'w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-600 placeholder-zinc-600'
+  const labelCls = 'text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1'
+  const tabBtn = (active: boolean) =>
+    `text-[10px] px-2.5 py-1 rounded-t font-medium transition-colors ${active ? 'bg-zinc-900 text-zinc-200 border border-zinc-700 border-b-zinc-900' : 'text-zinc-500 hover:text-zinc-300'}`
+
   const PRIORITIES = [
-    { value: 0, label: 'Critical', cls: 'text-red-400' },
-    { value: 1, label: 'High',     cls: 'text-orange-400' },
-    { value: 2, label: 'Normal',   cls: 'text-zinc-300' },
-    { value: 3, label: 'Low',      cls: 'text-zinc-500' },
+    { value: 0, label: '0 — Critical' },
+    { value: 1, label: '1 — High' },
+    { value: 2, label: '2 — Normal' },
+    { value: 3, label: '3 — Low' },
   ]
   const AGENTS = ['claude-code', 'cowork', 'atlas', 'forge', 'volt', 'hermes', '']
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.75)' }}>
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-2xl border border-zinc-800 shadow-2xl p-5 w-full max-w-lg space-y-3"
-        style={{ background: 'rgba(12,12,14,0.98)' }}
+    <div
+      className="fixed inset-0 z-[200] flex items-stretch justify-end"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={handleBackdrop}
+    >
+      <div
+        className="w-full max-w-2xl bg-zinc-950 border-l border-zinc-800 flex flex-col h-full"
+        style={{ animation: 'slideInRight 0.2s ease-out' }}
       >
-        <div className="flex justify-between items-center">
-          <h3 className="text-sm font-semibold text-zinc-100">New Task</h3>
-          <button type="button" onClick={onClose} className="text-zinc-600 hover:text-zinc-300">✕</button>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-200">New Task</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
-        {/* Title */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Title *</label>
-          <input
-            autoFocus
-            value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            placeholder="What needs to be done?"
-            className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800/60 border border-zinc-700/50 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Description</label>
-          <textarea
-            value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            placeholder="Context, steps, links…"
-            rows={4}
-            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
-          />
-        </div>
-
-        {/* Priority + Target row */}
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Priority</label>
-            <select
-              value={form.priority}
-              onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              {PRIORITIES.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
+        <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
+          {/* Priority + Target Agent */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Priority</label>
+              <select
+                value={form.priority}
+                onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))}
+                className={inputCls}
+              >
+                {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Target Agent</label>
+              <select
+                value={form.target}
+                onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
+                className={inputCls}
+              >
+                {AGENTS.map(a => <option key={a} value={a}>{a || '— unassigned —'}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="flex-1">
-            <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Target Agent</label>
-            <select
-              value={form.target}
-              onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              {AGENTS.map(a => (
-                <option key={a} value={a}>{a || '— unassigned —'}</option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        {/* Tags */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Tags <span className="text-zinc-700 normal-case">(comma-separated)</span></label>
-          <input
-            value={form.tags}
-            onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-            placeholder="homelab, infra, security…"
-            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        {/* Schedule */}
-        <div>
-          <label className="block text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Schedule <span className="text-zinc-700 normal-case">(optional repeat)</span></label>
-          <select
-            value={form.recurring_schedule}
-            onChange={e => setForm(f => ({ ...f, recurring_schedule: e.target.value, custom_cron: '' }))}
-            className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-          >
-            <option value="">One-time (default)</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="custom">Custom cron…</option>
-          </select>
-          {form.recurring_schedule === 'custom' && (
+          {/* Title */}
+          <div>
+            <label className={labelCls}>Title *</label>
             <input
-              value={form.custom_cron}
-              onChange={e => setForm(f => ({ ...f, custom_cron: e.target.value }))}
-              placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
-              className="mt-1 w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
+              autoFocus
+              type="text"
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="What needs to be done?"
+              className={inputCls}
+              required
             />
+          </div>
+
+          {/* Description with markdown toolbar + preview */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Description</label>
+              <div className="flex gap-0.5 -mb-px relative z-10">
+                <button type="button" className={tabBtn(descTab === 'edit')} onClick={() => setDescTab('edit')}>Edit</button>
+                <button type="button" className={tabBtn(descTab === 'preview')} onClick={() => setDescTab('preview')}>Preview</button>
+              </div>
+            </div>
+            {descTab === 'edit' ? (
+              <>
+                <TaskMdToolbar textareaRef={descRef} value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} />
+                <textarea
+                  ref={descRef}
+                  value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Context, steps, links… (supports **markdown**)"
+                  rows={10}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded-b-md px-3 py-2 text-zinc-200 focus:outline-none focus:border-blue-600 placeholder-zinc-600 resize-y font-mono leading-relaxed"
+                />
+              </>
+            ) : (
+              <div className="min-h-[220px] bg-zinc-900/60 border border-zinc-700 rounded-md px-3 py-2">
+                <TaskMdPreview content={form.description} />
+              </div>
+            )}
+          </div>
+
+          {/* Tags */}
+          <div>
+            <label className={labelCls}>Tags <span className="text-zinc-700 normal-case font-normal">(comma-separated)</span></label>
+            <input
+              value={form.tags}
+              onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+              placeholder="homelab, infra, security…"
+              className={inputCls}
+            />
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <label className={labelCls}>Schedule <span className="text-zinc-700 normal-case font-normal">(optional repeat)</span></label>
+            <select
+              value={form.recurring_schedule}
+              onChange={e => setForm(f => ({ ...f, recurring_schedule: e.target.value, custom_cron: '' }))}
+              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
+            >
+              <option value="">One-time (default)</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="custom">Custom cron…</option>
+            </select>
+            {form.recurring_schedule === 'custom' && (
+              <input
+                value={form.custom_cron}
+                onChange={e => setForm(f => ({ ...f, custom_cron: e.target.value }))}
+                placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
+                className="mt-1 w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
+              />
+            )}
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 border border-red-900/50 rounded-md px-3 py-2 bg-red-950/20">{error}</p>
           )}
-        </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2 pt-2 pb-4">
+            <button
+              type="submit"
+              disabled={saving || !form.title.trim()}
+              className="flex-1 text-xs px-3 py-2 rounded-md border border-blue-700/60 bg-blue-900/40 text-blue-200 hover:bg-blue-900/60 disabled:opacity-50 font-semibold transition-colors"
+            >
+              {saving ? 'Creating…' : 'Create Task'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-xs px-3 py-2 rounded-md border border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
 
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-          >Cancel</button>
-          <button
-            type="submit"
-            disabled={saving || !form.title.trim()}
-            className="flex-1 py-2 rounded-lg text-xs bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-40 font-semibold"
-          >{saving ? 'Creating…' : 'Create Task'}</button>
-        </div>
-      </form>
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }

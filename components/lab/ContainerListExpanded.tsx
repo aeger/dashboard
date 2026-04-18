@@ -134,12 +134,13 @@ function ActionBtn({ label, icon, onClick, disabled, color }: {
   )
 }
 
-function ContainerRow({ c, update, metrics, acting, rebuilding, actionLoading, onAction, onUpdateAction }: {
+function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, onAction, onUpdateAction }: {
   c: Container
   update?: UpdateInfo
   metrics?: ContainerMetrics
   acting: { id: string; action: string } | null
   rebuilding: string | null
+  forceRestarting: string | null
   actionLoading: string | null
   onAction: (c: Container, action: string) => void
   onUpdateAction: (name: string, action: string) => void
@@ -148,6 +149,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, actionLoading, o
   const isRunning = c.state === 'running'
   const isBusy = acting?.id === c.id
   const isRebuilding = rebuilding === c.name
+  const isForceRestarting = forceRestarting === c.name
   const hasUpdate = (update?.has_update ?? false) && update?.user_status !== 'ignored'
   const uptime = extractUptime(c.status)
 
@@ -218,10 +220,17 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, actionLoading, o
             label={isRebuilding ? 'Pulling…' : 'Pull'}
             icon="⇓"
             onClick={(e) => { e.stopPropagation(); onAction(c, 'rebuild') }}
-            disabled={isBusy || isRebuilding}
+            disabled={isBusy || isRebuilding || isForceRestarting}
             color="text-sky-400 bg-sky-950/30 hover:bg-sky-900/40"
           />
-          {(isBusy || isRebuilding) && <div className="w-3.5 h-3.5 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin" />}
+          <ActionBtn
+            label={isForceRestarting ? 'Restarting…' : 'Force ↻'}
+            icon="⚡"
+            onClick={(e) => { e.stopPropagation(); onAction(c, 'force-restart') }}
+            disabled={isBusy || isRebuilding || isForceRestarting}
+            color="text-orange-400 bg-orange-950/30 hover:bg-orange-900/40"
+          />
+          {(isBusy || isRebuilding || isForceRestarting) && <div className="w-3.5 h-3.5 border border-zinc-500 border-t-zinc-200 rounded-full animate-spin" />}
         </div>
 
         {/* Chevron */}
@@ -312,7 +321,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, actionLoading, o
                   <p className="text-xs text-zinc-500">Skipped — reassess {new Date(update.skip_reassess_at).toLocaleDateString()}</p>
                 )}
                 <div className="flex gap-2 pt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                  {['pending_review', 'notified', 'failed'].includes(update.user_status) && (<>
+                  {['pending_review', 'failed', 'notified'].includes(update.user_status) && (<>
                     <button onClick={() => onUpdateAction(c.name, 'update_now')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors">Update Now</button>
                     <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule 3 AM</button>
                     <button onClick={() => onUpdateAction(c.name, 'skip')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors">Skip 30d</button>
@@ -366,6 +375,8 @@ export default function ContainerListExpanded() {
   const [rebuilding, setRebuilding] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [stackUpdating, setStackUpdating] = useState<string | null>(null)
+  const [stackError, setStackError] = useState<string | null>(null)
+  const [forceRestarting, setForceRestarting] = useState<string | null>(null)
   const [rollingRestart, setRollingRestart] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   // collapsed state: undefined = auto, true = collapsed, false = expanded
@@ -406,6 +417,12 @@ export default function ContainerListExpanded() {
       setTimeout(() => { refresh(); setRebuilding(null) }, 3000)
       return
     }
+    if (action === 'force-restart') {
+      setForceRestarting(c.name)
+      await fetch('/api/containers/force-restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ containerName: c.name }) }).catch(() => {})
+      setTimeout(() => { refresh(); setForceRestarting(null) }, 3000)
+      return
+    }
     setActing({ id: c.id, action })
     setContainers((prev) => prev.map((ct) => {
       if (ct.id !== c.id) return ct
@@ -427,7 +444,16 @@ export default function ContainerListExpanded() {
 
   async function handleStackUpdate(stackName: string) {
     setStackUpdating(stackName)
-    await fetch('/api/containers/stack-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackName }) }).catch(() => {})
+    setStackError(null)
+    try {
+      const res = await fetch('/api/containers/stack-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackName }) })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setStackError(data.error || `Stack update failed (${res.status})`)
+      }
+    } catch {
+      setStackError('Network error — stack update failed')
+    }
     setTimeout(() => { refresh(); setStackUpdating(null) }, 4000)
   }
 
@@ -644,13 +670,18 @@ export default function ContainerListExpanded() {
                   </button>
                 )}
                 {hasStackUpdate && (
-                  <button
-                    onClick={() => handleStackUpdate(group.key)}
-                    disabled={stackUpdating === group.key || isRolling}
-                    className="text-[10px] px-2.5 py-1 bg-amber-700/40 hover:bg-amber-600/50 disabled:opacity-50 text-amber-200 rounded border border-amber-600/30 transition-colors"
-                  >
-                    {stackUpdating === group.key ? '⟳ Updating…' : '↑ Update Stack'}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleStackUpdate(group.key)}
+                      disabled={stackUpdating === group.key || isRolling}
+                      className="text-[10px] px-2.5 py-1 bg-amber-700/40 hover:bg-amber-600/50 disabled:opacity-50 text-amber-200 rounded border border-amber-600/30 transition-colors"
+                    >
+                      {stackUpdating === group.key ? '⟳ Updating…' : '↑ Update Stack'}
+                    </button>
+                    {stackError && stackUpdating === null && (
+                      <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={stackError}>{stackError}</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -666,6 +697,7 @@ export default function ContainerListExpanded() {
                     metrics={metricsMap.get(c.name)}
                     acting={acting}
                     rebuilding={rebuilding}
+                    forceRestarting={forceRestarting}
                     actionLoading={actionLoading}
                     onAction={handleAction}
                     onUpdateAction={handleUpdateAction}
