@@ -520,7 +520,7 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           calendarId: 'almty1@gmail.com',
-          title: goal.title,
+          title: `[Lab] ${goal.title}`,
           description: goal.description ?? `Goal: ${goal.title}`,
           start: startDt.toISOString(),
           end: endDt.toISOString(),
@@ -1444,7 +1444,8 @@ function CalendarSection() {
       .then((r) => r.json())
       .then((data) => {
         if (data.configured === false) { setConfigured(false); return }
-        setEvents((data.events ?? []).slice(0, 10))
+        const labEvents = (data.events ?? []).filter((e: CalendarEvent) => e.title?.startsWith('[Lab] '))
+        setEvents(labEvents.slice(0, 10))
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -1476,7 +1477,7 @@ function CalendarSection() {
                 <div className="flex-1 min-w-0 flex items-start gap-2">
                   <span className="text-[10px] font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded text-purple-300 flex-shrink-0">{dateStr}</span>
                   <div className="min-w-0">
-                    <p className="text-xs text-zinc-300 leading-tight truncate">{ev.title}</p>
+                    <p className="text-xs text-zinc-300 leading-tight truncate">{ev.title.replace(/^\[Lab\]\s*/, '')}</p>
                     <p className="text-[10px] text-zinc-600 mt-0.5">{timeStr}</p>
                   </div>
                 </div>
