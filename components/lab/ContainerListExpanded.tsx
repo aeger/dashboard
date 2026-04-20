@@ -513,7 +513,7 @@ export default function ContainerListExpanded() {
   if (containers.length === 0) return <div className="text-zinc-500 text-sm text-center py-12">Portainer not configured</div>
 
   const sorted = [...containers].sort((a, b) => a.name.localeCompare(b.name))
-  const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').map((u) => u.name))
+  const updateNames = new Set(updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed').map((u) => u.name))
 
   // Build groups
   const assignedNames = new Set(Object.values(STACKS).flatMap((s) => s.containers))
