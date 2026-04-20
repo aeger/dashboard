@@ -602,7 +602,7 @@ function parseNotes(raw: string | null | undefined): string[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter(Boolean)
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
   } catch {}
   return [raw]
 }
@@ -810,8 +810,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
-  const hasChildren = (goal.children?.length ?? 0) > 0
-  const [collapsed, setCollapsed] = useState(false)
   const [cardExpanded, setCardExpanded] = useState(goal.level === 'vision' || goal.level === 'strategy')
   const [showNotes, setShowNotes] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
@@ -902,12 +900,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
                     goal.status === 'completed' ? 'opacity-70' : ''
   const noteCount = parseNotes(goal.notes).length
 
-  const visibleChildren = (goal.children ?? []).filter((child) =>
-    !filterStatuses || !filterLevels
-      ? true
-      : nodeMatchesFilter(child, filterStatuses, filterLevels, searchText)
-  )
-
   return (
     <div className={`${depth > 0 ? 'ml-4 border-l border-zinc-800/60 pl-4' : ''}`}>
       <div data-goal-id={goal.id} className={`card-lift rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-4 mb-3 ${levelStripe} ${statusMod}`}>
@@ -940,17 +932,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             {goal.target_date && (
               <span className="text-[10px] text-zinc-600">{goal.target_date}</span>
             )}
-            {hasChildren && (
-              <button
-                data-action="toggle-details"
-                onClick={() => setCollapsed((v) => !v)}
-                className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-1.5 py-0.5 rounded border border-zinc-800/60 hover:border-zinc-600 bg-zinc-900/50 flex items-center gap-1"
-                title={collapsed ? 'Expand children' : 'Collapse children'}
-              >
-                <span>{collapsed ? '▶' : '▼'}</span>
-                <span>{goal.children!.length}</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -974,8 +955,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition-colors">{cardExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
-
-        <TitleProgressBar goal={goal} />
 
         {goal.description && (
           <div className="mb-3 max-h-40 overflow-y-auto pr-1">
@@ -1160,26 +1139,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         )}
       </div>
 
-      {hasChildren && !collapsed && (
-        <div className="space-y-0">
-          {visibleChildren.map((child) => (
-            <GoalCard
-              key={child.id}
-              goal={child}
-              depth={depth + 1}
-              onTrigger={onTrigger}
-              onFlag={onFlag}
-              triggeredTaskId={undefined}
-              taskStatus={allTaskStatuses?.[child.id]}
-              allTaskStatuses={allTaskStatuses}
-              filterStatuses={filterStatuses}
-              filterLevels={filterLevels}
-              searchText={searchText}
-              onRefresh={onRefresh}
-            />
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -2387,9 +2346,18 @@ function HierarchyView({
     onRefresh()
   }
 
+  // Deduplicate flat by id before building the hierarchy (guards against stale state slippage)
+  const dedupedFlat = Array.from(new Map(flat.map(g => [g.id, g])).values())
+  {
+    const ids = flat.map(g => g.id)
+    const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
+    if (dupes.length) console.warn('[HierarchyView] DUPE IDs in flat:', dupes, 'total:', flat.length)
+    else console.log('[HierarchyView] flat ok:', flat.length, 'goals, dedupedFlat:', dedupedFlat.length)
+  }
+
   // Build parent → sorted children map (exclude archived)
   const byParent = new Map<string | null, Goal[]>()
-  for (const g of flat) {
+  for (const g of dedupedFlat) {
     if (g.status === 'archived') continue
     const key = g.parent_id ?? null
     if (!byParent.has(key)) byParent.set(key, [])
@@ -2411,6 +2379,7 @@ function HierarchyView({
 
   function renderObjective(obj: Goal) {
     if (!passes(obj)) return null
+    console.log('[renderObjective]', obj.id, obj.title)
     return (
       <div
         key={obj.id}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 
 interface ContainerSummary { up: number; down: number; total: number; updates: number; majorUpdates: number }
@@ -244,12 +244,89 @@ function SecurityPill() {
   )
 }
 
+function ClaudeVersionPill() {
+  const [data, setData] = useState<{ current: string; latest: string; updateAvailable: boolean } | null>(null)
+  const [updating, setUpdating] = useState(false)
+  const [updateError, setUpdateError] = useState(false)
+
+  const load = useCallback(() =>
+    fetch('/api/claude-version')
+      .then(r => r.json())
+      .then(d => { if (!d.error) setData(d) })
+      .catch(() => {}), [])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 5 * 60_000)
+    return () => clearInterval(id)
+  }, [load])
+
+  const handleUpdate = async () => {
+    if (!data?.updateAvailable || updating) return
+    setUpdating(true)
+    setUpdateError(false)
+    try {
+      const res = await fetch('/api/claude-update', { method: 'POST' })
+      const d = await res.json()
+      if (d.success) {
+        await load()
+      } else {
+        setUpdateError(true)
+      }
+    } catch {
+      setUpdateError(true)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const color = updateError ? '#ef4444'
+    : !data ? '#71717a'
+    : data.updateAvailable ? '#f59e0b'
+    : '#22c55e'
+
+  const isClickable = !!data?.updateAvailable && !updating
+
+  return (
+    <button
+      onClick={handleUpdate}
+      disabled={!isClickable}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all${isClickable ? ' hover:brightness-125' : ''}`}
+      style={{
+        background: `${color}12`,
+        borderColor: `${color}30`,
+        color,
+        cursor: isClickable ? 'pointer' : 'default',
+      }}
+      title={data?.updateAvailable ? `Click to install v${data.latest}` : undefined}
+    >
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      <span className="text-zinc-400 font-normal">claude</span>
+      {updating ? (
+        <span className="text-amber-400">updating…</span>
+      ) : updateError ? (
+        <span className="text-red-400 font-semibold">update failed</span>
+      ) : data ? (
+        <>
+          <span className="font-semibold tabular-nums font-mono" style={{ color }}>v{data.current}</span>
+          {data.updateAvailable && (
+            <span className="text-amber-400 font-semibold">↑ v{data.latest}</span>
+          )}
+        </>
+      ) : (
+        <span className="text-zinc-500">—</span>
+      )}
+    </button>
+  )
+}
+
 export default function StatusPills() {
   return (
     <div className="flex items-center gap-2">
       <GoalsPill />
       <ContainerPill />
       <TaskPill />
+      <ClaudeVersionPill />
       <SecurityPill />
     </div>
   )
