@@ -790,6 +790,122 @@ interface GoalCardProps {
   searchText?: string
 }
 
+const OBJECTIVE_STATUS_COLOR: Record<string, string> = {
+  active:    'text-blue-400',
+  planned:   'text-zinc-400',
+  blocked:   'text-amber-400',
+  completed: 'text-green-400',
+  paused:    'text-zinc-500',
+  cancelled: 'text-zinc-600',
+  failed:    'text-red-400',
+}
+
+function QueueSelector({ objectives, onTrigger, onClose }: {
+  objectives: Goal[]
+  onTrigger: (goal: Goal) => Promise<string>
+  onClose: () => void
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(objectives.map(o => o.id)))
+  const [queuing, setQueuing] = useState(false)
+  const [results, setResults] = useState<Record<string, 'ok' | 'err'>>({})
+
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next
+  })
+
+  async function handleQueue() {
+    if (selected.size === 0 || queuing) return
+    setQueuing(true)
+    for (const obj of objectives.filter(o => selected.has(o.id))) {
+      try {
+        await onTrigger(obj)
+        setResults(prev => ({ ...prev, [obj.id]: 'ok' }))
+      } catch {
+        setResults(prev => ({ ...prev, [obj.id]: 'err' }))
+      }
+    }
+    setQueuing(false)
+  }
+
+  const doneCount = Object.keys(results).length
+  const isDone = doneCount > 0 && !queuing
+  const okCount = Object.values(results).filter(r => r === 'ok').length
+  const errCount = Object.values(results).filter(r => r === 'err').length
+
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Queue objectives</span>
+        {!isDone && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelected(new Set(objectives.map(o => o.id)))}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">All</button>
+            <span className="text-zinc-700">·</span>
+            <button onClick={() => setSelected(new Set())}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">None</button>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-0.5 mb-3">
+        {objectives.map(obj => {
+          const result = results[obj.id]
+          return (
+            <label key={obj.id}
+              className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer transition-colors select-none ${
+                result === 'ok' ? 'bg-green-900/20' : result === 'err' ? 'bg-red-900/20' : 'hover:bg-zinc-800/50'
+              }`}
+            >
+              <input type="checkbox"
+                checked={selected.has(obj.id)}
+                onChange={() => toggleOne(obj.id)}
+                disabled={queuing || !!result}
+                className="w-3 h-3 accent-purple-500 flex-shrink-0"
+              />
+              <span className="text-xs text-zinc-200 flex-1 truncate">{obj.title}</span>
+              {result === 'ok' ? (
+                <span className="text-[10px] text-green-400 flex-shrink-0">✓ queued</span>
+              ) : result === 'err' ? (
+                <span className="text-[10px] text-red-400 flex-shrink-0">✗ failed</span>
+              ) : (
+                <span className={`text-[10px] flex-shrink-0 ${OBJECTIVE_STATUS_COLOR[obj.status] ?? 'text-zinc-500'}`}>
+                  {obj.status}{obj.status === 'blocked' ? ' ⚠' : ''}
+                </span>
+              )}
+            </label>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {isDone ? (
+          <>
+            <span className="text-[11px] flex-1">
+              {okCount > 0 && <span className="text-green-400">{okCount} queued</span>}
+              {errCount > 0 && <span className="text-red-400 ml-1">{errCount} failed</span>}
+            </span>
+            <button onClick={onClose}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white transition-colors">
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={handleQueue} disabled={selected.size === 0 || queuing}
+              className="text-xs px-2.5 py-1 rounded-md border border-purple-700/60 bg-purple-900/20 text-purple-300 hover:bg-purple-900/40 disabled:opacity-40 transition-colors">
+              {queuing ? 'Queuing…' : `Queue ${selected.size}`}
+            </button>
+            <button onClick={onClose}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors">
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   const cfg: Record<string, { cls: string; label: string }> = {
     pending:   { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
@@ -810,9 +926,14 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
+  const milestoneObjectives = goal.level === 'milestone'
+    ? flat.filter(g => g.parent_id === goal.id && g.level === 'objective' && g.status !== 'archived')
+    : []
+
   const [cardExpanded, setCardExpanded] = useState(goal.level === 'vision' || goal.level === 'strategy')
   const [showNotes, setShowNotes] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
+  const [showQueueSelector, setShowQueueSelector] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [triggering, setTriggering] = useState(false)
@@ -1055,6 +1176,18 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
           >
             Schedule
           </button>
+          {milestoneObjectives.length > 0 && (
+            <button
+              onClick={() => { setShowQueueSelector(v => !v); setShowSchedule(false) }}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                showQueueSelector
+                  ? 'border-purple-600/60 bg-purple-900/30 text-purple-300'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20'
+              }`}
+            >
+              Queue Tasks →
+            </button>
+          )}
           {triggeredTaskId && (
             <button
               onClick={handleFlag}
@@ -1133,6 +1266,13 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
 
         {cardExpanded && showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
+        )}
+        {cardExpanded && showQueueSelector && milestoneObjectives.length > 0 && (
+          <QueueSelector
+            objectives={milestoneObjectives}
+            onTrigger={onTrigger}
+            onClose={() => setShowQueueSelector(false)}
+          />
         )}
         {cardExpanded && showEdit && (
           <GoalEditForm goal={goal} flat={flat} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
