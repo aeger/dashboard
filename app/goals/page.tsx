@@ -1163,19 +1163,23 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         {/* Action buttons */}
         {cardExpanded && (
         <div className="mt-3 pt-3 border-t border-zinc-800/40 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleTrigger}
-            disabled={triggering}
-            className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 disabled:opacity-50 transition-colors"
-          >
-            {triggering ? '…' : '▶ Run'}
-          </button>
-          <button
-            onClick={() => setShowSchedule((v) => !v)}
-            className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
-          >
-            Schedule
-          </button>
+          {goal.level !== 'milestone' && (
+            <button
+              onClick={handleTrigger}
+              disabled={triggering}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 disabled:opacity-50 transition-colors"
+            >
+              {triggering ? '…' : '▶ Run'}
+            </button>
+          )}
+          {goal.level !== 'milestone' && (
+            <button
+              onClick={() => setShowSchedule((v) => !v)}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
+            >
+              Schedule
+            </button>
+          )}
           {milestoneObjectives.length > 0 && (
             <button
               onClick={() => { setShowQueueSelector(v => !v); setShowSchedule(false) }}
@@ -2524,9 +2528,11 @@ function HierarchyView({
       <div
         key={obj.id}
         draggable
-        onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: obj.id, level: 'objective' }) }}
+        onDragStart={(e) => {
+          if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) { e.preventDefault(); return }
+          e.stopPropagation(); setDragItem({ id: obj.id, level: 'objective' })
+        }}
         onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
-        className="cursor-grab active:cursor-grabbing"
       >
         <GoalCard
           goal={obj} flat={flat} depth={3}
@@ -2562,10 +2568,11 @@ function HierarchyView({
         {msVisible && (
           <div
             draggable
-            onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: ms.id, level: 'milestone' }) }}
+            onDragStart={(e) => {
+              if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) { e.preventDefault(); return }
+              e.stopPropagation(); setDragItem({ id: ms.id, level: 'milestone' })
+            }}
             onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
-            className="cursor-grab active:cursor-grabbing"
-            title="Drag to move to a different strategy"
           >
             <GoalCard
               goal={ms} flat={flat} depth={orphaned ? 0 : 2}
