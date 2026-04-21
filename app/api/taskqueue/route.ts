@@ -48,6 +48,7 @@ export interface TaskQueueData {
   active: TaskItem[]
   recent: TaskItem[]
   completed: TaskItem[]
+  scheduled: TaskItem[]
   summary24h: Record<string, number>
 }
 
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes] = await Promise.all([
+    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes, scheduledRes] = await Promise.all([
       // Jeff urgent: pending_jeff_action and review_needed — highest priority
       fetch(`${base}?select=${SELECT}&${inFilter(JEFF_URGENT)}&order=updated_at.desc&limit=20`, opts),
       // Problems: failed or escalated
@@ -102,10 +103,12 @@ export async function GET(req: NextRequest) {
       fetch(`${base}?select=status&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
       // Total completed count for pagination
       fetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
+      // Scheduled: tasks with a recurring_schedule in context, not archived/cancelled
+      fetch(`${base}?select=${SELECT}&context->>recurring_schedule=not.is.null&status=neq.archived&status=neq.cancelled&order=created_at.desc&limit=50`, opts),
     ])
 
-    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw]: [
-      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>
+    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw]: [
+      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>, TaskItem[]
     ] = await Promise.all([
       jeffUrgentRes.ok ? jeffUrgentRes.json() : [],
       problemsRes.ok ? problemsRes.json() : [],
@@ -114,6 +117,7 @@ export async function GET(req: NextRequest) {
       recentRes.ok ? recentRes.json() : [],
       completedRes.ok ? completedRes.json() : [],
       summary24hRes.ok ? summary24hRes.json() : [],
+      scheduledRes.ok ? scheduledRes.json() : [],
     ])
     const completedTotal = parseInt(completedCountRes.headers.get('content-range')?.split('/')[1] ?? '0', 10) || 0
 
@@ -133,12 +137,13 @@ export async function GET(req: NextRequest) {
       active: activeRaw,
       recent: recentRaw,
       completed: completedRaw,
+      scheduled: scheduledRaw,
       completedTotal,
       completedOffset,
       completedPageSize: COMPLETED_PAGE_SIZE,
       summary24h,
       jeff_urgent: jeffUrgentRaw,
-    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
+    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; scheduled: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch task queue' }, { status: 500 })
   }

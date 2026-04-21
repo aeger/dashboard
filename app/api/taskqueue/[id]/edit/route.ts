@@ -17,7 +17,7 @@ export async function PATCH(
 
   const { id } = await params
 
-  let body: { title?: string; description?: string; priority?: number; tags?: string[] }
+  let body: { title?: string; description?: string; priority?: number; tags?: string[]; recurring_schedule?: string | null }
   try {
     body = await req.json()
   } catch {
@@ -29,6 +29,21 @@ export async function PATCH(
   if (body.description !== undefined) patch.description = body.description.trim() || null
   if (body.priority !== undefined) patch.priority = body.priority
   if (body.tags !== undefined) patch.tags = body.tags
+
+  // Merge recurring_schedule into context JSONB (read-modify-write)
+  if ('recurring_schedule' in body) {
+    const currentRes = await fetch(`${url}/rest/v1/task_queue?select=context&id=eq.${id}`, {
+      headers: SUPA_HEADERS(key),
+    })
+    const [current] = currentRes.ok ? await currentRes.json() : [{}]
+    const ctx: Record<string, unknown> = { ...(current?.context ?? {}) }
+    if (body.recurring_schedule === null || body.recurring_schedule === '') {
+      delete ctx.recurring_schedule
+    } else {
+      ctx.recurring_schedule = body.recurring_schedule
+    }
+    patch.context = ctx
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 })

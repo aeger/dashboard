@@ -1010,11 +1010,21 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
     } catch { setActionError('Delete failed') } finally { setActionBusy(null) }
   }
 
+  // Vision and strategy keep fixed accent colors; milestone and task/objective reflect status
+  const STATUS_BAR_COLOR: Record<string, string> = {
+    completed: 'border-l-emerald-500',
+    active:    'border-l-amber-500',
+    blocked:   'border-l-orange-600',
+    paused:    'border-l-zinc-500',
+    planned:   'border-l-zinc-300',
+    archived:  'border-l-zinc-700',
+  }
+  const statusBar = STATUS_BAR_COLOR[goal.status] ?? 'border-l-zinc-500'
   const LEVEL_STRIPE: Record<string, string> = {
     vision:    'border-l-4 border-l-purple-500 bg-purple-950/10',
     strategy:  'border-l-4 border-l-indigo-500',
-    milestone: 'border-l-4 border-l-blue-700/60',
-    objective: 'border-l-4 border-l-zinc-700',
+    milestone: `border-l-4 ${statusBar}`,
+    objective: `border-l-4 ${statusBar}`,
   }
   const levelStripe = LEVEL_STRIPE[goal.level] ?? LEVEL_STRIPE.milestone
   const statusMod = goal.status === 'blocked' ? 'ring-1 ring-amber-800/40' :
@@ -1167,7 +1177,15 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             <button
               onClick={handleTrigger}
               disabled={triggering}
-              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 disabled:opacity-50 transition-colors"
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+                goal.status === 'completed'
+                  ? 'border-emerald-700/50 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/30'
+                  : goal.status === 'active'
+                  ? 'border-amber-700/50 bg-amber-950/20 text-amber-300 hover:bg-amber-900/30'
+                  : goal.status === 'blocked'
+                  ? 'border-orange-700/50 bg-orange-950/20 text-orange-300 hover:bg-orange-900/30'
+                  : 'border-zinc-500/60 bg-zinc-800/50 text-zinc-200 hover:border-purple-500/50 hover:bg-purple-900/20'
+              }`}
             >
               {triggering ? '…' : '▶ Run'}
             </button>

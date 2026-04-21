@@ -1134,6 +1134,172 @@ function Section({ section, tasks, selected, onSelect, onContextMenu, onNeedsAct
   )
 }
 
+// ── Scheduled view ────────────────────────────────────────────────────────────
+
+function scheduleLabel(s: string): string {
+  if (s === 'daily')  return 'Every day'
+  if (s === 'weekly') return 'Every week'
+  if (s === 'hourly') return 'Every hour'
+  // Try to humanize simple cron: "0 3 * * *" → "Daily at 03:00"
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    if (dom === '*' && mon === '*' && dow === '*') {
+      const t = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
+      return `Daily at ${t}`
+    }
+  }
+  return s
+}
+
+const PRESET_SCHEDULES = [
+  { value: 'daily',        label: 'Every day' },
+  { value: 'weekly',       label: 'Every week' },
+  { value: '0 3 * * *',   label: 'Daily at 03:00' },
+  { value: '0 9 * * 1',   label: 'Weekly Mon 09:00' },
+  { value: '0 */6 * * *', label: 'Every 6 hours' },
+]
+
+function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editVal, setEditVal] = useState('')
+  const [isCustom, setIsCustom] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  async function handleCancel(task: TaskItem) {
+    setBusy(task.id)
+    try {
+      await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recurring_schedule: null }),
+      })
+      if (['pending', 'ready', 'backlog'].includes(task.status)) {
+        await fetch(`/api/taskqueue/${task.id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'cancelled' }),
+        })
+      }
+      onRefresh()
+    } catch { /* noop */ } finally { setBusy(null) }
+  }
+
+  async function handleSave(task: TaskItem) {
+    if (!editVal.trim()) return
+    setBusy(task.id)
+    try {
+      await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recurring_schedule: editVal.trim() }),
+      })
+      setEditing(null)
+      onRefresh()
+    } catch { /* noop */ } finally { setBusy(null) }
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="text-zinc-600 text-sm text-center py-16">
+        <div className="text-2xl mb-2">⏱</div>
+        No scheduled tasks — create one with the <span className="text-zinc-400">+ New</span> button and set a recurrence.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2 pr-1 overflow-y-auto">
+      {tasks.map(task => {
+        const schedule = task.context?.recurring_schedule ?? ''
+        const isEditing = editing === task.id
+        const isBusy = busy === task.id
+        const sc = STATUS_COLOR[task.status] ?? STATUS_COLOR.pending
+        const isPreset = PRESET_SCHEDULES.some(p => p.value === schedule)
+
+        return (
+          <div key={task.id} className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
+                  <span className="text-xs text-zinc-200 font-medium truncate">{task.title}</span>
+                </div>
+                {!isEditing ? (
+                  <div className="flex items-center gap-2 ml-3.5 flex-wrap">
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-cyan-300 font-mono">
+                      ⏱ {scheduleLabel(schedule)}
+                    </span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${sc.bg} ${sc.text}`}
+                      style={{ borderColor: sc.accent + '40' }}>
+                      {task.status.replace(/_/g, ' ')}
+                    </span>
+                    {task.tags && task.tags.length > 0 && task.tags.map(t => (
+                      <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500">{t}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="ml-3.5 space-y-2 mt-1">
+                    <select
+                      value={isCustom ? 'custom' : (PRESET_SCHEDULES.some(p => p.value === editVal) ? editVal : 'custom')}
+                      onChange={e => {
+                        if (e.target.value === 'custom') { setIsCustom(true) }
+                        else { setIsCustom(false); setEditVal(e.target.value) }
+                      }}
+                      className="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full"
+                    >
+                      {PRESET_SCHEDULES.map(p => (
+                        <option key={p.value} value={p.value}>{p.label}</option>
+                      ))}
+                      <option value="custom">Custom cron expression…</option>
+                    </select>
+                    {isCustom && (
+                      <input
+                        value={editVal}
+                        onChange={e => setEditVal(e.target.value)}
+                        placeholder="e.g. 0 9 * * 1  (Mon 9am)"
+                        className="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full font-mono"
+                      />
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSave(task)}
+                        disabled={isBusy || !editVal.trim()}
+                        className="text-xs px-3 py-1 rounded bg-blue-900/60 border border-blue-700/50 text-blue-300 hover:bg-blue-800/80 disabled:opacity-40"
+                      >{isBusy ? '…' : 'Save'}</button>
+                      <button
+                        onClick={() => setEditing(null)}
+                        className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-zinc-300"
+                      >Discard</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {!isEditing && (
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      setEditing(task.id)
+                      setEditVal(schedule)
+                      setIsCustom(!isPreset)
+                    }}
+                    className="text-[11px] px-2 py-1 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >Edit</button>
+                  <button
+                    onClick={() => handleCancel(task)}
+                    disabled={isBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-red-900/50 bg-red-950/20 text-red-400 hover:bg-red-900/40 disabled:opacity-40 transition-colors"
+                  >{isBusy ? '…' : 'Cancel'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Archived section ──────────────────────────────────────────────────────────
 
 function ArchivedSection({ onRestore }: { onRestore: () => void }) {
@@ -1598,7 +1764,7 @@ export default function TaskQueueExpanded() {
   const [showImport, setShowImport] = useState(false)
   const [showNewTask, setShowNewTask] = useState(false)
   const [completedPage, setCompletedPage] = useState(0)
-  const [viewTab, setViewTab] = useState<'list' | 'dependencies'>('list')
+  const [viewTab, setViewTab] = useState<'list' | 'scheduled' | 'dependencies'>('list')
   const [dependencyModal, setDependencyModal] = useState<TaskItem | null>(null)
 
   const load = useCallback((page?: number) => {
@@ -1719,6 +1885,21 @@ export default function TaskQueueExpanded() {
             Tasks
           </button>
           <button
+            onClick={() => setViewTab('scheduled')}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-1.5 ${
+              viewTab === 'scheduled'
+                ? 'bg-cyan-900/60 text-cyan-300 border border-cyan-700/50'
+                : 'bg-zinc-800/40 text-zinc-500 border border-zinc-700/30 hover:bg-zinc-800/60'
+            }`}
+          >
+            ⏱ Scheduled
+            {(data?.scheduled?.length ?? 0) > 0 && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${viewTab === 'scheduled' ? 'bg-cyan-700/60 text-cyan-200' : 'bg-zinc-700/60 text-zinc-400'}`}>
+                {data!.scheduled!.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => setViewTab('dependencies')}
             className={`px-3 py-1.5 rounded text-xs font-medium transition ${
               viewTab === 'dependencies'
@@ -1731,7 +1912,11 @@ export default function TaskQueueExpanded() {
         </div>
 
         {/* Conditional view content */}
-        {viewTab === 'list' ? (
+        {viewTab === 'scheduled' ? (
+          <div className="flex-1 overflow-y-auto">
+            <ScheduledView tasks={data?.scheduled ?? []} onRefresh={() => load()} />
+          </div>
+        ) : viewTab === 'list' ? (
           <>
             {/* Filter + controls */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">

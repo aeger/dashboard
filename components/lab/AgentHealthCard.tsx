@@ -31,6 +31,8 @@ const AGENT_STATUS_LABEL: Record<string, Partial<Record<string, string>>> = {
   discord_bot: { healthy: 'Connected' },
   task_poller: { healthy: 'Active'    },
   gmail_mcp:   { healthy: 'Active'    },
+  argus:       { healthy: 'Active', active: 'Active' },
+  sage:        { healthy: 'Active', active: 'Active' },
 }
 
 const AGENT_DISPLAY: Record<string, string> = {
@@ -38,10 +40,12 @@ const AGENT_DISPLAY: Record<string, string> = {
   discord_bot: 'Discord bot',
   task_poller: 'Task queue poller',
   gmail_mcp:   'Gmail MCP',
+  argus:       'Argus (orchestrator)',
+  sage:        'Sage (evaluator)',
 }
 
 // Known interesting agents in display order
-const AGENT_ORDER = ['wren', 'discord_bot', 'task_poller', 'gmail_mcp']
+const AGENT_ORDER = ['wren', 'argus', 'sage', 'discord_bot', 'task_poller', 'gmail_mcp']
 
 function formatAge(iso: string | null): string {
   if (!iso) return 'never'
