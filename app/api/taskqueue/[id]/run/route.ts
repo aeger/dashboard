@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
+import { sshExec } from '@/lib/ssh-exec'
 
 const SUPA_HEADERS = (key: string) => ({
   apikey: key,
@@ -41,12 +38,12 @@ export async function POST(
   }
 
   try {
-    await execAsync('systemctl --user start claude-queue-poll.service')
+    await sshExec('systemctl --user start --no-block claude-queue-poll.service', 15_000)
     return NextResponse.json({ ok: true, message: 'Poller triggered' })
   } catch (err: unknown) {
-    const error = err as { stderr?: string; message?: string }
+    const detail = err instanceof Error ? err.message : String(err)
     return NextResponse.json(
-      { error: 'Failed to trigger poller', detail: error.stderr ?? error.message },
+      { error: 'Failed to trigger poller', detail },
       { status: 500 }
     )
   }
