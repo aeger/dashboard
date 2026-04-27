@@ -776,11 +776,18 @@ interface TaskStatus {
   counts?: TaskCounts
 }
 
+interface DepCandidate {
+  id: string
+  title: string
+  status: string
+  goal_id: string | null
+}
+
 interface GoalCardProps {
   goal: Goal
   flat?: Goal[]
   depth?: number
-  onTrigger: (goal: Goal) => Promise<string>
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
   onFlag: (taskId: string) => Promise<void>
   triggeredTaskId?: string
   taskStatus?: TaskStatus
@@ -788,6 +795,7 @@ interface GoalCardProps {
   filterStatuses?: Set<string>
   filterLevels?: Set<string>
   searchText?: string
+  availableTasks?: DepCandidate[]
 }
 
 const OBJECTIVE_STATUS_COLOR: Record<string, string> = {
@@ -800,14 +808,17 @@ const OBJECTIVE_STATUS_COLOR: Record<string, string> = {
   failed:    'text-red-400',
 }
 
-function QueueSelector({ objectives, onTrigger, onClose }: {
+function QueueSelector({ objectives, onTrigger, onClose, availableTasks = [] }: {
   objectives: Goal[]
-  onTrigger: (goal: Goal) => Promise<string>
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
   onClose: () => void
+  availableTasks?: DepCandidate[]
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set(objectives.map(o => o.id)))
   const [queuing, setQueuing] = useState(false)
   const [results, setResults] = useState<Record<string, 'ok' | 'err'>>({})
+  const [sharedDeps, setSharedDeps] = useState<string[]>([])
+  const [showDeps, setShowDeps] = useState(false)
 
   const toggleOne = (id: string) => setSelected(prev => {
     const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next
@@ -816,9 +827,10 @@ function QueueSelector({ objectives, onTrigger, onClose }: {
   async function handleQueue() {
     if (selected.size === 0 || queuing) return
     setQueuing(true)
+    const opts = sharedDeps.length ? { blockedByIds: sharedDeps } : undefined
     for (const obj of objectives.filter(o => selected.has(o.id))) {
       try {
-        await onTrigger(obj)
+        await onTrigger(obj, opts)
         setResults(prev => ({ ...prev, [obj.id]: 'ok' }))
       } catch {
         setResults(prev => ({ ...prev, [obj.id]: 'err' }))
@@ -877,6 +889,36 @@ function QueueSelector({ objectives, onTrigger, onClose }: {
         })}
       </div>
 
+      {!isDone && availableTasks.length > 0 && (
+        <div className="mb-3 border-t border-zinc-800/60 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowDeps(v => !v)}
+            className="text-[10px] font-semibold text-zinc-500 hover:text-zinc-300 uppercase tracking-wider flex items-center gap-1"
+          >
+            <span>{showDeps ? '▼' : '▶'}</span>
+            <span>Dependencies</span>
+            {sharedDeps.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 text-[9px] normal-case tracking-normal">
+                {sharedDeps.length} blocking
+              </span>
+            )}
+            <span className="text-[9px] text-zinc-700 normal-case tracking-normal ml-1">
+              (applied to all queued tasks)
+            </span>
+          </button>
+          {showDeps && (
+            <div className="mt-2">
+              <DepChooser
+                candidates={availableTasks}
+                selected={sharedDeps}
+                onChange={setSharedDeps}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         {isDone ? (
           <>
@@ -906,6 +948,148 @@ function QueueSelector({ objectives, onTrigger, onClose }: {
   )
 }
 
+function DepChooser({ candidates, selected, onChange, excludeId }: {
+  candidates: DepCandidate[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+  excludeId?: string
+}) {
+  const [search, setSearch] = useState('')
+  const selectedSet = new Set(selected)
+  const pool = candidates.filter(c => c.id !== excludeId && !selectedSet.has(c.id))
+  const q = search.toLowerCase()
+  const filtered = q
+    ? pool.filter(c => c.title.toLowerCase().includes(q) || c.id.toLowerCase().includes(q))
+    : pool
+
+  const add = (id: string) => { onChange([...selected, id]); setSearch('') }
+  const remove = (id: string) => onChange(selected.filter(x => x !== id))
+
+  const statusColor = (s: string) =>
+    s === 'completed' ? 'text-emerald-400' :
+    s === 'in_progress_agent' || s === 'in_progress_jeff' || s === 'claimed' ? 'text-blue-400' :
+    s === 'blocked' || s === 'failed' || s === 'escalated' ? 'text-amber-400' : 'text-zinc-400'
+
+  return (
+    <div className="space-y-2">
+      {selected.length > 0 && (
+        <div className="space-y-1">
+          {selected.map(id => {
+            const t = candidates.find(c => c.id === id)
+            return (
+              <div key={id} className="flex items-center justify-between gap-2 px-2 py-1 bg-zinc-800/60 border border-zinc-700/60 rounded text-xs">
+                <div className="flex-1 min-w-0">
+                  <p className="text-zinc-200 truncate">{t?.title ?? id.slice(0, 8)}</p>
+                  {t && <p className={`text-[10px] ${statusColor(t.status)}`}>{t.status}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(id)}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 hover:bg-red-900/60 flex-shrink-0"
+                >Remove</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <input
+        type="text"
+        placeholder="Search tasks to block on…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full px-2 py-1.5 bg-zinc-900/80 border border-zinc-700 rounded text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+      />
+      <div className="max-h-40 overflow-y-auto space-y-1">
+        {filtered.length === 0 ? (
+          <p className="text-[10px] text-zinc-600 py-1">No matching tasks.</p>
+        ) : filtered.slice(0, 30).map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => add(t.id)}
+            className="w-full flex items-center justify-between gap-2 px-2 py-1 text-left bg-zinc-900/40 border border-zinc-800/60 rounded hover:border-zinc-600 hover:bg-zinc-800/60 text-xs"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-zinc-200 truncate">{t.title}</p>
+              <p className={`text-[10px] ${statusColor(t.status)}`}>{t.status}</p>
+            </div>
+            <span className="text-[10px] text-emerald-400 flex-shrink-0">+ Add</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TaskDependencyPanel({ candidates, initial, triggeredTaskId, onApplyNew, onApplyExisting, saving, onClose }: {
+  candidates: DepCandidate[]
+  initial: string[]
+  triggeredTaskId?: string
+  onApplyNew: (ids: string[]) => void
+  onApplyExisting: (ids: string[]) => Promise<void>
+  saving: boolean
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState<string[]>(initial)
+
+  useEffect(() => {
+    if (!triggeredTaskId) return
+    // Fetch current deps for the existing task so the editor reflects truth
+    fetch(`/api/taskqueue`)
+      .then(r => r.json())
+      .then((data: { active?: Array<{ id: string; blocked_by_task_ids: string[] | null }>; waiting?: Array<{ id: string; blocked_by_task_ids: string[] | null }>; recent?: Array<{ id: string; blocked_by_task_ids: string[] | null }> }) => {
+        const all = [...(data.active ?? []), ...(data.waiting ?? []), ...(data.recent ?? [])]
+        const found = all.find(t => t.id === triggeredTaskId)
+        if (found && Array.isArray(found.blocked_by_task_ids)) setDraft(found.blocked_by_task_ids)
+      })
+      .catch(() => {})
+  }, [triggeredTaskId])
+
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+          {triggeredTaskId ? 'Edit dependencies' : 'Set dependencies before queuing'}
+        </span>
+        <span className="text-[10px] text-zinc-600">{draft.length} selected</span>
+      </div>
+      <DepChooser
+        candidates={candidates}
+        selected={draft}
+        onChange={setDraft}
+        excludeId={triggeredTaskId}
+      />
+      <div className="flex items-center gap-2 mt-3">
+        {triggeredTaskId ? (
+          <button
+            type="button"
+            onClick={async () => { await onApplyExisting(draft); onClose() }}
+            disabled={saving}
+            className="text-xs px-2.5 py-1 rounded-md border border-amber-700/60 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 disabled:opacity-40 transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save dependencies'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { onApplyNew(draft); onClose() }}
+            className="text-xs px-2.5 py-1 rounded-md border border-amber-700/60 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors"
+          >
+            Apply ({draft.length})
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   const cfg: Record<string, { cls: string; label: string }> = {
     pending:   { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
@@ -922,7 +1106,7 @@ function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   )
 }
 
-function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
+function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', availableTasks = [], onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
@@ -936,6 +1120,9 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
   const [showQueueSelector, setShowQueueSelector] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showDeps, setShowDeps] = useState(false)
+  const [pendingDeps, setPendingDeps] = useState<string[]>([])
+  const [editingDeps, setEditingDeps] = useState(false)
   const [triggering, setTriggering] = useState(false)
   const [flagging, setFlagging] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -947,12 +1134,33 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
     setTriggering(true)
     setTriggerMsg(null)
     try {
-      const taskId = await onTrigger(goal)
+      const opts = pendingDeps.length ? { blockedByIds: pendingDeps } : undefined
+      const taskId = await onTrigger(goal, opts)
       setTriggerMsg(`Queued (task ${taskId.slice(0, 8)}…)`)
+      setPendingDeps([])
+      setShowDeps(false)
     } catch {
       setTriggerMsg('Failed to queue')
     } finally {
       setTriggering(false)
+    }
+  }
+
+  async function handleUpdateDependencies(ids: string[]) {
+    if (!triggeredTaskId) return
+    setEditingDeps(true)
+    try {
+      const res = await fetch('/api/task-dependencies', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: triggeredTaskId, blockedByIds: ids }),
+      })
+      if (res.ok) setTriggerMsg('Dependencies updated')
+      else setTriggerMsg('Update failed')
+    } catch {
+      setTriggerMsg('Update failed')
+    } finally {
+      setEditingDeps(false)
     }
   }
 
@@ -1198,6 +1406,35 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
               Schedule
             </button>
           )}
+          {goal.level !== 'milestone' && !triggeredTaskId && availableTasks.length > 0 && (
+            <button
+              onClick={() => setShowDeps(v => !v)}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                showDeps
+                  ? 'border-amber-600/60 bg-amber-900/30 text-amber-300'
+                  : pendingDeps.length > 0
+                  ? 'border-amber-700/50 bg-amber-950/20 text-amber-400 hover:bg-amber-900/20'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'
+              }`}
+              title="Set tasks that must finish before this runs"
+            >
+              Deps{pendingDeps.length > 0 ? ` (${pendingDeps.length})` : ''}
+            </button>
+          )}
+          {goal.level !== 'milestone' && triggeredTaskId && availableTasks.length > 0 && (
+            <button
+              onClick={() => setShowDeps(v => !v)}
+              disabled={editingDeps}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+                showDeps
+                  ? 'border-amber-600/60 bg-amber-900/30 text-amber-300'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'
+              }`}
+              title="Edit dependencies for the queued task"
+            >
+              Edit Deps
+            </button>
+          )}
           {milestoneObjectives.length > 0 && (
             <button
               onClick={() => { setShowQueueSelector(v => !v); setShowSchedule(false) }}
@@ -1289,10 +1526,24 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         {cardExpanded && showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
         )}
+        {cardExpanded && showDeps && goal.level !== 'milestone' && (
+          <TaskDependencyPanel
+            candidates={availableTasks}
+            initial={triggeredTaskId
+              ? (availableTasks.find(c => c.id === triggeredTaskId) ? [] : pendingDeps)
+              : pendingDeps}
+            triggeredTaskId={triggeredTaskId}
+            onApplyNew={(ids) => { setPendingDeps(ids) }}
+            onApplyExisting={async (ids) => { await handleUpdateDependencies(ids) }}
+            saving={editingDeps}
+            onClose={() => setShowDeps(false)}
+          />
+        )}
         {cardExpanded && showQueueSelector && milestoneObjectives.length > 0 && (
           <QueueSelector
             objectives={milestoneObjectives}
             onTrigger={onTrigger}
+            availableTasks={availableTasks}
             onClose={() => setShowQueueSelector(false)}
           />
         )}
@@ -2478,7 +2729,7 @@ function StrategyHeader({
 
 interface HierarchyViewProps {
   flat: Goal[]
-  onTrigger: (goal: Goal) => Promise<string>
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
   onFlag: (taskId: string) => Promise<void>
   triggeredTasks: Record<string, string>
   taskStatuses: Record<string, TaskStatus>
@@ -2486,11 +2737,12 @@ interface HierarchyViewProps {
   filterLevels: Set<string>
   searchText: string
   onRefresh: () => void
+  availableTasks: DepCandidate[]
 }
 
 function HierarchyView({
   flat, onTrigger, onFlag, triggeredTasks, taskStatuses,
-  filterStatuses, filterLevels, searchText, onRefresh,
+  filterStatuses, filterLevels, searchText, onRefresh, availableTasks,
 }: HierarchyViewProps) {
   const [dragItem, setDragItem] = useState<{ id: string; level: string } | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -2559,6 +2811,7 @@ function HierarchyView({
           triggeredTaskId={triggeredTasks[obj.id]}
           taskStatus={taskStatuses[obj.id]}
           allTaskStatuses={taskStatuses}
+          availableTasks={availableTasks}
           onRefresh={onRefresh}
         />
       </div>
@@ -2599,6 +2852,7 @@ function HierarchyView({
               triggeredTaskId={triggeredTasks[ms.id]}
               taskStatus={taskStatuses[ms.id]}
               allTaskStatuses={taskStatuses}
+              availableTasks={availableTasks}
               onRefresh={onRefresh}
             />
           </div>
@@ -2720,6 +2974,7 @@ export default function GoalsPage() {
   const [showNewDropdown, setShowNewDropdown] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
+  const [availableTasks, setAvailableTasks] = useState<DepCandidate[]>([])
 
   // keyboard shortcuts
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
@@ -2995,11 +3250,45 @@ export default function GoalsPage() {
     return () => clearInterval(timer)
   }, [flat])
 
-  async function handleTrigger(goal: Goal): Promise<string> {
+  // Fetch candidate tasks for dependency selection (open tasks in the queue)
+  useEffect(() => {
+    let cancelled = false
+    async function fetchCandidates() {
+      try {
+        const res = await fetch('/api/taskqueue')
+        if (!res.ok) return
+        const data = await res.json()
+        const rows: Array<{ id: string; title: string; status: string; goal_id: string | null }> = [
+          ...(data.active ?? []),
+          ...(data.waiting ?? []),
+          ...(data.recent ?? []),
+          ...(data.problems ?? []),
+          ...(data.scheduled ?? []),
+        ]
+        const dedup = new Map<string, DepCandidate>()
+        for (const r of rows) {
+          if (!r?.id || dedup.has(r.id)) continue
+          dedup.set(r.id, { id: r.id, title: r.title, status: r.status, goal_id: r.goal_id })
+        }
+        if (!cancelled) setAvailableTasks(Array.from(dedup.values()))
+      } catch { /* silent */ }
+    }
+    fetchCandidates()
+    const t = setInterval(fetchCandidates, 30000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
+
+  async function handleTrigger(goal: Goal, opts?: { blockedByIds?: string[] }): Promise<string> {
     const res = await fetch('/api/goals/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goalId: goal.id, title: goal.title, description: goal.description, notes: goal.notes }),
+      body: JSON.stringify({
+        goalId: goal.id,
+        title: goal.title,
+        description: goal.description,
+        notes: goal.notes,
+        ...(opts?.blockedByIds?.length ? { blockedByIds: opts.blockedByIds } : {}),
+      }),
     })
     if (!res.ok) throw new Error('Failed to trigger')
     const data = await res.json()
@@ -3168,6 +3457,7 @@ export default function GoalsPage() {
                 filterLevels={filterLevels}
                 searchText={searchText}
                 onRefresh={handleGoalRestored}
+                availableTasks={availableTasks}
               />
             )}
           </div>

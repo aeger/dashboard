@@ -5,6 +5,7 @@ import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
 import SecurityWidget from '@/components/lab/SecurityWidget'
 import AgentHealthBanner from '@/components/shared/AgentHealthBanner'
+import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
 import AgentHealthCard from '@/components/lab/AgentHealthCard'
 import HostMetricsCharts from '@/components/lab/HostMetricsCharts'
 import ToolPills from '@/components/lab/ToolPills'
@@ -30,6 +31,7 @@ export default function LabPage() {
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
       <AgentHealthBanner />
+      <GmailReauthBanner />
 
       {/* Page action bar */}
       <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">

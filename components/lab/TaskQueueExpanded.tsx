@@ -1136,35 +1136,340 @@ function Section({ section, tasks, selected, onSelect, onContextMenu, onNeedsAct
 
 // ── Scheduled view ────────────────────────────────────────────────────────────
 
+const DOW_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DOW_LONG  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_LABEL = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTH_LONG  = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
 function scheduleLabel(s: string): string {
-  if (s === 'daily')  return 'Every day'
-  if (s === 'weekly') return 'Every week'
-  if (s === 'hourly') return 'Every hour'
-  // Try to humanize simple cron: "0 3 * * *" → "Daily at 03:00"
+  const key = s.trim().toLowerCase()
+  if (key === 'hourly')   return 'Every hour'
+  if (key === 'daily')    return 'Every day'
+  if (key === 'weekly')   return 'Every week'
+  if (key === 'biweekly') return 'Every 2 weeks'
+  if (key === 'monthly')  return 'Every month'
+  if (key === 'yearly')   return 'Every year'
+  if (key === 'weekdays') return 'Weekdays (Mon–Fri)'
+  // biweekly M H D custom format
+  const biw = /^biweekly\s+(\d+)\s+(\d+)\s+([0-6])$/.exec(s.trim().toLowerCase())
+  if (biw) {
+    const [, min, hr, d] = biw
+    const t = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
+    return `Every 2 weeks on ${DOW_LONG[Number(d)]} at ${t}`
+  }
+  // Humanize 5-field cron
   const parts = s.trim().split(/\s+/)
   if (parts.length === 5) {
     const [min, hr, dom, mon, dow] = parts
-    if (dom === '*' && mon === '*' && dow === '*') {
-      const t = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
-      return `Daily at ${t}`
+    const minOk = /^\d+$/.test(min)
+    const hrOk = /^\d+$/.test(hr)
+    const t = (minOk && hrOk) ? `${hr.padStart(2,'0')}:${min.padStart(2,'0')}` : null
+    // Hourly at a given minute: M * * * *
+    if (minOk && hr === '*' && dom === '*' && mon === '*' && dow === '*') {
+      return `Hourly at :${min.padStart(2,'0')}`
     }
+    // Daily
+    if (t && dom === '*' && mon === '*' && dow === '*') return `Daily at ${t}`
+    // Weekdays
+    if (t && dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${t}`
+    // Single DOW (weekly)
+    if (t && dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+      return `Every ${DOW_LONG[Number(dow)]} at ${t}`
+    }
+    // Multi DOW
+    if (t && dom === '*' && mon === '*' && /^[0-6](,[0-6])+$/.test(dow)) {
+      const days = dow.split(',').map(n => DOW_LABEL[Number(n)]).join(', ')
+      return `${days} at ${t}`
+    }
+    // Yearly: M H D Mon *
+    if (t && /^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === '*') {
+      const m = Number(mon)
+      if (m >= 1 && m <= 12) return `Every year on ${MONTH_LONG[m]} ${dom} at ${t}`
+    }
+    // Monthly: M H D * *
+    if (t && /^\d+$/.test(dom) && mon === '*' && dow === '*') return `Monthly on day ${dom} at ${t}`
   }
   return s
 }
 
-const PRESET_SCHEDULES = [
-  { value: 'daily',        label: 'Every day' },
-  { value: 'weekly',       label: 'Every week' },
-  { value: '0 3 * * *',   label: 'Daily at 03:00' },
-  { value: '0 9 * * 1',   label: 'Weekly Mon 09:00' },
-  { value: '0 */6 * * *', label: 'Every 6 hours' },
+// ── Shared schedule editor ────────────────────────────────────────────────────
+
+type RepeatFreq =
+  | 'none' | 'hourly' | 'daily' | 'weekly' | 'biweekly'
+  | 'monthly' | 'yearly' | 'weekdays' | 'custom_days' | 'cron'
+
+type ScheduleState = {
+  freq: RepeatFreq
+  time: string           // HH:MM UTC — used by daily/weekdays/weekly/biweekly/custom_days/monthly/yearly
+  minute: number         // 0-59 — used by hourly (separate so time stays HH:MM clean)
+  days: number[]         // 0-6 (Sun=0) — multi for custom_days, single for weekly/biweekly ([0])
+  dayOfMonth: number     // 1-31 — used by monthly/yearly
+  month: number          // 1-12 — used by yearly
+  cron: string           // custom cron expression
+}
+
+const DEFAULT_SCHED: ScheduleState = {
+  freq: 'none', time: '09:00', minute: 0, days: [1],
+  dayOfMonth: 1, month: 1, cron: '',
+}
+
+const REPEAT_OPTIONS: { value: RepeatFreq; label: string }[] = [
+  { value: 'none',        label: 'Does not repeat' },
+  { value: 'hourly',      label: 'Hourly' },
+  { value: 'daily',       label: 'Daily' },
+  { value: 'weekly',      label: 'Weekly' },
+  { value: 'biweekly',    label: 'Every 2 weeks' },
+  { value: 'monthly',     label: 'Monthly' },
+  { value: 'yearly',      label: 'Yearly' },
+  { value: 'weekdays',    label: 'Weekdays (Mon–Fri)' },
+  { value: 'custom_days', label: 'Custom days of week…' },
+  { value: 'cron',        label: 'Custom cron expression…' },
 ]
+
+const DOW_CHIPS = [
+  { key: 'SU', num: 0, label: 'Su' },
+  { key: 'MO', num: 1, label: 'Mo' },
+  { key: 'TU', num: 2, label: 'Tu' },
+  { key: 'WE', num: 3, label: 'We' },
+  { key: 'TH', num: 4, label: 'Th' },
+  { key: 'FR', num: 5, label: 'Fr' },
+  { key: 'SA', num: 6, label: 'Sa' },
+]
+
+// Build the schedule string the poller expects from the UI state.
+function buildSchedule(st: ScheduleState): string {
+  const { freq, time, minute, days, dayOfMonth, month, cron } = st
+  if (freq === 'none') return ''
+  if (freq === 'cron') return cron.trim()
+  const [hh, mm] = (time || '09:00').split(':')
+  const h = Math.max(0, Math.min(23, Number(hh) || 0))
+  const m = Math.max(0, Math.min(59, Number(mm) || 0))
+  const dom = Math.max(1, Math.min(31, Number(dayOfMonth) || 1))
+  const mon = Math.max(1, Math.min(12, Number(month) || 1))
+  const dow0 = (days[0] ?? 1) // default Mon
+  const minOfHour = Math.max(0, Math.min(59, Number(minute) || 0))
+  if (freq === 'hourly')   return `${minOfHour} * * * *`
+  if (freq === 'daily')    return `${m} ${h} * * *`
+  if (freq === 'weekdays') return `${m} ${h} * * 1-5`
+  if (freq === 'weekly')   return `${m} ${h} * * ${dow0}`
+  if (freq === 'biweekly') return `biweekly ${m} ${h} ${dow0}`
+  if (freq === 'monthly')  return `${m} ${h} ${dom} * *`
+  if (freq === 'yearly')   return `${m} ${h} ${dom} ${mon} *`
+  if (freq === 'custom_days') {
+    if (!days.length) return ''
+    return `${m} ${h} * * ${[...days].sort((a,b) => a - b).join(',')}`
+  }
+  return ''
+}
+
+// Inverse: best-effort parse a stored schedule string back into UI state.
+function parseSchedule(s: string): ScheduleState {
+  if (!s) return { ...DEFAULT_SCHED }
+  const key = s.trim().toLowerCase()
+  // Legacy bare aliases
+  const bareAliases: RepeatFreq[] = ['hourly','daily','weekly','biweekly','monthly','yearly','weekdays']
+  if ((bareAliases as string[]).includes(key)) {
+    return { ...DEFAULT_SCHED, freq: key as RepeatFreq }
+  }
+  // biweekly M H D
+  const biw = /^biweekly\s+(\d+)\s+(\d+)\s+([0-6])$/.exec(key)
+  if (biw) {
+    const [, min, hr, d] = biw
+    return {
+      ...DEFAULT_SCHED,
+      freq: 'biweekly',
+      time: `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`,
+      days: [Number(d)],
+    }
+  }
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    // Hourly: M * * * *
+    if (/^\d+$/.test(min) && hr === '*' && dom === '*' && mon === '*' && dow === '*') {
+      return { ...DEFAULT_SCHED, freq: 'hourly', minute: Number(min) }
+    }
+    if (/^\d+$/.test(min) && /^\d+$/.test(hr)) {
+      const time = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
+      if (dom === '*' && mon === '*' && dow === '*')   return { ...DEFAULT_SCHED, freq: 'daily', time }
+      if (dom === '*' && mon === '*' && dow === '1-5') return { ...DEFAULT_SCHED, freq: 'weekdays', time }
+      // Weekly single DOW
+      if (dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+        return { ...DEFAULT_SCHED, freq: 'weekly', time, days: [Number(dow)] }
+      }
+      // Custom days
+      if (dom === '*' && mon === '*' && /^[0-6](,[0-6])+$/.test(dow)) {
+        return { ...DEFAULT_SCHED, freq: 'custom_days', time, days: dow.split(',').map(Number) }
+      }
+      // Yearly
+      if (/^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === '*') {
+        return { ...DEFAULT_SCHED, freq: 'yearly', time, dayOfMonth: Number(dom), month: Number(mon) }
+      }
+      // Monthly
+      if (/^\d+$/.test(dom) && mon === '*' && dow === '*') {
+        return { ...DEFAULT_SCHED, freq: 'monthly', time, dayOfMonth: Number(dom) }
+      }
+    }
+  }
+  return { ...DEFAULT_SCHED, freq: 'cron', cron: s }
+}
+
+function ScheduleEditor({
+  state, onChange, compact = false,
+}: {
+  state: ScheduleState
+  onChange: (next: ScheduleState) => void
+  compact?: boolean
+}) {
+  const { freq, time, minute, days, dayOfMonth, month, cron } = state
+  const set = (patch: Partial<ScheduleState>) => onChange({ ...state, ...patch })
+  const needsTime = ['daily','weekdays','weekly','biweekly','custom_days','monthly','yearly'].includes(freq)
+  const inputCls = compact
+    ? 'text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full'
+    : 'w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-600'
+  const smallSelectCls = 'text-xs bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-zinc-200'
+  const dow0 = days[0] ?? 1
+  return (
+    <div className="space-y-2">
+      <select
+        value={freq}
+        onChange={e => {
+          const newFreq = e.target.value as RepeatFreq
+          // Re-initialize days sensibly when switching into weekly/biweekly/custom_days
+          let nextDays = days
+          if (newFreq === 'weekly' || newFreq === 'biweekly') nextDays = [days[0] ?? 1]
+          else if (newFreq === 'custom_days' && !days.length) nextDays = [1]
+          set({ freq: newFreq, days: nextDays })
+        }}
+        className={inputCls}
+      >
+        {REPEAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+
+      {freq === 'hourly' && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Starts at minute</span>
+          <select
+            value={minute}
+            onChange={e => set({ minute: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 60 }, (_, i) => i).map(i => (
+              <option key={i} value={i}>:{i.toString().padStart(2,'0')}</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-zinc-600">of every hour (UTC)</span>
+        </div>
+      )}
+
+      {(freq === 'weekly' || freq === 'biweekly') && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On</span>
+          <select
+            value={dow0}
+            onChange={e => set({ days: [Number(e.target.value)] })}
+            className={smallSelectCls}
+          >
+            {DOW_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          </select>
+        </div>
+      )}
+
+      {freq === 'monthly' && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On day</span>
+          <select
+            value={dayOfMonth}
+            onChange={e => set({ dayOfMonth: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{i}</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-zinc-600">of every month</span>
+        </div>
+      )}
+
+      {freq === 'yearly' && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On</span>
+          <select
+            value={month}
+            onChange={e => set({ month: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{MONTH_LONG[i]}</option>
+            ))}
+          </select>
+          <select
+            value={dayOfMonth}
+            onChange={e => set({ dayOfMonth: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{i}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {needsTime && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Run at</span>
+          <input
+            type="time"
+            value={time || '09:00'}
+            onChange={e => set({ time: e.target.value })}
+            className="text-xs bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-zinc-200"
+          />
+          <span className="text-[10px] text-zinc-600">UTC</span>
+        </div>
+      )}
+
+      {freq === 'custom_days' && (
+        <div className="flex gap-1 flex-wrap">
+          {DOW_CHIPS.map(d => {
+            const selected = days.includes(d.num)
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => {
+                  const next = selected ? days.filter(x => x !== d.num) : [...days, d.num]
+                  set({ days: next })
+                }}
+                className={`w-7 h-7 rounded-full text-[11px] font-medium transition-colors ${
+                  selected
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-500'
+                }`}
+              >
+                {d.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {freq === 'cron' && (
+        <input
+          value={cron}
+          onChange={e => set({ cron: e.target.value })}
+          placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
+          className={`${inputCls} font-mono`}
+        />
+      )}
+    </div>
+  )
+}
 
 function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () => void }) {
   const [editing, setEditing] = useState<string | null>(null)
-  const [editVal, setEditVal] = useState('')
-  const [isCustom, setIsCustom] = useState(false)
+  const [editState, setEditState] = useState<ScheduleState>({ ...DEFAULT_SCHED, freq: 'daily' })
   const [busy, setBusy] = useState<string | null>(null)
+  const editVal = buildSchedule(editState)
 
   async function handleCancel(task: TaskItem) {
     setBusy(task.id)
@@ -1186,13 +1491,14 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
   }
 
   async function handleSave(task: TaskItem) {
-    if (!editVal.trim()) return
+    const sched = editVal.trim()
+    if (!sched) return
     setBusy(task.id)
     try {
       await fetch(`/api/taskqueue/${task.id}/edit`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recurring_schedule: editVal.trim() }),
+        body: JSON.stringify({ recurring_schedule: sched }),
       })
       setEditing(null)
       onRefresh()
@@ -1215,7 +1521,6 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
         const isEditing = editing === task.id
         const isBusy = busy === task.id
         const sc = STATUS_COLOR[task.status] ?? STATUS_COLOR.pending
-        const isPreset = PRESET_SCHEDULES.some(p => p.value === schedule)
 
         return (
           <div key={task.id} className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
@@ -1240,27 +1545,11 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
                   </div>
                 ) : (
                   <div className="ml-3.5 space-y-2 mt-1">
-                    <select
-                      value={isCustom ? 'custom' : (PRESET_SCHEDULES.some(p => p.value === editVal) ? editVal : 'custom')}
-                      onChange={e => {
-                        if (e.target.value === 'custom') { setIsCustom(true) }
-                        else { setIsCustom(false); setEditVal(e.target.value) }
-                      }}
-                      className="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full"
-                    >
-                      {PRESET_SCHEDULES.map(p => (
-                        <option key={p.value} value={p.value}>{p.label}</option>
-                      ))}
-                      <option value="custom">Custom cron expression…</option>
-                    </select>
-                    {isCustom && (
-                      <input
-                        value={editVal}
-                        onChange={e => setEditVal(e.target.value)}
-                        placeholder="e.g. 0 9 * * 1  (Mon 9am)"
-                        className="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full font-mono"
-                      />
-                    )}
+                    <ScheduleEditor
+                      state={editState}
+                      onChange={setEditState}
+                      compact
+                    />
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleSave(task)}
@@ -1280,8 +1569,7 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
                   <button
                     onClick={() => {
                       setEditing(task.id)
-                      setEditVal(schedule)
-                      setIsCustom(!isPreset)
+                      setEditState(parseSchedule(schedule))
                     }}
                     className="text-[11px] px-2 py-1 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
                   >Edit</button>
@@ -1471,9 +1759,8 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     priority: 2,
     target: 'claude-code',
     tags: '',
-    recurring_schedule: '',
-    custom_cron: '',
   })
+  const [sched, setSched] = useState<ScheduleState>({ ...DEFAULT_SCHED })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
@@ -1490,9 +1777,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setError(null)
     try {
       const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
-      const schedule = form.recurring_schedule === 'custom'
-        ? form.custom_cron.trim()
-        : form.recurring_schedule
+      const schedule = buildSchedule(sched)
       const res = await fetch('/api/taskqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1622,24 +1907,10 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           {/* Schedule */}
           <div>
             <label className={labelCls}>Schedule <span className="text-zinc-700 normal-case font-normal">(optional repeat)</span></label>
-            <select
-              value={form.recurring_schedule}
-              onChange={e => setForm(f => ({ ...f, recurring_schedule: e.target.value, custom_cron: '' }))}
-              className="w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 focus:outline-none focus:border-zinc-500"
-            >
-              <option value="">One-time (default)</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="custom">Custom cron…</option>
-            </select>
-            {form.recurring_schedule === 'custom' && (
-              <input
-                value={form.custom_cron}
-                onChange={e => setForm(f => ({ ...f, custom_cron: e.target.value }))}
-                placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
-                className="mt-1 w-full px-3 py-2 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
-              />
-            )}
+            <ScheduleEditor
+              state={sched}
+              onChange={setSched}
+            />
           </div>
 
           {error && (

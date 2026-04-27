@@ -7,11 +7,15 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json()
-    const { goalId, title, description, notes } = body
+    const { goalId, title, description, notes, blockedByIds } = body
 
     if (!goalId || !title) {
       return NextResponse.json({ error: 'Missing required fields: goalId, title' }, { status: 400 })
     }
+
+    const deps: string[] = Array.isArray(blockedByIds)
+      ? blockedByIds.filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+      : []
 
     // Parse notes into individual items for agent context
     let noteItems: string[] = []
@@ -36,6 +40,7 @@ export async function POST(req: Request) {
       tags: ['goal', `goal-id:${goalId}`],
     }
     if (Object.keys(context).length) payload.context = context
+    if (deps.length) payload.blocked_by_task_ids = deps
 
     const res = await fetch(`${url}/rest/v1/task_queue`, {
       method: 'POST',
