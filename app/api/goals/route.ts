@@ -47,7 +47,7 @@ function buildTree(flat: Goal[]): Goal[] {
 
 export async function GET() {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SERVICE_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
@@ -68,7 +68,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SERVICE_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SERVICE_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
