@@ -38,11 +38,6 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
     const { stackName } = await req.json()
 

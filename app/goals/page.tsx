@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import LabSubNav from '@/components/lab/LabSubNav'
+import { useKeyboard, getShortcutLabel } from '@/lib/hooks/useKeyboard'
 import type { Goal } from '@/app/api/goals/route'
 
 // ── tree builder ───────────────────────────────────────────────────────────────
@@ -230,6 +231,8 @@ const LEVEL_BADGE: Record<string, string> = {
   objective: 'bg-zinc-800/50 text-zinc-500',
 }
 
+
+
 const STATUS_ICON: Record<string, string> = {
   active:    '● ',
   completed: '✓ ',
@@ -261,6 +264,27 @@ function computeChildProgress(goal: Goal): number {
   if (!objectives.length) return goal.progress
   const sum = objectives.reduce((acc, c) => acc + (c.status === 'completed' ? 100 : c.progress), 0)
   return Math.round(sum / objectives.length)
+}
+
+function calculateAggregateProgress(goal: Goal): number {
+  if (!goal.children || goal.children.length === 0) return goal.progress
+  const childProgress = goal.children.map(c => calculateAggregateProgress(c))
+  return Math.round(childProgress.reduce((sum, p) => sum + p, 0) / childProgress.length)
+}
+
+function TitleProgressBar({ goal }: { goal: Goal }) {
+  const isVisionOrStrategy = goal.level === 'vision' || goal.level === 'strategy'
+  const displayProgress = isVisionOrStrategy ? calculateAggregateProgress(goal) : goal.progress
+  const color = goal.status === 'completed' ? 'bg-green-400' : 'bg-amber-400'
+
+  return (
+    <div className="h-0.5 bg-zinc-800/50 rounded-full overflow-hidden mt-1.5 mb-2">
+      <div
+        className={`h-full rounded-full ${color} transition-all duration-300 opacity-60`}
+        style={{ width: `${displayProgress}%` }}
+      />
+    </div>
+  )
 }
 
 function ProgressBar({ value, status, taskStatus }: { value: number; status: string; taskStatus?: TaskStatus }) {
@@ -496,7 +520,7 @@ function ScheduleForm({ goal, onClose }: ScheduleFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           calendarId: 'almty1@gmail.com',
-          title: goal.title,
+          title: `[Lab] ${goal.title}`,
           description: goal.description ?? `Goal: ${goal.title}`,
           start: startDt.toISOString(),
           end: endDt.toISOString(),
@@ -578,7 +602,7 @@ function parseNotes(raw: string | null | undefined): string[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter(Boolean)
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
   } catch {}
   return [raw]
 }
@@ -743,6 +767,26 @@ interface TaskCounts {
   pct_complete: number
 }
 
+interface GoalTaskItem {
+  id: string
+  title: string
+  status: string
+  priority: number
+  created_at: string
+  updated_at: string
+  claimed_at: string | null
+  claimed_by: string | null
+  attempt_count: number
+  schedule: string | null
+  scheduled_for: string | null
+  tags: string[]
+  result_excerpt: string | null
+  error: string | null
+  blocked_reason: string | null
+  jeff_notes: string | null
+  context_summary: string | null
+}
+
 interface TaskStatus {
   id: string
   status: string
@@ -750,13 +794,23 @@ interface TaskStatus {
   claimed_by: string | null
   error: string | null
   counts?: TaskCounts
+  // Latest task and recent task list (server returns up to 5 items)
+  latest?: GoalTaskItem | null
+  items?: GoalTaskItem[]
+}
+
+interface DepCandidate {
+  id: string
+  title: string
+  status: string
+  goal_id: string | null
 }
 
 interface GoalCardProps {
   goal: Goal
   flat?: Goal[]
   depth?: number
-  onTrigger: (goal: Goal) => Promise<string>
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
   onFlag: (taskId: string) => Promise<void>
   triggeredTaskId?: string
   taskStatus?: TaskStatus
@@ -764,15 +818,313 @@ interface GoalCardProps {
   filterStatuses?: Set<string>
   filterLevels?: Set<string>
   searchText?: string
+  availableTasks?: DepCandidate[]
+}
+
+const OBJECTIVE_STATUS_COLOR: Record<string, string> = {
+  active:    'text-blue-400',
+  planned:   'text-zinc-400',
+  blocked:   'text-amber-400',
+  completed: 'text-green-400',
+  paused:    'text-zinc-500',
+  cancelled: 'text-zinc-600',
+  failed:    'text-red-400',
+}
+
+function QueueSelector({ objectives, onTrigger, onClose, availableTasks = [] }: {
+  objectives: Goal[]
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
+  onClose: () => void
+  availableTasks?: DepCandidate[]
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(objectives.map(o => o.id)))
+  const [queuing, setQueuing] = useState(false)
+  const [results, setResults] = useState<Record<string, 'ok' | 'err'>>({})
+  const [sharedDeps, setSharedDeps] = useState<string[]>([])
+  const [showDeps, setShowDeps] = useState(false)
+
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next
+  })
+
+  async function handleQueue() {
+    if (selected.size === 0 || queuing) return
+    setQueuing(true)
+    const opts = sharedDeps.length ? { blockedByIds: sharedDeps } : undefined
+    for (const obj of objectives.filter(o => selected.has(o.id))) {
+      try {
+        await onTrigger(obj, opts)
+        setResults(prev => ({ ...prev, [obj.id]: 'ok' }))
+      } catch {
+        setResults(prev => ({ ...prev, [obj.id]: 'err' }))
+      }
+    }
+    setQueuing(false)
+  }
+
+  const doneCount = Object.keys(results).length
+  const isDone = doneCount > 0 && !queuing
+  const okCount = Object.values(results).filter(r => r === 'ok').length
+  const errCount = Object.values(results).filter(r => r === 'err').length
+
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Queue objectives</span>
+        {!isDone && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelected(new Set(objectives.map(o => o.id)))}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">All</button>
+            <span className="text-zinc-700">·</span>
+            <button onClick={() => setSelected(new Set())}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">None</button>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-0.5 mb-3">
+        {objectives.map(obj => {
+          const result = results[obj.id]
+          return (
+            <label key={obj.id}
+              className={`flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer transition-colors select-none ${
+                result === 'ok' ? 'bg-green-900/20' : result === 'err' ? 'bg-red-900/20' : 'hover:bg-zinc-800/50'
+              }`}
+            >
+              <input type="checkbox"
+                checked={selected.has(obj.id)}
+                onChange={() => toggleOne(obj.id)}
+                disabled={queuing || !!result}
+                className="w-3 h-3 accent-purple-500 flex-shrink-0"
+              />
+              <span className="text-xs text-zinc-200 flex-1 truncate">{obj.title}</span>
+              {result === 'ok' ? (
+                <span className="text-[10px] text-green-400 flex-shrink-0">✓ queued</span>
+              ) : result === 'err' ? (
+                <span className="text-[10px] text-red-400 flex-shrink-0">✗ failed</span>
+              ) : (
+                <span className={`text-[10px] flex-shrink-0 ${OBJECTIVE_STATUS_COLOR[obj.status] ?? 'text-zinc-500'}`}>
+                  {obj.status}{obj.status === 'blocked' ? ' ⚠' : ''}
+                </span>
+              )}
+            </label>
+          )
+        })}
+      </div>
+
+      {!isDone && availableTasks.length > 0 && (
+        <div className="mb-3 border-t border-zinc-800/60 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowDeps(v => !v)}
+            className="text-[10px] font-semibold text-zinc-500 hover:text-zinc-300 uppercase tracking-wider flex items-center gap-1"
+          >
+            <span>{showDeps ? '▼' : '▶'}</span>
+            <span>Dependencies</span>
+            {sharedDeps.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 text-[9px] normal-case tracking-normal">
+                {sharedDeps.length} blocking
+              </span>
+            )}
+            <span className="text-[9px] text-zinc-700 normal-case tracking-normal ml-1">
+              (applied to all queued tasks)
+            </span>
+          </button>
+          {showDeps && (
+            <div className="mt-2">
+              <DepChooser
+                candidates={availableTasks}
+                selected={sharedDeps}
+                onChange={setSharedDeps}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        {isDone ? (
+          <>
+            <span className="text-[11px] flex-1">
+              {okCount > 0 && <span className="text-green-400">{okCount} queued</span>}
+              {errCount > 0 && <span className="text-red-400 ml-1">{errCount} failed</span>}
+            </span>
+            <button onClick={onClose}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white transition-colors">
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={handleQueue} disabled={selected.size === 0 || queuing}
+              className="text-xs px-2.5 py-1 rounded-md border border-purple-700/60 bg-purple-900/20 text-purple-300 hover:bg-purple-900/40 disabled:opacity-40 transition-colors">
+              {queuing ? 'Queuing…' : `Queue ${selected.size}`}
+            </button>
+            <button onClick={onClose}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors">
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DepChooser({ candidates, selected, onChange, excludeId }: {
+  candidates: DepCandidate[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+  excludeId?: string
+}) {
+  const [search, setSearch] = useState('')
+  const selectedSet = new Set(selected)
+  const pool = candidates.filter(c => c.id !== excludeId && !selectedSet.has(c.id))
+  const q = search.toLowerCase()
+  const filtered = q
+    ? pool.filter(c => c.title.toLowerCase().includes(q) || c.id.toLowerCase().includes(q))
+    : pool
+
+  const add = (id: string) => { onChange([...selected, id]); setSearch('') }
+  const remove = (id: string) => onChange(selected.filter(x => x !== id))
+
+  const statusColor = (s: string) =>
+    s === 'completed' ? 'text-emerald-400' :
+    s === 'in_progress_agent' || s === 'in_progress_jeff' || s === 'claimed' ? 'text-blue-400' :
+    s === 'blocked' || s === 'failed' || s === 'escalated' ? 'text-amber-400' : 'text-zinc-400'
+
+  return (
+    <div className="space-y-2">
+      {selected.length > 0 && (
+        <div className="space-y-1">
+          {selected.map(id => {
+            const t = candidates.find(c => c.id === id)
+            return (
+              <div key={id} className="flex items-center justify-between gap-2 px-2 py-1 bg-zinc-800/60 border border-zinc-700/60 rounded text-xs">
+                <div className="flex-1 min-w-0">
+                  <p className="text-zinc-200 truncate">{t?.title ?? id.slice(0, 8)}</p>
+                  {t && <p className={`text-[10px] ${statusColor(t.status)}`}>{t.status}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => remove(id)}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 hover:bg-red-900/60 flex-shrink-0"
+                >Remove</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <input
+        type="text"
+        placeholder="Search tasks to block on…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full px-2 py-1.5 bg-zinc-900/80 border border-zinc-700 rounded text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+      />
+      <div className="max-h-40 overflow-y-auto space-y-1">
+        {filtered.length === 0 ? (
+          <p className="text-[10px] text-zinc-600 py-1">No matching tasks.</p>
+        ) : filtered.slice(0, 30).map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => add(t.id)}
+            className="w-full flex items-center justify-between gap-2 px-2 py-1 text-left bg-zinc-900/40 border border-zinc-800/60 rounded hover:border-zinc-600 hover:bg-zinc-800/60 text-xs"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-zinc-200 truncate">{t.title}</p>
+              <p className={`text-[10px] ${statusColor(t.status)}`}>{t.status}</p>
+            </div>
+            <span className="text-[10px] text-emerald-400 flex-shrink-0">+ Add</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TaskDependencyPanel({ candidates, initial, triggeredTaskId, onApplyNew, onApplyExisting, saving, onClose }: {
+  candidates: DepCandidate[]
+  initial: string[]
+  triggeredTaskId?: string
+  onApplyNew: (ids: string[]) => void
+  onApplyExisting: (ids: string[]) => Promise<void>
+  saving: boolean
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState<string[]>(initial)
+
+  useEffect(() => {
+    if (!triggeredTaskId) return
+    // Fetch current deps for the existing task so the editor reflects truth
+    fetch(`/api/taskqueue`)
+      .then(r => r.json())
+      .then((data: { active?: Array<{ id: string; blocked_by_task_ids: string[] | null }>; waiting?: Array<{ id: string; blocked_by_task_ids: string[] | null }>; recent?: Array<{ id: string; blocked_by_task_ids: string[] | null }> }) => {
+        const all = [...(data.active ?? []), ...(data.waiting ?? []), ...(data.recent ?? [])]
+        const found = all.find(t => t.id === triggeredTaskId)
+        if (found && Array.isArray(found.blocked_by_task_ids)) setDraft(found.blocked_by_task_ids)
+      })
+      .catch(() => {})
+  }, [triggeredTaskId])
+
+  return (
+    <div className="mt-3 p-3 rounded-lg bg-zinc-900/60 border border-zinc-700/50">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+          {triggeredTaskId ? 'Edit dependencies' : 'Set dependencies before queuing'}
+        </span>
+        <span className="text-[10px] text-zinc-600">{draft.length} selected</span>
+      </div>
+      <DepChooser
+        candidates={candidates}
+        selected={draft}
+        onChange={setDraft}
+        excludeId={triggeredTaskId}
+      />
+      <div className="flex items-center gap-2 mt-3">
+        {triggeredTaskId ? (
+          <button
+            type="button"
+            onClick={async () => { await onApplyExisting(draft); onClose() }}
+            disabled={saving}
+            className="text-xs px-2.5 py-1 rounded-md border border-amber-700/60 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 disabled:opacity-40 transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save dependencies'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { onApplyNew(draft); onClose() }}
+            className="text-xs px-2.5 py-1 rounded-md border border-amber-700/60 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40 transition-colors"
+          >
+            Apply ({draft.length})
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   const cfg: Record<string, { cls: string; label: string }> = {
     pending:   { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
+    ready:     { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
     claimed:   { cls: 'bg-blue-900/50 text-blue-300 border-blue-800/50', label: 'Running' },
+    in_progress_agent: { cls: 'bg-blue-900/50 text-blue-300 border-blue-800/50', label: 'Running' },
     completed: { cls: 'bg-green-900/50 text-green-300 border-green-800/50', label: 'Done' },
     failed:    { cls: 'bg-red-900/40 text-red-300 border-red-800/40', label: 'Failed' },
     blocked:   { cls: 'bg-amber-900/40 text-amber-300 border-amber-800/40', label: 'Blocked' },
+    pending_eval:   { cls: 'bg-violet-900/40 text-violet-300 border-violet-800/40', label: 'Eval' },
+    review_needed:  { cls: 'bg-amber-900/40 text-amber-300 border-amber-800/40', label: 'Review' },
+    pending_jeff_action: { cls: 'bg-rose-900/40 text-rose-300 border-rose-800/40', label: 'Needs Jeff' },
   }
   const { cls, label } = cfg[ts.status] ?? cfg.pending
   return (
@@ -782,17 +1134,184 @@ function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   )
 }
 
-function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
+const TASK_STATUS_PILL: Record<string, string> = {
+  pending: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
+  ready: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
+  claimed: 'bg-blue-900/40 text-blue-300 border-blue-800/40',
+  in_progress_agent: 'bg-blue-900/40 text-blue-300 border-blue-800/40',
+  in_progress_jeff: 'bg-cyan-900/40 text-cyan-300 border-cyan-800/40',
+  completed: 'bg-emerald-900/40 text-emerald-300 border-emerald-800/40',
+  failed: 'bg-red-900/40 text-red-300 border-red-800/40',
+  escalated: 'bg-red-900/40 text-red-300 border-red-800/40',
+  blocked: 'bg-amber-900/40 text-amber-300 border-amber-800/40',
+  pending_eval: 'bg-violet-900/40 text-violet-300 border-violet-800/40',
+  review_needed: 'bg-amber-900/40 text-amber-300 border-amber-800/40',
+  pending_jeff_action: 'bg-rose-900/40 text-rose-300 border-rose-800/40',
+  delegated: 'bg-indigo-900/40 text-indigo-300 border-indigo-800/40',
+  cancelled: 'bg-zinc-900/60 text-zinc-500 border-zinc-800/40',
+}
+
+function fmtTaskTime(iso: string | null): string {
+  if (!iso) return '—'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 0) return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 48) return `${hr}h ago`
+  const d = Math.floor(hr / 24)
+  return `${d}d ago`
+}
+
+function humanSchedule(s: string): string {
+  const k = s.trim().toLowerCase()
+  if (['hourly', 'daily', 'weekly', 'biweekly', 'monthly', 'yearly', 'weekdays'].includes(k)) {
+    return k === 'weekdays' ? 'Mon–Fri' : `Every ${k.replace('ly', '')}`
+  }
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    if (/^\d+$/.test(min) && /^\d+$/.test(hr)) {
+      const t = `${hr.padStart(2, '0')}:${min.padStart(2, '0')}`
+      if (dom === '*' && mon === '*' && dow === '*') return `Daily at ${t}`
+      if (dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${t}`
+      if (dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+        return `Weekly (DOW ${dow}) at ${t}`
+      }
+    }
+  }
+  return s
+}
+
+function GoalTasksPanel({ items, latest, goalId }: { items: GoalTaskItem[]; latest?: GoalTaskItem | null; goalId: string }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const list = items.length ? items : (latest ? [latest] : [])
+
+  if (!list.length) {
+    return (
+      <div className="mt-3 px-3 py-2 rounded-lg bg-zinc-900/30 border border-zinc-800/40 text-[11px] text-zinc-600">
+        No tasks queued for this goal yet. Use <span className="text-zinc-400">▶ Run</span> or <span className="text-zinc-400">Schedule</span>.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-lg bg-zinc-900/30 border border-zinc-800/40 overflow-hidden">
+      <div className="px-3 py-1.5 flex items-center justify-between border-b border-zinc-800/40 bg-zinc-900/40">
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+          Tasks <span className="text-zinc-700 normal-case font-normal">({list.length} recent)</span>
+        </div>
+        <a href={`/lab/tasks?goal=${goalId}`} className="text-[10px] text-zinc-600 hover:text-zinc-300">All →</a>
+      </div>
+      <div className="divide-y divide-zinc-800/40">
+        {list.map((t) => {
+          const pillCls = TASK_STATUS_PILL[t.status] ?? TASK_STATUS_PILL.pending
+          const isOpen = expanded === t.id
+          const lastRun = t.claimed_at ?? t.updated_at
+          return (
+            <div key={t.id}>
+              <button
+                onClick={() => setExpanded(isOpen ? null : t.id)}
+                className="w-full text-left px-3 py-2 hover:bg-zinc-800/30 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border uppercase tracking-wide flex-shrink-0 ${pillCls}`}>
+                    {t.status.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-[11px] text-zinc-300 truncate flex-1">{t.title}</span>
+                  {t.attempt_count > 1 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-amber-400 border border-amber-900/30 flex-shrink-0" title={`${t.attempt_count} attempts`}>
+                      ×{t.attempt_count}
+                    </span>
+                  )}
+                  {t.schedule && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-900/30 font-mono flex-shrink-0" title={`Recurring: ${t.schedule}`}>
+                      ⏱ {humanSchedule(t.schedule)}
+                    </span>
+                  )}
+                  {!t.schedule && t.scheduled_for && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-900/30 flex-shrink-0" title={`Scheduled for ${t.scheduled_for}`}>
+                      📅 {t.scheduled_for.slice(0, 10)}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-zinc-600 tabular-nums flex-shrink-0" title={lastRun}>
+                    {fmtTaskTime(lastRun)}
+                  </span>
+                  <span className="text-zinc-700 text-[10px] flex-shrink-0">{isOpen ? '▲' : '▼'}</span>
+                </div>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 pt-1 space-y-2 bg-zinc-950/30 border-t border-zinc-800/30">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                    <div className="text-zinc-600">Created <span className="text-zinc-400">{fmtTaskTime(t.created_at)}</span></div>
+                    <div className="text-zinc-600">Last run <span className="text-zinc-400">{fmtTaskTime(lastRun)}</span></div>
+                    {t.claimed_by && <div className="text-zinc-600">Agent <span className="text-blue-400">{t.claimed_by}</span></div>}
+                    <div className="text-zinc-600">Priority <span className="text-zinc-400">P{t.priority}</span></div>
+                  </div>
+                  {t.context_summary && (
+                    <div className="text-[10px]">
+                      <span className="text-zinc-600 uppercase tracking-wider">Context · </span>
+                      <span className="text-zinc-400">{t.context_summary}</span>
+                    </div>
+                  )}
+                  {t.jeff_notes && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                      <span className="font-semibold">Jeff: </span>{t.jeff_notes}
+                    </div>
+                  )}
+                  {t.error && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-red-950/30 border border-red-900/30 text-red-300 whitespace-pre-wrap">
+                      <span className="font-semibold">Error: </span>{t.error.slice(0, 240)}
+                    </div>
+                  )}
+                  {t.blocked_reason && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                      <span className="font-semibold">Blocked: </span>{t.blocked_reason}
+                    </div>
+                  )}
+                  {t.result_excerpt && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-emerald-950/20 border border-emerald-900/30 text-zinc-400">
+                      <span className="text-emerald-500 font-semibold">Result: </span>{t.result_excerpt}…
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <a
+                      href={`/lab/tasks?id=${t.id}`}
+                      className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/60 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-zinc-500"
+                    >
+                      Open in Tasks →
+                    </a>
+                    <span className="text-[10px] text-zinc-700 ml-auto font-mono">{t.id.slice(0, 8)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTaskId, taskStatus, allTaskStatuses, filterStatuses, filterLevels, searchText = '', availableTasks = [], onArchive, onRestore, onRefresh }: GoalCardProps & { onArchive?: (id: string) => void; onRestore?: (id: string) => void; onRefresh?: () => void }) {
   const daysLeft = goal.target_date
     ? Math.ceil((new Date(goal.target_date).getTime() - Date.now()) / 86400000)
     : null
-  const hasChildren = (goal.children?.length ?? 0) > 0
-  const [collapsed, setCollapsed] = useState(false)
+  const milestoneObjectives = goal.level === 'milestone'
+    ? flat.filter(g => g.parent_id === goal.id && g.level === 'objective' && g.status !== 'archived')
+    : []
+
   const [cardExpanded, setCardExpanded] = useState(goal.level === 'vision' || goal.level === 'strategy')
   const [showNotes, setShowNotes] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
+  const [showQueueSelector, setShowQueueSelector] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showDeps, setShowDeps] = useState(false)
+  const [pendingDeps, setPendingDeps] = useState<string[]>([])
+  const [editingDeps, setEditingDeps] = useState(false)
   const [triggering, setTriggering] = useState(false)
   const [flagging, setFlagging] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -804,12 +1323,33 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
     setTriggering(true)
     setTriggerMsg(null)
     try {
-      const taskId = await onTrigger(goal)
+      const opts = pendingDeps.length ? { blockedByIds: pendingDeps } : undefined
+      const taskId = await onTrigger(goal, opts)
       setTriggerMsg(`Queued (task ${taskId.slice(0, 8)}…)`)
+      setPendingDeps([])
+      setShowDeps(false)
     } catch {
       setTriggerMsg('Failed to queue')
     } finally {
       setTriggering(false)
+    }
+  }
+
+  async function handleUpdateDependencies(ids: string[]) {
+    if (!triggeredTaskId) return
+    setEditingDeps(true)
+    try {
+      const res = await fetch('/api/task-dependencies', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: triggeredTaskId, blockedByIds: ids }),
+      })
+      if (res.ok) setTriggerMsg('Dependencies updated')
+      else setTriggerMsg('Update failed')
+    } catch {
+      setTriggerMsg('Update failed')
+    } finally {
+      setEditingDeps(false)
     }
   }
 
@@ -867,26 +1407,30 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
     } catch { setActionError('Delete failed') } finally { setActionBusy(null) }
   }
 
+  // Vision and strategy keep fixed accent colors; milestone and task/objective reflect status
+  const STATUS_BAR_COLOR: Record<string, string> = {
+    completed: 'border-l-emerald-500',
+    active:    'border-l-amber-500',
+    blocked:   'border-l-orange-600',
+    paused:    'border-l-zinc-500',
+    planned:   'border-l-zinc-300',
+    archived:  'border-l-zinc-700',
+  }
+  const statusBar = STATUS_BAR_COLOR[goal.status] ?? 'border-l-zinc-500'
   const LEVEL_STRIPE: Record<string, string> = {
     vision:    'border-l-4 border-l-purple-500 bg-purple-950/10',
     strategy:  'border-l-4 border-l-indigo-500',
-    milestone: 'border-l-4 border-l-blue-700/60',
-    objective: 'border-l-4 border-l-zinc-700',
+    milestone: `border-l-4 ${statusBar}`,
+    objective: `border-l-4 ${statusBar}`,
   }
   const levelStripe = LEVEL_STRIPE[goal.level] ?? LEVEL_STRIPE.milestone
   const statusMod = goal.status === 'blocked' ? 'ring-1 ring-amber-800/40' :
                     goal.status === 'completed' ? 'opacity-70' : ''
   const noteCount = parseNotes(goal.notes).length
 
-  const visibleChildren = (goal.children ?? []).filter((child) =>
-    !filterStatuses || !filterLevels
-      ? true
-      : nodeMatchesFilter(child, filterStatuses, filterLevels, searchText)
-  )
-
   return (
     <div className={`${depth > 0 ? 'ml-4 border-l border-zinc-800/60 pl-4' : ''}`}>
-      <div className={`card-lift rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-4 mb-3 ${levelStripe} ${statusMod}`}>
+      <div data-goal-id={goal.id} className={`card-lift rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-4 mb-3 ${levelStripe} ${statusMod}`}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-2 flex-wrap">
             <LevelBadge level={goal.level} />
@@ -916,16 +1460,6 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             {goal.target_date && (
               <span className="text-[10px] text-zinc-600">{goal.target_date}</span>
             )}
-            {hasChildren && (
-              <button
-                onClick={() => setCollapsed((v) => !v)}
-                className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-1.5 py-0.5 rounded border border-zinc-800/60 hover:border-zinc-600 bg-zinc-900/50 flex items-center gap-1"
-                title={collapsed ? 'Expand children' : 'Collapse children'}
-              >
-                <span>{collapsed ? '▶' : '▼'}</span>
-                <span>{goal.children!.length}</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -941,6 +1475,9 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             }`}
             style={goal.level === 'vision' ? { textShadow: '0 0 20px rgba(167,139,250,0.3)' } : undefined}
           >{goal.title}</h3>
+
+          <TitleProgressBar goal={goal} />
+
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {!cardExpanded && goal.notes && <NotesPopover notes={goal.notes} />}
             <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition-colors">{cardExpanded ? '▲' : '▼'}</span>
@@ -1033,19 +1570,72 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         {/* Action buttons */}
         {cardExpanded && (
         <div className="mt-3 pt-3 border-t border-zinc-800/40 flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleTrigger}
-            disabled={triggering}
-            className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 disabled:opacity-50 transition-colors"
-          >
-            {triggering ? '…' : '▶ Run'}
-          </button>
-          <button
-            onClick={() => setShowSchedule((v) => !v)}
-            className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
-          >
-            Schedule
-          </button>
+          {goal.level !== 'milestone' && (
+            <button
+              onClick={handleTrigger}
+              disabled={triggering}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+                goal.status === 'completed'
+                  ? 'border-emerald-700/50 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/30'
+                  : goal.status === 'active'
+                  ? 'border-amber-700/50 bg-amber-950/20 text-amber-300 hover:bg-amber-900/30'
+                  : goal.status === 'blocked'
+                  ? 'border-orange-700/50 bg-orange-950/20 text-orange-300 hover:bg-orange-900/30'
+                  : 'border-zinc-500/60 bg-zinc-800/50 text-zinc-200 hover:border-purple-500/50 hover:bg-purple-900/20'
+              }`}
+            >
+              {triggering ? '…' : '▶ Run'}
+            </button>
+          )}
+          {goal.level !== 'milestone' && (
+            <button
+              onClick={() => setShowSchedule((v) => !v)}
+              className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20 transition-colors"
+            >
+              Schedule
+            </button>
+          )}
+          {goal.level !== 'milestone' && !triggeredTaskId && availableTasks.length > 0 && (
+            <button
+              onClick={() => setShowDeps(v => !v)}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                showDeps
+                  ? 'border-amber-600/60 bg-amber-900/30 text-amber-300'
+                  : pendingDeps.length > 0
+                  ? 'border-amber-700/50 bg-amber-950/20 text-amber-400 hover:bg-amber-900/20'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'
+              }`}
+              title="Set tasks that must finish before this runs"
+            >
+              Deps{pendingDeps.length > 0 ? ` (${pendingDeps.length})` : ''}
+            </button>
+          )}
+          {goal.level !== 'milestone' && triggeredTaskId && availableTasks.length > 0 && (
+            <button
+              onClick={() => setShowDeps(v => !v)}
+              disabled={editingDeps}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+                showDeps
+                  ? 'border-amber-600/60 bg-amber-900/30 text-amber-300'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-amber-500/50 hover:bg-amber-900/20'
+              }`}
+              title="Edit dependencies for the queued task"
+            >
+              Edit Deps
+            </button>
+          )}
+          {milestoneObjectives.length > 0 && (
+            <button
+              onClick={() => { setShowQueueSelector(v => !v); setShowSchedule(false) }}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                showQueueSelector
+                  ? 'border-purple-600/60 bg-purple-900/30 text-purple-300'
+                  : 'border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-purple-500/50 hover:bg-purple-900/20'
+              }`}
+            >
+              Queue Tasks →
+            </button>
+          )}
           {triggeredTaskId && (
             <button
               onClick={handleFlag}
@@ -1070,7 +1660,7 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
             {actionError && <span className="text-[10px] text-red-400 mr-1">{actionError}</span>}
             <a href={`/api/goals/${goal.id}/export?format=json`} download
                className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-300">↓</a>
-            <button onClick={() => setShowEdit(!showEdit)}
+            <button data-action="edit" onClick={() => setShowEdit(!showEdit)}
                     className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showEdit ? 'border-sky-700/60 bg-sky-900/30 text-sky-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200'}`}>
               ✎ Edit
             </button>
@@ -1122,34 +1712,42 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         </div>
         )}
 
+        {cardExpanded && (taskStatus?.items?.length || taskStatus?.latest) && (
+          <GoalTasksPanel
+            items={taskStatus.items ?? []}
+            latest={taskStatus.latest ?? null}
+            goalId={goal.id}
+          />
+        )}
         {cardExpanded && showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
+        )}
+        {cardExpanded && showDeps && goal.level !== 'milestone' && (
+          <TaskDependencyPanel
+            candidates={availableTasks}
+            initial={triggeredTaskId
+              ? (availableTasks.find(c => c.id === triggeredTaskId) ? [] : pendingDeps)
+              : pendingDeps}
+            triggeredTaskId={triggeredTaskId}
+            onApplyNew={(ids) => { setPendingDeps(ids) }}
+            onApplyExisting={async (ids) => { await handleUpdateDependencies(ids) }}
+            saving={editingDeps}
+            onClose={() => setShowDeps(false)}
+          />
+        )}
+        {cardExpanded && showQueueSelector && milestoneObjectives.length > 0 && (
+          <QueueSelector
+            objectives={milestoneObjectives}
+            onTrigger={onTrigger}
+            availableTasks={availableTasks}
+            onClose={() => setShowQueueSelector(false)}
+          />
         )}
         {cardExpanded && showEdit && (
           <GoalEditForm goal={goal} flat={flat} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); onRefresh?.() }} />
         )}
       </div>
 
-      {hasChildren && !collapsed && (
-        <div className="space-y-0">
-          {visibleChildren.map((child) => (
-            <GoalCard
-              key={child.id}
-              goal={child}
-              depth={depth + 1}
-              onTrigger={onTrigger}
-              onFlag={onFlag}
-              triggeredTaskId={undefined}
-              taskStatus={allTaskStatuses?.[child.id]}
-              allTaskStatuses={allTaskStatuses}
-              filterStatuses={filterStatuses}
-              filterLevels={filterLevels}
-              searchText={searchText}
-              onRefresh={onRefresh}
-            />
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -1311,7 +1909,8 @@ function CalendarSection() {
       .then((r) => r.json())
       .then((data) => {
         if (data.configured === false) { setConfigured(false); return }
-        setEvents((data.events ?? []).slice(0, 10))
+        const labEvents = (data.events ?? []).filter((e: CalendarEvent) => e.title?.startsWith('[Lab] '))
+        setEvents(labEvents.slice(0, 10))
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -1343,7 +1942,7 @@ function CalendarSection() {
                 <div className="flex-1 min-w-0 flex items-start gap-2">
                   <span className="text-[10px] font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded text-purple-300 flex-shrink-0">{dateStr}</span>
                   <div className="min-w-0">
-                    <p className="text-xs text-zinc-300 leading-tight truncate">{ev.title}</p>
+                    <p className="text-xs text-zinc-300 leading-tight truncate">{ev.title.replace(/^\[Lab\]\s*/, '')}</p>
                     <p className="text-[10px] text-zinc-600 mt-0.5">{timeStr}</p>
                   </div>
                 </div>
@@ -2326,7 +2925,7 @@ function StrategyHeader({
 
 interface HierarchyViewProps {
   flat: Goal[]
-  onTrigger: (goal: Goal) => Promise<string>
+  onTrigger: (goal: Goal, opts?: { blockedByIds?: string[] }) => Promise<string>
   onFlag: (taskId: string) => Promise<void>
   triggeredTasks: Record<string, string>
   taskStatuses: Record<string, TaskStatus>
@@ -2334,11 +2933,12 @@ interface HierarchyViewProps {
   filterLevels: Set<string>
   searchText: string
   onRefresh: () => void
+  availableTasks: DepCandidate[]
 }
 
 function HierarchyView({
   flat, onTrigger, onFlag, triggeredTasks, taskStatuses,
-  filterStatuses, filterLevels, searchText, onRefresh,
+  filterStatuses, filterLevels, searchText, onRefresh, availableTasks,
 }: HierarchyViewProps) {
   const [dragItem, setDragItem] = useState<{ id: string; level: string } | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -2357,9 +2957,18 @@ function HierarchyView({
     onRefresh()
   }
 
+  // Deduplicate flat by id before building the hierarchy (guards against stale state slippage)
+  const dedupedFlat = Array.from(new Map(flat.map(g => [g.id, g])).values())
+  {
+    const ids = flat.map(g => g.id)
+    const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
+    if (dupes.length) console.warn('[HierarchyView] DUPE IDs in flat:', dupes, 'total:', flat.length)
+    else console.log('[HierarchyView] flat ok:', flat.length, 'goals, dedupedFlat:', dedupedFlat.length)
+  }
+
   // Build parent → sorted children map (exclude archived)
   const byParent = new Map<string | null, Goal[]>()
-  for (const g of flat) {
+  for (const g of dedupedFlat) {
     if (g.status === 'archived') continue
     const key = g.parent_id ?? null
     if (!byParent.has(key)) byParent.set(key, [])
@@ -2381,13 +2990,16 @@ function HierarchyView({
 
   function renderObjective(obj: Goal) {
     if (!passes(obj)) return null
+    console.log('[renderObjective]', obj.id, obj.title)
     return (
       <div
         key={obj.id}
         draggable
-        onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: obj.id, level: 'objective' }) }}
+        onDragStart={(e) => {
+          if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) { e.preventDefault(); return }
+          e.stopPropagation(); setDragItem({ id: obj.id, level: 'objective' })
+        }}
         onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
-        className="cursor-grab active:cursor-grabbing"
       >
         <GoalCard
           goal={obj} flat={flat} depth={3}
@@ -2395,6 +3007,7 @@ function HierarchyView({
           triggeredTaskId={triggeredTasks[obj.id]}
           taskStatus={taskStatuses[obj.id]}
           allTaskStatuses={taskStatuses}
+          availableTasks={availableTasks}
           onRefresh={onRefresh}
         />
       </div>
@@ -2423,10 +3036,11 @@ function HierarchyView({
         {msVisible && (
           <div
             draggable
-            onDragStart={(e) => { e.stopPropagation(); setDragItem({ id: ms.id, level: 'milestone' }) }}
+            onDragStart={(e) => {
+              if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) { e.preventDefault(); return }
+              e.stopPropagation(); setDragItem({ id: ms.id, level: 'milestone' })
+            }}
             onDragEnd={() => { setDragItem(null); setDragOverId(null) }}
-            className="cursor-grab active:cursor-grabbing"
-            title="Drag to move to a different strategy"
           >
             <GoalCard
               goal={ms} flat={flat} depth={orphaned ? 0 : 2}
@@ -2434,6 +3048,7 @@ function HierarchyView({
               triggeredTaskId={triggeredTasks[ms.id]}
               taskStatus={taskStatuses[ms.id]}
               allTaskStatuses={taskStatuses}
+              availableTasks={availableTasks}
               onRefresh={onRefresh}
             />
           </div>
@@ -2555,30 +3170,139 @@ export default function GoalsPage() {
   const [showNewDropdown, setShowNewDropdown] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
+  const [availableTasks, setAvailableTasks] = useState<DepCandidate[]>([])
+
+  // keyboard shortcuts
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null)
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false)
+  const keyboardHelpTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // filters — persisted in localStorage
-  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(() => {
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(['active', 'planned', 'paused', 'blocked']))
+  const [filterLevels, setFilterLevels] = useState<Set<string>>(new Set(ALL_LEVELS))
+  const [sortBy, setSortBy] = useState<SortBy>('priority')
+
+  // restore persisted filter state after hydration
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem('goals_filterStatuses')
-      return saved ? new Set(JSON.parse(saved)) : new Set(['active', 'planned', 'paused', 'blocked'])
-    } catch { return new Set(['active', 'planned', 'paused', 'blocked']) }
-  })
-  const [filterLevels, setFilterLevels] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('goals_filterLevels')
-      return saved ? new Set(JSON.parse(saved)) : new Set(ALL_LEVELS)
-    } catch { return new Set(ALL_LEVELS) }
-  })
-  const [sortBy, setSortBy] = useState<SortBy>(() => {
-    try {
-      return (localStorage.getItem('goals_sortBy') as SortBy) ?? 'priority'
-    } catch { return 'priority' }
-  })
+      const savedStatuses = localStorage.getItem('goals_filterStatuses')
+      if (savedStatuses) setFilterStatuses(new Set(JSON.parse(savedStatuses)))
+      const savedLevels = localStorage.getItem('goals_filterLevels')
+      if (savedLevels) setFilterLevels(new Set(JSON.parse(savedLevels)))
+      const savedSort = localStorage.getItem('goals_sortBy') as SortBy
+      if (savedSort) setSortBy(savedSort)
+    } catch {}
+  }, [])
   const [searchText, setSearchText] = useState('')
 
   // section collapse state
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const hierarchyRef = useRef<HTMLDivElement>(null)
+
+  // keyboard handlers
+  const allVisibleGoals = goals.length > 0
+    ? sortGoals(goals.filter((g) => nodeMatchesFilter(g, filterStatuses, filterLevels, searchText)), sortBy)
+    : []
+
+  const handleKeyboardHelp = useCallback(() => {
+    setShowKeyboardHelp(true)
+    if (keyboardHelpTimeoutRef.current) clearTimeout(keyboardHelpTimeoutRef.current)
+    keyboardHelpTimeoutRef.current = setTimeout(() => setShowKeyboardHelp(false), 3000)
+  }, [])
+
+  const handleOpenNewGoal = useCallback(() => {
+    setShowNewDropdown(true)
+    handleKeyboardHelp()
+  }, [handleKeyboardHelp])
+
+  const handleEditSelected = useCallback(() => {
+    if (!selectedGoalId) {
+      handleKeyboardHelp()
+      return
+    }
+    const goal = flat.find((g) => g.id === selectedGoalId)
+    if (goal) {
+      const editBtn = document.querySelector(`[data-goal-id="${goal.id}"] [data-action="edit"]`) as HTMLButtonElement
+      if (editBtn) editBtn.click()
+      handleKeyboardHelp()
+    }
+  }, [selectedGoalId, flat, handleKeyboardHelp])
+
+  const handleToggleDetails = useCallback(() => {
+    if (!selectedGoalId) {
+      handleKeyboardHelp()
+      return
+    }
+    const goal = flat.find((g) => g.id === selectedGoalId)
+    if (goal) {
+      const toggleBtn = document.querySelector(`[data-goal-id="${goal.id}"] [data-action="toggle-details"]`) as HTMLButtonElement
+      if (toggleBtn) toggleBtn.click()
+      handleKeyboardHelp()
+    }
+  }, [selectedGoalId, flat, handleKeyboardHelp])
+
+  const handleNavigateGoals = useCallback((direction: 'up' | 'down') => {
+    if (allVisibleGoals.length === 0) {
+      handleKeyboardHelp()
+      return
+    }
+
+    setSelectedGoalId((currentId) => {
+      const currentIndex = currentId
+        ? allVisibleGoals.findIndex((g) => g.id === currentId)
+        : -1
+
+      let nextIndex: number
+      if (direction === 'down') {
+        nextIndex = currentIndex < allVisibleGoals.length - 1 ? currentIndex + 1 : 0
+      } else {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : allVisibleGoals.length - 1
+      }
+
+      const nextGoal = allVisibleGoals[nextIndex]
+      if (nextGoal) {
+        setTimeout(() => {
+          const elem = document.querySelector(`[data-goal-id="${nextGoal.id}"]`)
+          if (elem) {
+            elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+          }
+        }, 0)
+        return nextGoal.id
+      }
+      return currentId
+    })
+    handleKeyboardHelp()
+  }, [allVisibleGoals, handleKeyboardHelp])
+
+  useKeyboard({
+    shortcuts: [
+      {
+        key: 'n',
+        callback: handleOpenNewGoal,
+        description: 'Open new goal'
+      },
+      {
+        key: 'e',
+        callback: handleEditSelected,
+        description: 'Edit selected'
+      },
+      {
+        key: 'd',
+        callback: handleToggleDetails,
+        description: 'Toggle details'
+      },
+      {
+        key: 'ArrowDown',
+        callback: () => handleNavigateGoals('down'),
+        description: 'Next goal'
+      },
+      {
+        key: 'ArrowUp',
+        callback: () => handleNavigateGoals('up'),
+        description: 'Previous goal'
+      }
+    ]
+  })
 
   function toggleSection(s: string) {
     setCollapsedSections((prev) => {
@@ -2722,11 +3446,45 @@ export default function GoalsPage() {
     return () => clearInterval(timer)
   }, [flat])
 
-  async function handleTrigger(goal: Goal): Promise<string> {
+  // Fetch candidate tasks for dependency selection (open tasks in the queue)
+  useEffect(() => {
+    let cancelled = false
+    async function fetchCandidates() {
+      try {
+        const res = await fetch('/api/taskqueue')
+        if (!res.ok) return
+        const data = await res.json()
+        const rows: Array<{ id: string; title: string; status: string; goal_id: string | null }> = [
+          ...(data.active ?? []),
+          ...(data.waiting ?? []),
+          ...(data.recent ?? []),
+          ...(data.problems ?? []),
+          ...(data.scheduled ?? []),
+        ]
+        const dedup = new Map<string, DepCandidate>()
+        for (const r of rows) {
+          if (!r?.id || dedup.has(r.id)) continue
+          dedup.set(r.id, { id: r.id, title: r.title, status: r.status, goal_id: r.goal_id })
+        }
+        if (!cancelled) setAvailableTasks(Array.from(dedup.values()))
+      } catch { /* silent */ }
+    }
+    fetchCandidates()
+    const t = setInterval(fetchCandidates, 30000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
+
+  async function handleTrigger(goal: Goal, opts?: { blockedByIds?: string[] }): Promise<string> {
     const res = await fetch('/api/goals/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goalId: goal.id, title: goal.title, description: goal.description, notes: goal.notes }),
+      body: JSON.stringify({
+        goalId: goal.id,
+        title: goal.title,
+        description: goal.description,
+        notes: goal.notes,
+        ...(opts?.blockedByIds?.length ? { blockedByIds: opts.blockedByIds } : {}),
+      }),
     })
     if (!res.ok) throw new Error('Failed to trigger')
     const data = await res.json()
@@ -2895,6 +3653,7 @@ export default function GoalsPage() {
                 filterLevels={filterLevels}
                 searchText={searchText}
                 onRefresh={handleGoalRestored}
+                availableTasks={availableTasks}
               />
             )}
           </div>
@@ -2911,6 +3670,31 @@ export default function GoalsPage() {
           onCreated={handleGoalCreated}
           initialLevel={addPanelLevel}
         />
+      )}
+
+      {/* Keyboard help tooltip */}
+      {showKeyboardHelp && (
+        <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg shadow-lg p-3 max-w-xs text-xs z-50 animate-in fade-in duration-200">
+          <div className="font-semibold text-zinc-300 mb-2">Keyboard Shortcuts</div>
+          <div className="space-y-1 text-zinc-400">
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">N</kbd>
+              <span>Open new goal</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">E</kbd>
+              <span>Edit selected</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">D</kbd>
+              <span>Toggle details</span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono">↑↓</kbd>
+              <span>Navigate goals</span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

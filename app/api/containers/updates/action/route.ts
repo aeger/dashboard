@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { sshExec } from '@/lib/ssh-exec'
 
 const STATE_FILE = join(process.cwd(), 'data', 'update_state.json')
 const VALID_ACTIONS = ['update_now', 'schedule', 'skip', 'ignore', 'unignore'] as const
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 export async function POST(req: NextRequest) {
   // Auth is enforced at Traefik level (lan-allow@file middleware).
-  // Cookie presence check as basic sanity — real auth is at the reverse proxy.
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
     const { container, action } = await req.json()
 
-    if (!container || typeof container !== 'string' || !VALID_ACTIONS.includes(action)) {
+    if (!container || typeof container !== 'string' || !NAME_RE.test(container) || !VALID_ACTIONS.includes(action)) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
@@ -31,6 +27,20 @@ export async function POST(req: NextRequest) {
     if (action === 'update_now') {
       entry.status = 'requested'
       entry.requested_at = now
+      state.containers[container] = entry
+      writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + '\n')
+
+      // Trigger immediate update via SSH — apply-updates.py handles 'requested' status immediately
+      try {
+        const output = await sshExec(
+          'python3 /home/almty1/dashboard/scripts/apply-updates.py 2>&1',
+          300_000
+        )
+        return NextResponse.json({ success: true, status: 'completed', output })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return NextResponse.json({ success: false, status: 'failed', error: msg }, { status: 500 })
+      }
     } else if (action === 'schedule') {
       // Schedule for next 3:47 AM UTC
       const target = new Date()

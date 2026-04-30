@@ -26,13 +26,14 @@ const SELECT = 'id,parent_id,title,description,level,status,priority,target_date
 
 function buildTree(flat: Goal[]): Goal[] {
   const map = new Map<string, Goal>()
-  flat.forEach((g) => { g.children = []; map.set(g.id, g) })
+  flat.forEach((g) => { map.set(g.id, { ...g, children: [] }) })
   const roots: Goal[] = []
   flat.forEach((g) => {
+    const node = map.get(g.id)!
     if (g.parent_id && map.has(g.parent_id)) {
-      map.get(g.parent_id)!.children!.push(g)
+      map.get(g.parent_id)!.children!.push(node)
     } else {
-      roots.push(g)
+      roots.push(node)
     }
   })
   // Sort each level by sort_order
@@ -46,7 +47,7 @@ function buildTree(flat: Goal[]): Goal[] {
 
 export async function GET() {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
@@ -67,7 +68,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
@@ -117,7 +118,7 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {

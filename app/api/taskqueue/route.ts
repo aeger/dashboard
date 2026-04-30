@@ -14,7 +14,17 @@ export interface TaskContext {
   archived_at?: string
   pre_archive_status?: string
   action_required?: string
+  recurring_schedule?: string   // 'daily' | 'weekly' | cron expr | null
   [key: string]: unknown
+}
+
+export interface TaskRun {
+  run_at: string
+  status?: string
+  result?: string | null
+  notes?: string | null
+  completed_at?: string | null
+  source_id?: string | null
 }
 
 export interface TaskItem {
@@ -39,6 +49,11 @@ export interface TaskItem {
   parent_task_id: string | null
   context: TaskContext | null
   blocked_by_task_ids: string[] | null
+  recurring?: boolean | null
+  recurring_key?: string | null
+  last_run_at?: string | null
+  run_count?: number | null
+  runs?: TaskRun[] | null
 }
 
 export interface TaskQueueData {
@@ -47,13 +62,14 @@ export interface TaskQueueData {
   active: TaskItem[]
   recent: TaskItem[]
   completed: TaskItem[]
+  scheduled: TaskItem[]
   summary24h: Record<string, number>
 }
 
 // Keep old export name for any existing imports
 export type TaskQueueStats = TaskQueueData
 
-const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids'
+const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids,recurring,recurring_key,last_run_at,run_count,runs'
 
 // JeffLoop new statuses + legacy statuses all live as plain TEXT — no constraint change needed
 const JEFF_URGENT = ['pending_jeff_action', 'review_needed']
@@ -65,7 +81,7 @@ const COMPLETED_PAGE_SIZE = 25
 
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
   const completedOffset = parseInt(req.nextUrl.searchParams.get('completedOffset') ?? '0', 10) || 0
 
@@ -84,7 +100,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes] = await Promise.all([
+    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes, scheduledRes] = await Promise.all([
       // Jeff urgent: pending_jeff_action and review_needed — highest priority
       fetch(`${base}?select=${SELECT}&${inFilter(JEFF_URGENT)}&order=updated_at.desc&limit=20`, opts),
       // Problems: failed or escalated
@@ -101,10 +117,15 @@ export async function GET(req: NextRequest) {
       fetch(`${base}?select=status&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
       // Total completed count for pagination
       fetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
+      // Scheduled: canonical recurring rows (recurring=true, post-migration 031),
+      // not archived/cancelled. Sort by last_run_at desc so the most recently fired
+      // task lands on top. Legacy recurring_schedule rows still show through the
+      // OR clause until they're migrated.
+      fetch(`${base}?select=${SELECT}&or=(recurring.eq.true,context->>recurring_schedule.not.is.null)&status=neq.archived&status=neq.cancelled&archived_at=is.null&order=last_run_at.desc.nullslast,created_at.desc&limit=50`, opts),
     ])
 
-    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw]: [
-      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>
+    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw]: [
+      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>, TaskItem[]
     ] = await Promise.all([
       jeffUrgentRes.ok ? jeffUrgentRes.json() : [],
       problemsRes.ok ? problemsRes.json() : [],
@@ -113,6 +134,7 @@ export async function GET(req: NextRequest) {
       recentRes.ok ? recentRes.json() : [],
       completedRes.ok ? completedRes.json() : [],
       summary24hRes.ok ? summary24hRes.json() : [],
+      scheduledRes.ok ? scheduledRes.json() : [],
     ])
     const completedTotal = parseInt(completedCountRes.headers.get('content-range')?.split('/')[1] ?? '0', 10) || 0
 
@@ -126,18 +148,43 @@ export async function GET(req: NextRequest) {
       (t, i, arr) => arr.findIndex(x => x.id === t.id) === i
     )
 
+    // Dedupe scheduled tasks: canonical recurring rows (recurring=true) keep their identity,
+    // but legacy recurring_schedule duplicates get collapsed to the most-recently-updated row
+    // per title so the Scheduled tab shows one entry per schedule.
+    const scheduledDedup: TaskItem[] = []
+    const legacyByTitle = new Map<string, TaskItem>()
+    for (const t of scheduledRaw) {
+      if (t.recurring) {
+        scheduledDedup.push(t)
+        continue
+      }
+      // Legacy: keep only the latest per title
+      const prev = legacyByTitle.get(t.title)
+      if (!prev || (t.updated_at > prev.updated_at)) {
+        legacyByTitle.set(t.title, t)
+      }
+    }
+    scheduledDedup.push(...legacyByTitle.values())
+    // Sort: most recently active first
+    scheduledDedup.sort((a, b) => {
+      const aRun = a.last_run_at ?? a.updated_at
+      const bRun = b.last_run_at ?? b.updated_at
+      return bRun.localeCompare(aRun)
+    })
+
     return NextResponse.json({
       problems: mergedProblems,
       waiting: waitingRaw,
       active: activeRaw,
       recent: recentRaw,
       completed: completedRaw,
+      scheduled: scheduledDedup,
       completedTotal,
       completedOffset,
       completedPageSize: COMPLETED_PAGE_SIZE,
       summary24h,
       jeff_urgent: jeffUrgentRaw,
-    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
+    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; scheduled: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch task queue' }, { status: 500 })
   }
@@ -145,13 +192,19 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
     const body = await req.json()
-    const { title, description, priority, source, target, tags, status } = body
+    const { title, description, priority, source, target, tags, status, recurring_schedule, context } = body
     if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+
+    // Merge recurring_schedule into context JSONB (no schema migration required)
+    const taskContext: TaskContext = { ...(context ?? {}) }
+    if (recurring_schedule?.trim()) {
+      taskContext.recurring_schedule = recurring_schedule.trim()
+    }
 
     const res = await fetch(`${url}/rest/v1/task_queue`, {
       method: 'POST',
@@ -169,6 +222,7 @@ export async function POST(req: NextRequest) {
         source: source?.trim() || 'dashboard',
         target: target?.trim() || null,
         tags: tags ?? [],
+        context: Object.keys(taskContext).length ? taskContext : null,
       }),
     })
 
@@ -186,7 +240,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {

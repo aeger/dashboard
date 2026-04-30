@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { SOUND_CATALOG, DEFAULT_SOUND_SETTINGS, getSoundEngine } from '@/lib/soundEngine'
 import type { SoundSettings as SoundSettingsType, UrgencySoundConfig } from '@/lib/soundEngine'
 
@@ -190,6 +191,7 @@ export default function SoundSettings({ open, onClose }: Props) {
   }
 
   if (!open) return null
+  if (typeof document === 'undefined') return null
 
   const byCategory = SOUND_CATALOG.reduce((acc, s) => {
     if (!acc[s.category]) acc[s.category] = []
@@ -197,7 +199,7 @@ export default function SoundSettings({ open, onClose }: Props) {
     return acc
   }, {} as Record<string, typeof SOUND_CATALOG>)
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 flex items-center justify-center"
       style={{ zIndex: 99999, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
@@ -434,6 +436,7 @@ export default function SoundSettings({ open, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

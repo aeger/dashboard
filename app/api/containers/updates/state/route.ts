@@ -31,9 +31,24 @@ export async function GET() {
 
     const merged = (updates.containers || []).map((c: UpdateContainer) => {
       const s = stateMap[c.name]
+      // Stale-state guard: if check-updates detects a NEW image for this container
+      // (has_update=true), then a previous-round's "completed" status is by
+      // definition stale — that completion was for an OLDER image. Reset to
+      // pending_review so the UI surfaces the new update. Other in-flight states
+      // (scheduled, in_progress, skipped, pending_review) carry through.
+      let user_status: string
+      if (s?.status) {
+        if (c.has_update && s.status === 'completed') {
+          user_status = 'pending_review'
+        } else {
+          user_status = s.status as string
+        }
+      } else {
+        user_status = c.has_update ? 'pending_review' : 'current'
+      }
       return {
         ...c,
-        user_status: s?.status || (c.has_update ? 'pending_review' : 'current'),
+        user_status,
         scheduled_time: s?.scheduled_time || null,
         skipped_at: s?.skipped_at || null,
         skip_reassess_at: s?.skip_reassess_at || null,

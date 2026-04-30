@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { TaskQueueData, TaskItem, ChecklistItem } from '@/app/api/taskqueue/route'
+import type { TaskQueueData, TaskItem, ChecklistItem, TaskRun } from '@/app/api/taskqueue/route'
 import TaskDependencyGraph from './TaskDependencyGraph'
 import TaskDependencyModal from './TaskDependencyModal'
 
@@ -78,17 +78,20 @@ const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string;
     { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: 'Queue for Agent',           status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'Queue for Agent',           status: 'ready',               cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
     { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
@@ -312,6 +315,89 @@ function ChecklistPanel({ taskId, items, onUpdate }: {
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
 type ActivityRow = { id: string; activity_type: string; content: string; created_at: string }
+
+function HistoryPanel({ runs, totalCount }: { runs: TaskRun[]; totalCount?: number | null }) {
+  const [open, setOpen] = useState(true)
+  if (!runs || runs.length === 0) {
+    return (
+      <div className="rounded-xl border border-violet-900/30 bg-violet-950/10 p-3">
+        <div className="text-[10px] text-violet-500/80 uppercase tracking-widest">Run History</div>
+        <div className="text-xs text-zinc-500 mt-1 italic">No runs recorded yet.</div>
+      </div>
+    )
+  }
+  // Render newest-first; sort by run_at desc.
+  const sorted = [...runs].sort((a, b) =>
+    (b.run_at ?? '').localeCompare(a.run_at ?? '')
+  )
+  return (
+    <div className="rounded-xl border border-violet-900/30 bg-violet-950/10">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-3 text-left hover:bg-violet-950/20 transition rounded-xl"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-violet-500/80 uppercase tracking-widest">Run History</span>
+          <span className="text-[10px] text-violet-700/60">
+            {totalCount ?? sorted.length} run{(totalCount ?? sorted.length) === 1 ? '' : 's'}
+          </span>
+        </div>
+        <span className="text-zinc-500 text-xs">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-2 max-h-96 overflow-y-auto">
+          {sorted.map((run, idx) => {
+            const isLatest = idx === 0
+            const status = run.status ?? 'unknown'
+            const statusColor =
+              status === 'completed' ? 'text-emerald-400' :
+              status === 'failed' || status === 'escalated' ? 'text-red-400' :
+              status === 'ready' ? 'text-amber-400' :
+              'text-zinc-500'
+            return (
+              <div
+                key={`${run.run_at}-${idx}`}
+                className={`rounded-lg p-2 border text-xs ${isLatest ? 'border-violet-700/40 bg-violet-900/10' : 'border-zinc-800/60 bg-zinc-900/30'}`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-zinc-500 text-[10px] tabular-nums whitespace-nowrap">
+                      {fmtDate(run.run_at)}
+                    </span>
+                    <span className={`uppercase text-[9px] tracking-wider ${statusColor}`}>
+                      {status}
+                    </span>
+                    {isLatest && (
+                      <span className="text-[9px] uppercase tracking-wider text-violet-500/80 px-1.5 py-0.5 rounded bg-violet-950/40">
+                        latest
+                      </span>
+                    )}
+                  </div>
+                  {run.completed_at && run.completed_at !== run.run_at && (
+                    <span className="text-zinc-600 text-[10px] whitespace-nowrap">
+                      done {timeAgo(run.completed_at)}
+                    </span>
+                  )}
+                </div>
+                {run.result && (
+                  <div className="text-zinc-400 leading-relaxed whitespace-pre-wrap break-words mt-1">
+                    {run.result.length > 600 ? run.result.slice(0, 600) + '…' : run.result}
+                  </div>
+                )}
+                {run.notes && (
+                  <div className="mt-1 pt-1 border-t border-zinc-800/40 text-zinc-500 italic">
+                    📝 {run.notes}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function LiveActivityLog({ taskId }: { taskId: string }) {
   const [rows, setRows] = useState<ActivityRow[]>([])
@@ -552,6 +638,11 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         const res = await fetch(`/api/taskqueue/${task.id}/archive`, { method: 'POST' })
         if (res.ok) { onRefresh(); onClose() }
         else setActionError('Archive failed')
+      } else if (action.special === 'run') {
+        const res = await fetch(`/api/taskqueue/${task.id}/run`, { method: 'POST' })
+        const data = await res.json()
+        if (res.ok) { onRefresh() }
+        else setActionError(data.error ?? 'Failed to trigger poller')
       } else if (action.status) {
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
@@ -833,6 +924,14 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           </div>
         )}
 
+        {/* Run history — only shown for recurring (canonical scheduled) tasks */}
+        {task.recurring && (
+          <HistoryPanel
+            runs={Array.isArray(task.runs) ? task.runs : []}
+            totalCount={task.run_count ?? null}
+          />
+        )}
+
         {/* Error */}
         {task.error && (
           <div>
@@ -1057,7 +1156,13 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
 
       {/* Right meta */}
       <div className="flex-shrink-0 text-right flex flex-col items-end gap-1">
-        <div className="text-[10px] text-zinc-600 group-hover:text-zinc-500">{timeAgo(task.updated_at)}</div>
+        {task.recurring && task.last_run_at ? (
+          <div className="text-[10px] text-violet-400/80 group-hover:text-violet-300" title={`Recurring task — ${task.run_count ?? '?'} runs`}>
+            ↻ last run {timeAgo(task.last_run_at)}
+          </div>
+        ) : (
+          <div className="text-[10px] text-zinc-600 group-hover:text-zinc-500">{timeAgo(task.updated_at)}</div>
+        )}
         {isRunning(task.status) && task.claimed_at && (
           <div className="text-[10px] text-blue-400">{elapsed(task.claimed_at)}</div>
         )}
@@ -1122,6 +1227,534 @@ function Section({ section, tasks, selected, onSelect, onContextMenu, onNeedsAct
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Scheduled view ────────────────────────────────────────────────────────────
+
+const DOW_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DOW_LONG  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_LABEL = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTH_LONG  = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function scheduleLabel(s: string): string {
+  const key = s.trim().toLowerCase()
+  if (key === 'hourly')   return 'Every hour'
+  if (key === 'daily')    return 'Every day'
+  if (key === 'weekly')   return 'Every week'
+  if (key === 'biweekly') return 'Every 2 weeks'
+  if (key === 'monthly')  return 'Every month'
+  if (key === 'yearly')   return 'Every year'
+  if (key === 'weekdays') return 'Weekdays (Mon–Fri)'
+  // biweekly M H D custom format
+  const biw = /^biweekly\s+(\d+)\s+(\d+)\s+([0-6])$/.exec(s.trim().toLowerCase())
+  if (biw) {
+    const [, min, hr, d] = biw
+    const t = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
+    return `Every 2 weeks on ${DOW_LONG[Number(d)]} at ${t}`
+  }
+  // Humanize 5-field cron
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    const minOk = /^\d+$/.test(min)
+    const hrOk = /^\d+$/.test(hr)
+    const t = (minOk && hrOk) ? `${hr.padStart(2,'0')}:${min.padStart(2,'0')}` : null
+    // Hourly at a given minute: M * * * *
+    if (minOk && hr === '*' && dom === '*' && mon === '*' && dow === '*') {
+      return `Hourly at :${min.padStart(2,'0')}`
+    }
+    // Daily
+    if (t && dom === '*' && mon === '*' && dow === '*') return `Daily at ${t}`
+    // Weekdays
+    if (t && dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${t}`
+    // Single DOW (weekly)
+    if (t && dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+      return `Every ${DOW_LONG[Number(dow)]} at ${t}`
+    }
+    // Multi DOW
+    if (t && dom === '*' && mon === '*' && /^[0-6](,[0-6])+$/.test(dow)) {
+      const days = dow.split(',').map(n => DOW_LABEL[Number(n)]).join(', ')
+      return `${days} at ${t}`
+    }
+    // Yearly: M H D Mon *
+    if (t && /^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === '*') {
+      const m = Number(mon)
+      if (m >= 1 && m <= 12) return `Every year on ${MONTH_LONG[m]} ${dom} at ${t}`
+    }
+    // Monthly: M H D * *
+    if (t && /^\d+$/.test(dom) && mon === '*' && dow === '*') return `Monthly on day ${dom} at ${t}`
+  }
+  return s
+}
+
+// ── Shared schedule editor ────────────────────────────────────────────────────
+
+type RepeatFreq =
+  | 'none' | 'hourly' | 'daily' | 'weekly' | 'biweekly'
+  | 'monthly' | 'yearly' | 'weekdays' | 'custom_days' | 'cron'
+
+type ScheduleState = {
+  freq: RepeatFreq
+  time: string           // HH:MM UTC — used by daily/weekdays/weekly/biweekly/custom_days/monthly/yearly
+  minute: number         // 0-59 — used by hourly (separate so time stays HH:MM clean)
+  days: number[]         // 0-6 (Sun=0) — multi for custom_days, single for weekly/biweekly ([0])
+  dayOfMonth: number     // 1-31 — used by monthly/yearly
+  month: number          // 1-12 — used by yearly
+  cron: string           // custom cron expression
+}
+
+const DEFAULT_SCHED: ScheduleState = {
+  freq: 'none', time: '09:00', minute: 0, days: [1],
+  dayOfMonth: 1, month: 1, cron: '',
+}
+
+const REPEAT_OPTIONS: { value: RepeatFreq; label: string }[] = [
+  { value: 'none',        label: 'Does not repeat' },
+  { value: 'hourly',      label: 'Hourly' },
+  { value: 'daily',       label: 'Daily' },
+  { value: 'weekly',      label: 'Weekly' },
+  { value: 'biweekly',    label: 'Every 2 weeks' },
+  { value: 'monthly',     label: 'Monthly' },
+  { value: 'yearly',      label: 'Yearly' },
+  { value: 'weekdays',    label: 'Weekdays (Mon–Fri)' },
+  { value: 'custom_days', label: 'Custom days of week…' },
+  { value: 'cron',        label: 'Custom cron expression…' },
+]
+
+const DOW_CHIPS = [
+  { key: 'SU', num: 0, label: 'Su' },
+  { key: 'MO', num: 1, label: 'Mo' },
+  { key: 'TU', num: 2, label: 'Tu' },
+  { key: 'WE', num: 3, label: 'We' },
+  { key: 'TH', num: 4, label: 'Th' },
+  { key: 'FR', num: 5, label: 'Fr' },
+  { key: 'SA', num: 6, label: 'Sa' },
+]
+
+// Build the schedule string the poller expects from the UI state.
+function buildSchedule(st: ScheduleState): string {
+  const { freq, time, minute, days, dayOfMonth, month, cron } = st
+  if (freq === 'none') return ''
+  if (freq === 'cron') return cron.trim()
+  const [hh, mm] = (time || '09:00').split(':')
+  const h = Math.max(0, Math.min(23, Number(hh) || 0))
+  const m = Math.max(0, Math.min(59, Number(mm) || 0))
+  const dom = Math.max(1, Math.min(31, Number(dayOfMonth) || 1))
+  const mon = Math.max(1, Math.min(12, Number(month) || 1))
+  const dow0 = (days[0] ?? 1) // default Mon
+  const minOfHour = Math.max(0, Math.min(59, Number(minute) || 0))
+  if (freq === 'hourly')   return `${minOfHour} * * * *`
+  if (freq === 'daily')    return `${m} ${h} * * *`
+  if (freq === 'weekdays') return `${m} ${h} * * 1-5`
+  if (freq === 'weekly')   return `${m} ${h} * * ${dow0}`
+  if (freq === 'biweekly') return `biweekly ${m} ${h} ${dow0}`
+  if (freq === 'monthly')  return `${m} ${h} ${dom} * *`
+  if (freq === 'yearly')   return `${m} ${h} ${dom} ${mon} *`
+  if (freq === 'custom_days') {
+    if (!days.length) return ''
+    return `${m} ${h} * * ${[...days].sort((a,b) => a - b).join(',')}`
+  }
+  return ''
+}
+
+// Inverse: best-effort parse a stored schedule string back into UI state.
+function parseSchedule(s: string): ScheduleState {
+  if (!s) return { ...DEFAULT_SCHED }
+  const key = s.trim().toLowerCase()
+  // Legacy bare aliases
+  const bareAliases: RepeatFreq[] = ['hourly','daily','weekly','biweekly','monthly','yearly','weekdays']
+  if ((bareAliases as string[]).includes(key)) {
+    return { ...DEFAULT_SCHED, freq: key as RepeatFreq }
+  }
+  // biweekly M H D
+  const biw = /^biweekly\s+(\d+)\s+(\d+)\s+([0-6])$/.exec(key)
+  if (biw) {
+    const [, min, hr, d] = biw
+    return {
+      ...DEFAULT_SCHED,
+      freq: 'biweekly',
+      time: `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`,
+      days: [Number(d)],
+    }
+  }
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    // Hourly: M * * * *
+    if (/^\d+$/.test(min) && hr === '*' && dom === '*' && mon === '*' && dow === '*') {
+      return { ...DEFAULT_SCHED, freq: 'hourly', minute: Number(min) }
+    }
+    if (/^\d+$/.test(min) && /^\d+$/.test(hr)) {
+      const time = `${hr.padStart(2,'0')}:${min.padStart(2,'0')}`
+      if (dom === '*' && mon === '*' && dow === '*')   return { ...DEFAULT_SCHED, freq: 'daily', time }
+      if (dom === '*' && mon === '*' && dow === '1-5') return { ...DEFAULT_SCHED, freq: 'weekdays', time }
+      // Weekly single DOW
+      if (dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+        return { ...DEFAULT_SCHED, freq: 'weekly', time, days: [Number(dow)] }
+      }
+      // Custom days
+      if (dom === '*' && mon === '*' && /^[0-6](,[0-6])+$/.test(dow)) {
+        return { ...DEFAULT_SCHED, freq: 'custom_days', time, days: dow.split(',').map(Number) }
+      }
+      // Yearly
+      if (/^\d+$/.test(dom) && /^\d+$/.test(mon) && dow === '*') {
+        return { ...DEFAULT_SCHED, freq: 'yearly', time, dayOfMonth: Number(dom), month: Number(mon) }
+      }
+      // Monthly
+      if (/^\d+$/.test(dom) && mon === '*' && dow === '*') {
+        return { ...DEFAULT_SCHED, freq: 'monthly', time, dayOfMonth: Number(dom) }
+      }
+    }
+  }
+  return { ...DEFAULT_SCHED, freq: 'cron', cron: s }
+}
+
+function ScheduleEditor({
+  state, onChange, compact = false,
+}: {
+  state: ScheduleState
+  onChange: (next: ScheduleState) => void
+  compact?: boolean
+}) {
+  const { freq, time, minute, days, dayOfMonth, month, cron } = state
+  const set = (patch: Partial<ScheduleState>) => onChange({ ...state, ...patch })
+  const needsTime = ['daily','weekdays','weekly','biweekly','custom_days','monthly','yearly'].includes(freq)
+  const inputCls = compact
+    ? 'text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700/50 text-zinc-300 w-full'
+    : 'w-full text-xs bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-zinc-200 focus:outline-none focus:border-blue-600'
+  const smallSelectCls = 'text-xs bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-zinc-200'
+  const dow0 = days[0] ?? 1
+  return (
+    <div className="space-y-2">
+      <select
+        value={freq}
+        onChange={e => {
+          const newFreq = e.target.value as RepeatFreq
+          // Re-initialize days sensibly when switching into weekly/biweekly/custom_days
+          let nextDays = days
+          if (newFreq === 'weekly' || newFreq === 'biweekly') nextDays = [days[0] ?? 1]
+          else if (newFreq === 'custom_days' && !days.length) nextDays = [1]
+          set({ freq: newFreq, days: nextDays })
+        }}
+        className={inputCls}
+      >
+        {REPEAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+
+      {freq === 'hourly' && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Starts at minute</span>
+          <select
+            value={minute}
+            onChange={e => set({ minute: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 60 }, (_, i) => i).map(i => (
+              <option key={i} value={i}>:{i.toString().padStart(2,'0')}</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-zinc-600">of every hour (UTC)</span>
+        </div>
+      )}
+
+      {(freq === 'weekly' || freq === 'biweekly') && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On</span>
+          <select
+            value={dow0}
+            onChange={e => set({ days: [Number(e.target.value)] })}
+            className={smallSelectCls}
+          >
+            {DOW_LONG.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          </select>
+        </div>
+      )}
+
+      {freq === 'monthly' && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On day</span>
+          <select
+            value={dayOfMonth}
+            onChange={e => set({ dayOfMonth: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{i}</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-zinc-600">of every month</span>
+        </div>
+      )}
+
+      {freq === 'yearly' && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">On</span>
+          <select
+            value={month}
+            onChange={e => set({ month: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{MONTH_LONG[i]}</option>
+            ))}
+          </select>
+          <select
+            value={dayOfMonth}
+            onChange={e => set({ dayOfMonth: Number(e.target.value) })}
+            className={smallSelectCls}
+          >
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(i => (
+              <option key={i} value={i}>{i}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {needsTime && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Run at</span>
+          <input
+            type="time"
+            value={time || '09:00'}
+            onChange={e => set({ time: e.target.value })}
+            className="text-xs bg-zinc-800 border border-zinc-700/50 rounded px-2 py-1 text-zinc-200"
+          />
+          <span className="text-[10px] text-zinc-600">UTC</span>
+        </div>
+      )}
+
+      {freq === 'custom_days' && (
+        <div className="flex gap-1 flex-wrap">
+          {DOW_CHIPS.map(d => {
+            const selected = days.includes(d.num)
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => {
+                  const next = selected ? days.filter(x => x !== d.num) : [...days, d.num]
+                  set({ days: next })
+                }}
+                className={`w-7 h-7 rounded-full text-[11px] font-medium transition-colors ${
+                  selected
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-500'
+                }`}
+              >
+                {d.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {freq === 'cron' && (
+        <input
+          value={cron}
+          onChange={e => set({ cron: e.target.value })}
+          placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
+          className={`${inputCls} font-mono`}
+        />
+      )}
+    </div>
+  )
+}
+
+function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editState, setEditState] = useState<ScheduleState>({ ...DEFAULT_SCHED, freq: 'daily' })
+  const [busy, setBusy] = useState<string | null>(null)
+  const editVal = buildSchedule(editState)
+
+  async function handleCancel(task: TaskItem) {
+    setBusy(task.id)
+    try {
+      await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recurring_schedule: null }),
+      })
+      if (['pending', 'ready', 'backlog'].includes(task.status)) {
+        await fetch(`/api/taskqueue/${task.id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'cancelled' }),
+        })
+      }
+      onRefresh()
+    } catch { /* noop */ } finally { setBusy(null) }
+  }
+
+  async function handleSave(task: TaskItem) {
+    const sched = editVal.trim()
+    if (!sched) return
+    setBusy(task.id)
+    try {
+      await fetch(`/api/taskqueue/${task.id}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recurring_schedule: sched }),
+      })
+      setEditing(null)
+      onRefresh()
+    } catch { /* noop */ } finally { setBusy(null) }
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="text-zinc-600 text-sm text-center py-16">
+        <div className="text-2xl mb-2">⏱</div>
+        No scheduled tasks — create one with the <span className="text-zinc-400">+ New</span> button and set a recurrence.
+      </div>
+    )
+  }
+
+  async function handleRunNow(task: TaskItem) {
+    setBusy(task.id)
+    try {
+      const status = task.status
+      // If the scheduled task is in a runnable state, just trigger the poller.
+      // Otherwise (completed/failed/cancelled), clone it as a one-off ready task —
+      // the recurring chain stays intact via context.recurring_schedule on the original.
+      const runnable = ['ready', 'pending', 'backlog'].includes(status)
+      if (runnable) {
+        await fetch(`/api/taskqueue/${task.id}/run`, { method: 'POST' })
+      } else {
+        await fetch('/api/taskqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            target: task.target,
+            tags: [...(task.tags ?? []), 'manual-run'],
+            status: 'ready',
+            // Drop recurring_schedule on the manual run so it doesn't double-recur
+            context: { manual_run_of: task.id },
+          }),
+        })
+      }
+      onRefresh()
+    } finally { setBusy(null) }
+  }
+
+  return (
+    <div className="space-y-2 pr-1 overflow-y-auto">
+      {tasks.map(task => {
+        const schedule = task.context?.recurring_schedule ?? ''
+        const isEditing = editing === task.id
+        const isBusy = busy === task.id
+        const sc = STATUS_COLOR[task.status] ?? STATUS_COLOR.pending
+        const lastRun = task.claimed_at ?? task.updated_at
+        const resultExcerpt = task.result ? task.result.replace(/\s+/g, ' ').slice(0, 220) : null
+        const errorExcerpt = task.error ? task.error.replace(/\s+/g, ' ').slice(0, 220) : null
+
+        return (
+          <div key={task.id} className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
+                  <span className="text-xs text-zinc-200 font-medium truncate">{task.title}</span>
+                </div>
+                {!isEditing ? (
+                  <div className="ml-3.5 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-cyan-300 font-mono">
+                        ⏱ {scheduleLabel(schedule)}
+                      </span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${sc.bg} ${sc.text}`}
+                        style={{ borderColor: sc.accent + '40' }}>
+                        {task.status.replace(/_/g, ' ')}
+                      </span>
+                      {task.attempt_count > 0 && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded border ${task.attempt_count > 1 ? 'bg-amber-950/30 border-amber-900/40 text-amber-300' : 'bg-zinc-800/60 border-zinc-700/40 text-zinc-500'}`}
+                          title={`${task.attempt_count} attempt${task.attempt_count !== 1 ? 's' : ''}`}
+                        >
+                          ×{task.attempt_count}
+                        </span>
+                      )}
+                      {task.priority !== 2 && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_LABEL[task.priority]?.cls ?? 'bg-zinc-800 text-zinc-400'}`}>
+                          {PRIORITY_LABEL[task.priority]?.label ?? `P${task.priority}`}
+                        </span>
+                      )}
+                      {task.tags && task.tags.length > 0 && task.tags.slice(0, 4).map(t => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500">{t}</span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                      <span title={lastRun}>Last run: <span className="text-zinc-300">{timeAgo(lastRun)}</span></span>
+                      {task.claimed_by && <span>Agent: <span className="text-blue-400">{task.claimed_by}</span></span>}
+                      {task.target && <span>Target: <span className="text-zinc-400">{task.target}</span></span>}
+                    </div>
+                    {errorExcerpt && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-red-950/30 border border-red-900/30 text-red-300 whitespace-pre-wrap">
+                        <span className="font-semibold">Error: </span>{errorExcerpt}
+                      </div>
+                    )}
+                    {!errorExcerpt && resultExcerpt && task.status === 'completed' && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-emerald-950/20 border border-emerald-900/30 text-zinc-400">
+                        <span className="text-emerald-500 font-semibold">Last result: </span>{resultExcerpt}…
+                      </div>
+                    )}
+                    {task.context?.jeff_notes && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                        <span className="font-semibold">Notes: </span>{String(task.context.jeff_notes).slice(0, 200)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="ml-3.5 space-y-2 mt-1">
+                    <ScheduleEditor
+                      state={editState}
+                      onChange={setEditState}
+                      compact
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSave(task)}
+                        disabled={isBusy || !editVal.trim()}
+                        className="text-xs px-3 py-1 rounded bg-blue-900/60 border border-blue-700/50 text-blue-300 hover:bg-blue-800/80 disabled:opacity-40"
+                      >{isBusy ? '…' : 'Save'}</button>
+                      <button
+                        onClick={() => setEditing(null)}
+                        className="text-xs px-2 py-1 rounded text-zinc-500 hover:text-zinc-300"
+                      >Discard</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {!isEditing && (
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => handleRunNow(task)}
+                    disabled={isBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-violet-700/60 bg-violet-900/30 text-violet-300 hover:bg-violet-800/50 disabled:opacity-40 transition-colors"
+                    title="Queue this task to run immediately (next occurrence still fires on schedule)"
+                  >▶ Run Now</button>
+                  <button
+                    onClick={() => {
+                      setEditing(task.id)
+                      setEditState(parseSchedule(schedule))
+                    }}
+                    className="text-[11px] px-2 py-1 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >Edit</button>
+                  <button
+                    onClick={() => handleCancel(task)}
+                    disabled={isBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-red-900/50 bg-red-950/20 text-red-400 hover:bg-red-900/40 disabled:opacity-40 transition-colors"
+                  >{isBusy ? '…' : 'Cancel'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1298,6 +1931,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     target: 'claude-code',
     tags: '',
   })
+  const [sched, setSched] = useState<ScheduleState>({ ...DEFAULT_SCHED })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
@@ -1314,6 +1948,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setError(null)
     try {
       const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
+      const schedule = buildSchedule(sched)
       const res = await fetch('/api/taskqueue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1323,6 +1958,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           priority: form.priority,
           target: form.target || null,
           tags: tags.length ? tags : [],
+          recurring_schedule: schedule || null,
         }),
       })
       if (res.ok) { onCreated(); onClose() }
@@ -1436,6 +2072,15 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
               onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
               placeholder="homelab, infra, security…"
               className={inputCls}
+            />
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <label className={labelCls}>Schedule <span className="text-zinc-700 normal-case font-normal">(optional repeat)</span></label>
+            <ScheduleEditor
+              state={sched}
+              onChange={setSched}
             />
           </div>
 
@@ -1561,7 +2206,7 @@ export default function TaskQueueExpanded() {
   const [showImport, setShowImport] = useState(false)
   const [showNewTask, setShowNewTask] = useState(false)
   const [completedPage, setCompletedPage] = useState(0)
-  const [viewTab, setViewTab] = useState<'list' | 'dependencies'>('list')
+  const [viewTab, setViewTab] = useState<'list' | 'scheduled' | 'dependencies'>('list')
   const [dependencyModal, setDependencyModal] = useState<TaskItem | null>(null)
 
   const load = useCallback((page?: number) => {
@@ -1682,6 +2327,21 @@ export default function TaskQueueExpanded() {
             Tasks
           </button>
           <button
+            onClick={() => setViewTab('scheduled')}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-1.5 ${
+              viewTab === 'scheduled'
+                ? 'bg-cyan-900/60 text-cyan-300 border border-cyan-700/50'
+                : 'bg-zinc-800/40 text-zinc-500 border border-zinc-700/30 hover:bg-zinc-800/60'
+            }`}
+          >
+            ⏱ Scheduled
+            {(data?.scheduled?.length ?? 0) > 0 && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${viewTab === 'scheduled' ? 'bg-cyan-700/60 text-cyan-200' : 'bg-zinc-700/60 text-zinc-400'}`}>
+                {data!.scheduled!.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => setViewTab('dependencies')}
             className={`px-3 py-1.5 rounded text-xs font-medium transition ${
               viewTab === 'dependencies'
@@ -1694,7 +2354,11 @@ export default function TaskQueueExpanded() {
         </div>
 
         {/* Conditional view content */}
-        {viewTab === 'list' ? (
+        {viewTab === 'scheduled' ? (
+          <div className="flex-1 overflow-y-auto">
+            <ScheduledView tasks={data?.scheduled ?? []} onRefresh={() => load()} />
+          </div>
+        ) : viewTab === 'list' ? (
           <>
             {/* Filter + controls */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">

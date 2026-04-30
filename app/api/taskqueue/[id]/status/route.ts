@@ -3,25 +3,26 @@ import { notifyJeff } from '@/lib/discord-notify'
 import type { TaskItem } from '@/app/api/taskqueue/route'
 
 // Valid transitions: from → allowed_to[]
+// Any in-progress status must be able to reach pending_eval so agents can hand results off for evaluation.
 const TRANSITIONS: Record<string, string[]> = {
   // New JeffLoop statuses
-  backlog:              ['ready', 'cancelled', 'in_progress_jeff'],
-  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled'],
-  in_progress_agent:    ['pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled'],
-  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back'],
-  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked'],
-  review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled'],
+  backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval'],
+  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval'],
+  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed'],
+  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval'],
+  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready'],
+  review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled', 'pending_eval', 'ready'],
   blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled'],
   completed:            ['ready'],  // Reopen
   cancelled:            ['ready'],  // Restore
   archived:             [],         // Use restore endpoint
   // Legacy status compat
-  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed'],
-  claimed:              ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed'],
-  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent'],
-  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled'],
-  delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready'],
-  pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled'],
+  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed', 'pending_eval'],
+  claimed:              ['in_progress_agent', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
+  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'pending_eval'],
+  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'pending_eval'],
+  delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval'],
+  pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff'],
   expired:              ['ready', 'cancelled'],
 }
 
@@ -40,7 +41,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   const { id } = await params

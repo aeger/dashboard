@@ -1,40 +1,39 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 
-interface ContainerSummary { up: number; down: number; total: number }
+interface ContainerSummary { up: number; down: number; total: number; updates: number; majorUpdates: number }
 interface TaskSummary { pending: number; active: number; completed: number; failed: number; blocked: number; total: number }
-interface GoalsSummary { visionTitle: string | null; activeMilestones: number; completedMilestones: number; blockedCount: number }
+interface GoalsSummary { visionTitle: string | null; activeMilestones: number; completedMilestones: number; activeTasks: number; blockedCount: number }
 interface SecuritySummary { score: number; critical: number; warning: number }
 
 function ContainerPill() {
   const [summary, setSummary] = useState<ContainerSummary | null>(null)
 
   useEffect(() => {
-    fetch('/api/containers')
-      .then(r => r.json())
-      .then(d => {
-        const containers: { state: string }[] = d.containers ?? []
-        const up = containers.filter(c => c.state === 'running').length
-        setSummary({ up, down: containers.length - up, total: containers.length })
+    const load = () => Promise.all([
+      fetch('/api/containers').then(r => r.json()),
+      fetch('/api/containers/updates/state').then(r => r.json()).catch(() => ({ containers: [] })),
+    ]).then(([cd, ud]) => {
+      const containers: { state: string }[] = cd.containers ?? []
+      const up = containers.filter(c => c.state === 'running').length
+      const updList: { has_update: boolean; user_status: string; risk?: string }[] = ud.containers ?? []
+      const pending = updList.filter(u => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed')
+      setSummary({
+        up, down: containers.length - up, total: containers.length,
+        updates: pending.length,
+        majorUpdates: pending.filter(u => u.risk === 'major').length,
       })
-      .catch(() => {})
-    const id = setInterval(() => {
-      fetch('/api/containers')
-        .then(r => r.json())
-        .then(d => {
-          const containers: { state: string }[] = d.containers ?? []
-          const up = containers.filter(c => c.state === 'running').length
-          setSummary({ up, down: containers.length - up, total: containers.length })
-        })
-        .catch(() => {})
-    }, 30_000)
+    }).catch(() => {})
+    load()
+    const id = setInterval(load, 30_000)
     return () => clearInterval(id)
   }, [])
 
   const pct = summary ? Math.round((summary.up / Math.max(summary.total, 1)) * 100) : null
-  const color = pct == null ? '#52525b' : pct === 100 ? '#22c55e' : pct >= 80 ? '#f59e0b' : '#ef4444'
+  const color = pct == null ? '#52525b' : summary!.down > 0 ? '#ef4444' : pct === 100 ? '#22c55e' : '#f59e0b'
+  const updateColor = summary && summary.majorUpdates > 0 ? '#ef4444' : '#f59e0b'
 
   return (
     <Link
@@ -51,8 +50,9 @@ function ContainerPill() {
       {summary ? (
         <>
           <span className="font-semibold tabular-nums" style={{ color }}>{summary.up}/{summary.total}</span>
-          {summary.down > 0 && (
-            <span className="text-red-400 tabular-nums">↓{summary.down}</span>
+          {summary.down > 0 && <span className="text-red-400 tabular-nums font-semibold">↓{summary.down}</span>}
+          {summary.updates > 0 && (
+            <span className="font-semibold tabular-nums" style={{ color: updateColor }}>↑{summary.updates}</span>
           )}
         </>
       ) : (
@@ -138,10 +138,12 @@ function GoalsPill() {
           const flat: { level: string; status: string; title: string }[] = d.flat ?? []
           const vision = flat.find(g => g.level === 'vision' && g.status === 'active')
           const milestones = flat.filter(g => g.level === 'milestone')
+          const tasks = flat.filter(g => g.level === 'objective' || g.level === 'task')
           setSummary({
             visionTitle: vision?.title ?? null,
             activeMilestones: milestones.filter(g => g.status === 'active').length,
             completedMilestones: milestones.filter(g => g.status === 'completed').length,
+            activeTasks: tasks.filter(g => g.status === 'active').length,
             blockedCount: flat.filter(g => g.status === 'blocked').length,
           })
         })
@@ -168,7 +170,10 @@ function GoalsPill() {
       {summary ? (
         <span className="flex items-center gap-1.5 tabular-nums">
           {summary.activeMilestones > 0 && (
-            <span style={{ color: accent }} className="font-semibold">{summary.activeMilestones} active</span>
+            <span style={{ color: accent }} className="font-semibold">{summary.activeMilestones} milestones</span>
+          )}
+          {summary.activeTasks > 0 && (
+            <span className="text-emerald-400 font-semibold">{summary.activeTasks} tasks</span>
           )}
           {summary.completedMilestones > 0 && (
             <span className="text-green-400">{summary.completedMilestones} done</span>
@@ -176,8 +181,8 @@ function GoalsPill() {
           {summary.blockedCount > 0 && (
             <span className="text-amber-400">{summary.blockedCount} blocked</span>
           )}
-          {summary.activeMilestones === 0 && summary.completedMilestones === 0 && summary.blockedCount === 0 && (
-            <span style={{ color: accent }}>no milestones</span>
+          {summary.activeMilestones === 0 && summary.activeTasks === 0 && summary.completedMilestones === 0 && summary.blockedCount === 0 && (
+            <span style={{ color: accent }}>idle</span>
           )}
         </span>
       ) : (
@@ -239,12 +244,89 @@ function SecurityPill() {
   )
 }
 
+function ClaudeVersionPill() {
+  const [data, setData] = useState<{ current: string; latest: string; updateAvailable: boolean } | null>(null)
+  const [updating, setUpdating] = useState(false)
+  const [updateError, setUpdateError] = useState(false)
+
+  const load = useCallback(() =>
+    fetch('/api/claude-version')
+      .then(r => r.json())
+      .then(d => { if (!d.error) setData(d) })
+      .catch(() => {}), [])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 5 * 60_000)
+    return () => clearInterval(id)
+  }, [load])
+
+  const handleUpdate = async () => {
+    if (!data?.updateAvailable || updating) return
+    setUpdating(true)
+    setUpdateError(false)
+    try {
+      const res = await fetch('/api/claude-update', { method: 'POST' })
+      const d = await res.json()
+      if (d.success) {
+        await load()
+      } else {
+        setUpdateError(true)
+      }
+    } catch {
+      setUpdateError(true)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const color = updateError ? '#ef4444'
+    : !data ? '#71717a'
+    : data.updateAvailable ? '#f59e0b'
+    : '#22c55e'
+
+  const isClickable = !!data?.updateAvailable && !updating
+
+  return (
+    <button
+      onClick={handleUpdate}
+      disabled={!isClickable}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all${isClickable ? ' hover:brightness-125' : ''}`}
+      style={{
+        background: `${color}12`,
+        borderColor: `${color}30`,
+        color,
+        cursor: isClickable ? 'pointer' : 'default',
+      }}
+      title={data?.updateAvailable ? `Click to install v${data.latest}` : undefined}
+    >
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      <span className="text-zinc-400 font-normal">claude</span>
+      {updating ? (
+        <span className="text-amber-400">updating…</span>
+      ) : updateError ? (
+        <span className="text-red-400 font-semibold">update failed</span>
+      ) : data ? (
+        <>
+          <span className="font-semibold tabular-nums font-mono" style={{ color }}>v{data.current}</span>
+          {data.updateAvailable && (
+            <span className="text-amber-400 font-semibold">↑ v{data.latest}</span>
+          )}
+        </>
+      ) : (
+        <span className="text-zinc-500">—</span>
+      )}
+    </button>
+  )
+}
+
 export default function StatusPills() {
   return (
     <div className="flex items-center gap-2">
       <GoalsPill />
       <ContainerPill />
       <TaskPill />
+      <ClaudeVersionPill />
       <SecurityPill />
     </div>
   )

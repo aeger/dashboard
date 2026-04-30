@@ -474,7 +474,7 @@ function ExpandedPanel({ update, onAction, loading }: {
         <div className="text-xs text-red-400">Failed: {update.last_result.error}</div>
       )}
       {/* Action buttons */}
-      {['pending_review', 'failed'].includes(status) && (
+      {['pending_review', 'notified', 'failed'].includes(status) && (
         <div className="flex gap-2 pt-1 flex-wrap">
           <button
             onClick={() => onAction('update_now')}
