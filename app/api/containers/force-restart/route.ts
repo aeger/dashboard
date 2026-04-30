@@ -17,11 +17,12 @@ const COMPOSE_MAP: Record<string, [string, string]> = {
   'traefik':                 ['dashboard', 'traefik'],
   'portainer':               ['portainer', 'portainer'],
   'az-dashboard':            ['dashboard', 'dashboard'],
-  'uptime-kuma':             ['dashboard', 'uptime-kuma'],
-  'immich-server':           ['dashboard', 'immich-server'],
-  'immich-machine-learning': ['dashboard', 'immich-machine-learning'],
-  'immich-redis':            ['dashboard', 'immich-redis'],
-  'immich-postgres':         ['dashboard', 'immich-postgres'],
+  // uptime-kuma + immich extracted to own compose stacks 2026-04-30
+  'uptime-kuma':             ['uptime-kuma', 'uptime-kuma'],
+  'immich-server':           ['immich', 'immich-server'],
+  'immich-machine-learning': ['immich', 'immich-machine-learning'],
+  'immich-redis':            ['immich', 'immich-redis'],
+  'immich-postgres':         ['immich', 'immich-postgres'],
   'code-server':             ['code-server', 'code-server'],
   'webtop':                  ['webtop', 'webtop'],
   'shelfmark':               ['shelfmark', 'shelfmark'],
@@ -71,17 +72,24 @@ export async function POST(req: NextRequest) {
     const [composeDir] = mapping
     const composePath = `${SERVICES_DIR}/${composeDir}`
 
+    // Force-stop helper: SIGKILL + -t 0 removal handles "stuck stopping" containers
+    // that won't respond to SIGTERM. The previous `podman rm -f` alone could hang
+    // when a container had already been signaled but the runtime didn't finish.
+    const forceStop = (name: string) =>
+      `podman kill -s KILL ${name} 2>/dev/null || true; ` +
+      `podman rm -f -t 0 ${name} 2>/dev/null || true`
+
     const stackKey = Object.keys(STACK_GROUPS).find((k) => STACK_GROUPS[k].includes(containerName))
     if (stackKey) {
-      // Multi-container stack — remove all peers then bring up in order
+      // Multi-container stack — force-stop all peers then bring up in order
       const peers = STACK_GROUPS[stackKey]
       const services = (STACK_SERVICES[stackKey] ?? peers).join(' ')
-      const rmAll = peers.map((p) => `podman rm -f ${p} 2>/dev/null || true`).join(' && ')
-      await sshExec(`${rmAll} && cd ${composePath} && podman-compose up -d ${services}`, 120_000)
+      const stopAll = peers.map(forceStop).join('; ')
+      await sshExec(`${stopAll}; cd ${composePath} && podman-compose up -d ${services}`, 120_000)
     } else {
       const [, serviceName] = mapping
       await sshExec(
-        `podman rm -f ${containerName} 2>/dev/null || true && cd ${composePath} && podman-compose up -d ${serviceName}`,
+        `${forceStop(containerName)}; cd ${composePath} && podman-compose up -d ${serviceName}`,
         120_000
       )
     }
