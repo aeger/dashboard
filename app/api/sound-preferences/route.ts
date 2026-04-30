@@ -8,7 +8,7 @@
 import { NextResponse } from 'next/server'
 
 const SUPABASE_URL = process.env.SUPABASE_URL
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY
 const USER_ID = 'jeff'
 const PREF_KEY = 'sound_settings'
 

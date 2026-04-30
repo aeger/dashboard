@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 //   - tasks[goalId].items         — up to 5 recent tasks (rich rows for the expanded GoalCard)
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ tasks: {} })
 
   const { searchParams } = req.nextUrl

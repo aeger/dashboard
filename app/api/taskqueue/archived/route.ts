@@ -5,7 +5,7 @@ const SELECT = 'id,title,description,status,priority,source,target,claimed_by,cl
 
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   const search = req.nextUrl.searchParams.get('search') ?? ''

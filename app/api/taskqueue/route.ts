@@ -67,7 +67,7 @@ const COMPLETED_PAGE_SIZE = 25
 
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
   const completedOffset = parseInt(req.nextUrl.searchParams.get('completedOffset') ?? '0', 10) || 0
 
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_KEY
+  const key = process.env.SUPABASE_SECRET_KEY
   if (!url || !key) return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
 
   try {
