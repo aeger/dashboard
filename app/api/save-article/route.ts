@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const supabaseUrl = process.env.SUPABASE_URL
-  const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY
   if (!supabaseUrl || !supabaseKey) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 503 })
   }

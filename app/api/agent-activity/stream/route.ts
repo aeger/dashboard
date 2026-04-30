@@ -13,7 +13,7 @@ async function fetchSince(url: string, key: string, agent: string, since: string
 
 export async function GET(req: Request) {
   const supabaseUrl = process.env.SUPABASE_URL
-  const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY
   if (!supabaseUrl || !supabaseKey) {
     return new Response('Supabase not configured', { status: 503 })
   }
