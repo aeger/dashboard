@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { TaskQueueData, TaskItem, ChecklistItem } from '@/app/api/taskqueue/route'
+import type { TaskQueueData, TaskItem, ChecklistItem, TaskRun } from '@/app/api/taskqueue/route'
 import TaskDependencyGraph from './TaskDependencyGraph'
 import TaskDependencyModal from './TaskDependencyModal'
 
@@ -315,6 +315,89 @@ function ChecklistPanel({ taskId, items, onUpdate }: {
 // ── Detail panel ──────────────────────────────────────────────────────────────
 
 type ActivityRow = { id: string; activity_type: string; content: string; created_at: string }
+
+function HistoryPanel({ runs, totalCount }: { runs: TaskRun[]; totalCount?: number | null }) {
+  const [open, setOpen] = useState(true)
+  if (!runs || runs.length === 0) {
+    return (
+      <div className="rounded-xl border border-violet-900/30 bg-violet-950/10 p-3">
+        <div className="text-[10px] text-violet-500/80 uppercase tracking-widest">Run History</div>
+        <div className="text-xs text-zinc-500 mt-1 italic">No runs recorded yet.</div>
+      </div>
+    )
+  }
+  // Render newest-first; sort by run_at desc.
+  const sorted = [...runs].sort((a, b) =>
+    (b.run_at ?? '').localeCompare(a.run_at ?? '')
+  )
+  return (
+    <div className="rounded-xl border border-violet-900/30 bg-violet-950/10">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between p-3 text-left hover:bg-violet-950/20 transition rounded-xl"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-violet-500/80 uppercase tracking-widest">Run History</span>
+          <span className="text-[10px] text-violet-700/60">
+            {totalCount ?? sorted.length} run{(totalCount ?? sorted.length) === 1 ? '' : 's'}
+          </span>
+        </div>
+        <span className="text-zinc-500 text-xs">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-2 max-h-96 overflow-y-auto">
+          {sorted.map((run, idx) => {
+            const isLatest = idx === 0
+            const status = run.status ?? 'unknown'
+            const statusColor =
+              status === 'completed' ? 'text-emerald-400' :
+              status === 'failed' || status === 'escalated' ? 'text-red-400' :
+              status === 'ready' ? 'text-amber-400' :
+              'text-zinc-500'
+            return (
+              <div
+                key={`${run.run_at}-${idx}`}
+                className={`rounded-lg p-2 border text-xs ${isLatest ? 'border-violet-700/40 bg-violet-900/10' : 'border-zinc-800/60 bg-zinc-900/30'}`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-zinc-500 text-[10px] tabular-nums whitespace-nowrap">
+                      {fmtDate(run.run_at)}
+                    </span>
+                    <span className={`uppercase text-[9px] tracking-wider ${statusColor}`}>
+                      {status}
+                    </span>
+                    {isLatest && (
+                      <span className="text-[9px] uppercase tracking-wider text-violet-500/80 px-1.5 py-0.5 rounded bg-violet-950/40">
+                        latest
+                      </span>
+                    )}
+                  </div>
+                  {run.completed_at && run.completed_at !== run.run_at && (
+                    <span className="text-zinc-600 text-[10px] whitespace-nowrap">
+                      done {timeAgo(run.completed_at)}
+                    </span>
+                  )}
+                </div>
+                {run.result && (
+                  <div className="text-zinc-400 leading-relaxed whitespace-pre-wrap break-words mt-1">
+                    {run.result.length > 600 ? run.result.slice(0, 600) + '…' : run.result}
+                  </div>
+                )}
+                {run.notes && (
+                  <div className="mt-1 pt-1 border-t border-zinc-800/40 text-zinc-500 italic">
+                    📝 {run.notes}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function LiveActivityLog({ taskId }: { taskId: string }) {
   const [rows, setRows] = useState<ActivityRow[]>([])
@@ -841,6 +924,14 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           </div>
         )}
 
+        {/* Run history — only shown for recurring (canonical scheduled) tasks */}
+        {task.recurring && (
+          <HistoryPanel
+            runs={Array.isArray(task.runs) ? task.runs : []}
+            totalCount={task.run_count ?? null}
+          />
+        )}
+
         {/* Error */}
         {task.error && (
           <div>
@@ -1065,7 +1156,13 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
 
       {/* Right meta */}
       <div className="flex-shrink-0 text-right flex flex-col items-end gap-1">
-        <div className="text-[10px] text-zinc-600 group-hover:text-zinc-500">{timeAgo(task.updated_at)}</div>
+        {task.recurring && task.last_run_at ? (
+          <div className="text-[10px] text-violet-400/80 group-hover:text-violet-300" title={`Recurring task — ${task.run_count ?? '?'} runs`}>
+            ↻ last run {timeAgo(task.last_run_at)}
+          </div>
+        ) : (
+          <div className="text-[10px] text-zinc-600 group-hover:text-zinc-500">{timeAgo(task.updated_at)}</div>
+        )}
         {isRunning(task.status) && task.claimed_at && (
           <div className="text-[10px] text-blue-400">{elapsed(task.claimed_at)}</div>
         )}
@@ -1514,6 +1611,36 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
     )
   }
 
+  async function handleRunNow(task: TaskItem) {
+    setBusy(task.id)
+    try {
+      const status = task.status
+      // If the scheduled task is in a runnable state, just trigger the poller.
+      // Otherwise (completed/failed/cancelled), clone it as a one-off ready task —
+      // the recurring chain stays intact via context.recurring_schedule on the original.
+      const runnable = ['ready', 'pending', 'backlog'].includes(status)
+      if (runnable) {
+        await fetch(`/api/taskqueue/${task.id}/run`, { method: 'POST' })
+      } else {
+        await fetch('/api/taskqueue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            target: task.target,
+            tags: [...(task.tags ?? []), 'manual-run'],
+            status: 'ready',
+            // Drop recurring_schedule on the manual run so it doesn't double-recur
+            context: { manual_run_of: task.id },
+          }),
+        })
+      }
+      onRefresh()
+    } finally { setBusy(null) }
+  }
+
   return (
     <div className="space-y-2 pr-1 overflow-y-auto">
       {tasks.map(task => {
@@ -1521,6 +1648,9 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
         const isEditing = editing === task.id
         const isBusy = busy === task.id
         const sc = STATUS_COLOR[task.status] ?? STATUS_COLOR.pending
+        const lastRun = task.claimed_at ?? task.updated_at
+        const resultExcerpt = task.result ? task.result.replace(/\s+/g, ' ').slice(0, 220) : null
+        const errorExcerpt = task.error ? task.error.replace(/\s+/g, ' ').slice(0, 220) : null
 
         return (
           <div key={task.id} className="rounded-lg border border-zinc-800/60 bg-zinc-900/30 p-3">
@@ -1531,17 +1661,52 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
                   <span className="text-xs text-zinc-200 font-medium truncate">{task.title}</span>
                 </div>
                 {!isEditing ? (
-                  <div className="flex items-center gap-2 ml-3.5 flex-wrap">
-                    <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-cyan-300 font-mono">
-                      ⏱ {scheduleLabel(schedule)}
-                    </span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${sc.bg} ${sc.text}`}
-                      style={{ borderColor: sc.accent + '40' }}>
-                      {task.status.replace(/_/g, ' ')}
-                    </span>
-                    {task.tags && task.tags.length > 0 && task.tags.map(t => (
-                      <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500">{t}</span>
-                    ))}
+                  <div className="ml-3.5 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-cyan-300 font-mono">
+                        ⏱ {scheduleLabel(schedule)}
+                      </span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${sc.bg} ${sc.text}`}
+                        style={{ borderColor: sc.accent + '40' }}>
+                        {task.status.replace(/_/g, ' ')}
+                      </span>
+                      {task.attempt_count > 0 && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded border ${task.attempt_count > 1 ? 'bg-amber-950/30 border-amber-900/40 text-amber-300' : 'bg-zinc-800/60 border-zinc-700/40 text-zinc-500'}`}
+                          title={`${task.attempt_count} attempt${task.attempt_count !== 1 ? 's' : ''}`}
+                        >
+                          ×{task.attempt_count}
+                        </span>
+                      )}
+                      {task.priority !== 2 && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_LABEL[task.priority]?.cls ?? 'bg-zinc-800 text-zinc-400'}`}>
+                          {PRIORITY_LABEL[task.priority]?.label ?? `P${task.priority}`}
+                        </span>
+                      )}
+                      {task.tags && task.tags.length > 0 && task.tags.slice(0, 4).map(t => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-500">{t}</span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                      <span title={lastRun}>Last run: <span className="text-zinc-300">{timeAgo(lastRun)}</span></span>
+                      {task.claimed_by && <span>Agent: <span className="text-blue-400">{task.claimed_by}</span></span>}
+                      {task.target && <span>Target: <span className="text-zinc-400">{task.target}</span></span>}
+                    </div>
+                    {errorExcerpt && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-red-950/30 border border-red-900/30 text-red-300 whitespace-pre-wrap">
+                        <span className="font-semibold">Error: </span>{errorExcerpt}
+                      </div>
+                    )}
+                    {!errorExcerpt && resultExcerpt && task.status === 'completed' && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-emerald-950/20 border border-emerald-900/30 text-zinc-400">
+                        <span className="text-emerald-500 font-semibold">Last result: </span>{resultExcerpt}…
+                      </div>
+                    )}
+                    {task.context?.jeff_notes && (
+                      <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                        <span className="font-semibold">Notes: </span>{String(task.context.jeff_notes).slice(0, 200)}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="ml-3.5 space-y-2 mt-1">
@@ -1566,6 +1731,12 @@ function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () 
               </div>
               {!isEditing && (
                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => handleRunNow(task)}
+                    disabled={isBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-violet-700/60 bg-violet-900/30 text-violet-300 hover:bg-violet-800/50 disabled:opacity-40 transition-colors"
+                    title="Queue this task to run immediately (next occurrence still fires on schedule)"
+                  >▶ Run Now</button>
                   <button
                     onClick={() => {
                       setEditing(task.id)

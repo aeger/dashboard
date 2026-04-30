@@ -18,6 +18,15 @@ export interface TaskContext {
   [key: string]: unknown
 }
 
+export interface TaskRun {
+  run_at: string
+  status?: string
+  result?: string | null
+  notes?: string | null
+  completed_at?: string | null
+  source_id?: string | null
+}
+
 export interface TaskItem {
   id: string
   title: string
@@ -40,6 +49,11 @@ export interface TaskItem {
   parent_task_id: string | null
   context: TaskContext | null
   blocked_by_task_ids: string[] | null
+  recurring?: boolean | null
+  recurring_key?: string | null
+  last_run_at?: string | null
+  run_count?: number | null
+  runs?: TaskRun[] | null
 }
 
 export interface TaskQueueData {
@@ -55,7 +69,7 @@ export interface TaskQueueData {
 // Keep old export name for any existing imports
 export type TaskQueueStats = TaskQueueData
 
-const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids'
+const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids,recurring,recurring_key,last_run_at,run_count,runs'
 
 // JeffLoop new statuses + legacy statuses all live as plain TEXT — no constraint change needed
 const JEFF_URGENT = ['pending_jeff_action', 'review_needed']
