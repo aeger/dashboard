@@ -117,8 +117,11 @@ export async function GET(req: NextRequest) {
       fetch(`${base}?select=status&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
       // Total completed count for pagination
       fetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
-      // Scheduled: tasks with a recurring_schedule in context, not archived/cancelled
-      fetch(`${base}?select=${SELECT}&context->>recurring_schedule=not.is.null&status=neq.archived&status=neq.cancelled&order=created_at.desc&limit=50`, opts),
+      // Scheduled: canonical recurring rows (recurring=true, post-migration 031),
+      // not archived/cancelled. Sort by last_run_at desc so the most recently fired
+      // task lands on top. Legacy recurring_schedule rows still show through the
+      // OR clause until they're migrated.
+      fetch(`${base}?select=${SELECT}&or=(recurring.eq.true,context->>recurring_schedule.not.is.null)&status=neq.archived&status=neq.cancelled&archived_at=is.null&order=last_run_at.desc.nullslast,created_at.desc&limit=50`, opts),
     ])
 
     const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw]: [
@@ -145,13 +148,37 @@ export async function GET(req: NextRequest) {
       (t, i, arr) => arr.findIndex(x => x.id === t.id) === i
     )
 
+    // Dedupe scheduled tasks: canonical recurring rows (recurring=true) keep their identity,
+    // but legacy recurring_schedule duplicates get collapsed to the most-recently-updated row
+    // per title so the Scheduled tab shows one entry per schedule.
+    const scheduledDedup: TaskItem[] = []
+    const legacyByTitle = new Map<string, TaskItem>()
+    for (const t of scheduledRaw) {
+      if (t.recurring) {
+        scheduledDedup.push(t)
+        continue
+      }
+      // Legacy: keep only the latest per title
+      const prev = legacyByTitle.get(t.title)
+      if (!prev || (t.updated_at > prev.updated_at)) {
+        legacyByTitle.set(t.title, t)
+      }
+    }
+    scheduledDedup.push(...legacyByTitle.values())
+    // Sort: most recently active first
+    scheduledDedup.sort((a, b) => {
+      const aRun = a.last_run_at ?? a.updated_at
+      const bRun = b.last_run_at ?? b.updated_at
+      return bRun.localeCompare(aRun)
+    })
+
     return NextResponse.json({
       problems: mergedProblems,
       waiting: waitingRaw,
       active: activeRaw,
       recent: recentRaw,
       completed: completedRaw,
-      scheduled: scheduledRaw,
+      scheduled: scheduledDedup,
       completedTotal,
       completedOffset,
       completedPageSize: COMPLETED_PAGE_SIZE,
