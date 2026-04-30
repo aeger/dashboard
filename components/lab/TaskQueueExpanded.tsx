@@ -1562,6 +1562,283 @@ function ScheduleEditor({
   )
 }
 
+// ── Unified Scheduled Activity view (Phase 2) ─────────────────────────────────
+// Reads from /api/scheduled-activity (which queries the scheduled_activity
+// registry seeded by scripts/scheduled_activity_seed.py). Surfaces every
+// scheduler in az-lab — systemd timers, cron, CCR triggers, agent loops,
+// task_queue recurring rows — in one view.
+
+interface ScheduledActivityRow {
+  id: string
+  name: string
+  display_name: string | null
+  description: string | null
+  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring'
+  schedule: string
+  schedule_tz: string
+  enabled: boolean
+  paused_at: string | null
+  pause_reason: string | null
+  source_ref: Record<string, unknown>
+  last_run_at: string | null
+  last_status: string | null
+  last_result_summary: string | null
+  next_run_at: string | null
+  run_count: number
+  runs: Array<{ run_at: string; status?: string; result_summary?: string | null; duration_sec?: number | null; notes?: string | null }>
+  tags: string[]
+}
+
+const KIND_LABEL: Record<ScheduledActivityRow['kind'], { short: string; long: string; cls: string }> = {
+  systemd:              { short: 'systemd',  long: 'systemd timer',          cls: 'bg-blue-950/40 border-blue-800/40 text-blue-300' },
+  cron:                 { short: 'cron',     long: 'user crontab',           cls: 'bg-amber-950/30 border-amber-800/40 text-amber-300' },
+  ccr_trigger:          { short: 'ccr',      long: 'claude.ai trigger',      cls: 'bg-purple-950/30 border-purple-800/40 text-purple-300' },
+  agent_loop:           { short: 'agent',    long: 'always-on agent loop',   cls: 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300' },
+  task_queue_recurring: { short: 'task',     long: 'task_queue recurring',   cls: 'bg-cyan-950/30 border-cyan-800/40 text-cyan-300' },
+}
+
+const STATUS_DOT: Record<string, string> = {
+  success: 'bg-emerald-400',
+  failure: 'bg-red-400',
+  running: 'bg-blue-400 animate-pulse',
+  skipped: 'bg-zinc-500',
+  unknown: 'bg-zinc-600',
+}
+
+function ScheduledActivityView() {
+  const [rows, setRows] = useState<ScheduledActivityRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [kindFilter, setKindFilter] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+
+  const load = useCallback(() => {
+    fetch('/api/scheduled-activity')
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { setError(d.error); return }
+        setRows(d.activities ?? [])
+        setError(null)
+      })
+      .catch(e => setError(e instanceof Error ? e.message : 'fetch failed'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
+  }, [load])
+
+  const filtered = rows.filter(r => {
+    if (kindFilter && r.kind !== kindFilter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!r.name.toLowerCase().includes(q) &&
+          !(r.display_name ?? '').toLowerCase().includes(q) &&
+          !(r.description ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+
+  const kindCounts: Record<string, number> = {}
+  for (const r of rows) kindCounts[r.kind] = (kindCounts[r.kind] ?? 0) + 1
+
+  if (loading && rows.length === 0) {
+    return <div className="text-zinc-600 text-sm text-center py-16">Loading scheduled activity…</div>
+  }
+  if (error) {
+    return <div className="text-red-400 text-sm text-center py-16">Error: {error}</div>
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="text-zinc-600 text-sm text-center py-16">
+        <div className="text-2xl mb-2">⏱</div>
+        Nothing in <code className="text-zinc-400">scheduled_activity</code> yet.
+        Run <code className="text-zinc-400">azlab/scripts/scheduled_activity_seed.py</code> to populate.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 pr-1 overflow-y-auto">
+      {/* Kind filter chips */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setKindFilter(null)}
+          className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+            !kindFilter
+              ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
+              : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
+          }`}
+        >
+          All ({rows.length})
+        </button>
+        {(Object.keys(KIND_LABEL) as ScheduledActivityRow['kind'][]).map(k => {
+          const count = kindCounts[k] ?? 0
+          if (count === 0) return null
+          const isActive = kindFilter === k
+          return (
+            <button
+              key={k}
+              onClick={() => setKindFilter(isActive ? null : k)}
+              className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+                isActive
+                  ? KIND_LABEL[k].cls + ' ring-1 ring-current'
+                  : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
+              }`}
+            >
+              {KIND_LABEL[k].short} ({count})
+            </button>
+          )
+        })}
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="search…"
+          className="ml-auto text-xs px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-zinc-600 text-xs text-center py-8 italic">No matches.</div>
+      ) : filtered.map(row => {
+        const kindCfg = KIND_LABEL[row.kind]
+        const expanded = expandedId === row.id
+        const statusDot = STATUS_DOT[row.last_status ?? 'unknown'] ?? STATUS_DOT.unknown
+        const sourceTitle = row.display_name ?? row.name
+
+        return (
+          <div
+            key={row.id}
+            className={`rounded-lg border p-3 transition-colors ${
+              !row.enabled
+                ? 'border-zinc-800/40 bg-zinc-950/30 opacity-60'
+                : row.paused_at
+                ? 'border-amber-900/40 bg-amber-950/10'
+                : 'border-zinc-800/60 bg-zinc-900/30 hover:border-zinc-700/60'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setExpandedId(expanded ? null : row.id)}
+              className="w-full text-left"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot}`}
+                          title={row.last_status ?? 'no runs recorded'} />
+                    <span className="text-xs text-zinc-200 font-medium truncate">{sourceTitle}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${kindCfg.cls}`}>
+                      {kindCfg.short}
+                    </span>
+                    {!row.enabled && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 uppercase">disabled</span>
+                    )}
+                    {row.paused_at && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300 uppercase">paused</span>
+                    )}
+                    {row.run_count > 0 && (
+                      <span className="text-[10px] text-zinc-600">×{row.run_count}</span>
+                    )}
+                  </div>
+                  <div className="ml-3.5 flex items-center gap-3 text-[11px] text-zinc-500 flex-wrap">
+                    <span className="px-2 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/40 text-cyan-300 font-mono text-[10px]">
+                      ⏱ {row.schedule}
+                    </span>
+                    {row.last_run_at && (
+                      <span title={row.last_run_at}>
+                        last <span className="text-zinc-300">{timeAgo(row.last_run_at)}</span>
+                      </span>
+                    )}
+                    {row.next_run_at && (
+                      <span title={row.next_run_at} className="text-blue-400/80">
+                        next {timeAgo(row.next_run_at).replace(' ago', ' from now').replace('-', '')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="text-zinc-600 text-xs">{expanded ? '▾' : '▸'}</span>
+              </div>
+            </button>
+
+            {expanded && (
+              <div className="mt-3 ml-3.5 space-y-2 text-xs">
+                {row.description && (
+                  <p className="text-zinc-400 leading-relaxed">{row.description}</p>
+                )}
+
+                {/* source_ref — points at native config */}
+                <div>
+                  <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">
+                    Source ({kindCfg.long})
+                  </div>
+                  <div className="rounded bg-zinc-950/50 border border-zinc-800/40 p-2 font-mono text-[10px] text-zinc-400">
+                    {Object.entries(row.source_ref).map(([k, v]) => (
+                      <div key={k}>
+                        <span className="text-zinc-600">{k}</span>: {String(v)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* last result */}
+                {row.last_result_summary && (
+                  <div>
+                    <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Last result</div>
+                    <div className="rounded bg-zinc-950/50 border border-zinc-800/40 p-2 text-zinc-400 leading-relaxed">
+                      {row.last_result_summary.length > 600
+                        ? row.last_result_summary.slice(0, 600) + '…'
+                        : row.last_result_summary}
+                    </div>
+                  </div>
+                )}
+
+                {/* runs[] history */}
+                {row.runs && row.runs.length > 0 && (
+                  <div>
+                    <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">
+                      Run history ({row.runs.length})
+                    </div>
+                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                      {[...row.runs].reverse().slice(0, 12).map((r, idx) => {
+                        const dot = STATUS_DOT[r.status ?? 'unknown'] ?? STATUS_DOT.unknown
+                        return (
+                          <div key={idx} className="flex items-start gap-2 text-[11px] py-1 border-b border-zinc-800/30 last:border-b-0">
+                            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${dot}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 text-zinc-500 text-[10px]">
+                                <span title={r.run_at}>{timeAgo(r.run_at)}</span>
+                                {r.status && <span className="uppercase tracking-wider">{r.status}</span>}
+                                {r.duration_sec != null && <span>{r.duration_sec.toFixed(1)}s</span>}
+                              </div>
+                              {r.result_summary && (
+                                <div className="text-zinc-400 mt-0.5">
+                                  {r.result_summary.length > 120 ? r.result_summary.slice(0, 120) + '…' : r.result_summary}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[10px] text-zinc-600 italic">
+                  Phase 4 will add Run-now / Pause / Edit-schedule / Disable buttons here.
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ScheduledView({ tasks, onRefresh }: { tasks: TaskItem[]; onRefresh: () => void }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [editState, setEditState] = useState<ScheduleState>({ ...DEFAULT_SCHED, freq: 'daily' })
@@ -2356,7 +2633,7 @@ export default function TaskQueueExpanded() {
         {/* Conditional view content */}
         {viewTab === 'scheduled' ? (
           <div className="flex-1 overflow-y-auto">
-            <ScheduledView tasks={data?.scheduled ?? []} onRefresh={() => load()} />
+            <ScheduledActivityView />
           </div>
         ) : viewTab === 'list' ? (
           <>
