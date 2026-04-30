@@ -3,8 +3,7 @@ import { notifyJeff } from '@/lib/discord-notify'
 import type { TaskItem } from '@/app/api/taskqueue/route'
 
 // Valid transitions: from → allowed_to[]
-// pending_eval is the Iris/Sage review gate for CRIT/HIGH completions. Any in-progress
-// status must be able to reach it so agents can hand results off for evaluation.
+// Any in-progress status must be able to reach pending_eval so agents can hand results off for evaluation.
 const TRANSITIONS: Record<string, string[]> = {
   // New JeffLoop statuses
   backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval'],

@@ -767,6 +767,26 @@ interface TaskCounts {
   pct_complete: number
 }
 
+interface GoalTaskItem {
+  id: string
+  title: string
+  status: string
+  priority: number
+  created_at: string
+  updated_at: string
+  claimed_at: string | null
+  claimed_by: string | null
+  attempt_count: number
+  schedule: string | null
+  scheduled_for: string | null
+  tags: string[]
+  result_excerpt: string | null
+  error: string | null
+  blocked_reason: string | null
+  jeff_notes: string | null
+  context_summary: string | null
+}
+
 interface TaskStatus {
   id: string
   status: string
@@ -774,6 +794,9 @@ interface TaskStatus {
   claimed_by: string | null
   error: string | null
   counts?: TaskCounts
+  // Latest task and recent task list (server returns up to 5 items)
+  latest?: GoalTaskItem | null
+  items?: GoalTaskItem[]
 }
 
 interface DepCandidate {
@@ -1093,16 +1116,182 @@ function TaskDependencyPanel({ candidates, initial, triggeredTaskId, onApplyNew,
 function TaskStatusBadge({ ts }: { ts: TaskStatus }) {
   const cfg: Record<string, { cls: string; label: string }> = {
     pending:   { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
+    ready:     { cls: 'bg-zinc-800 text-zinc-400 border-zinc-700', label: 'Queued' },
     claimed:   { cls: 'bg-blue-900/50 text-blue-300 border-blue-800/50', label: 'Running' },
+    in_progress_agent: { cls: 'bg-blue-900/50 text-blue-300 border-blue-800/50', label: 'Running' },
     completed: { cls: 'bg-green-900/50 text-green-300 border-green-800/50', label: 'Done' },
     failed:    { cls: 'bg-red-900/40 text-red-300 border-red-800/40', label: 'Failed' },
     blocked:   { cls: 'bg-amber-900/40 text-amber-300 border-amber-800/40', label: 'Blocked' },
+    pending_eval:   { cls: 'bg-violet-900/40 text-violet-300 border-violet-800/40', label: 'Eval' },
+    review_needed:  { cls: 'bg-amber-900/40 text-amber-300 border-amber-800/40', label: 'Review' },
+    pending_jeff_action: { cls: 'bg-rose-900/40 text-rose-300 border-rose-800/40', label: 'Needs Jeff' },
   }
   const { cls, label } = cfg[ts.status] ?? cfg.pending
   return (
     <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${cls}`} title={ts.error ?? ts.claimed_by ?? ts.id}>
       {label}
     </span>
+  )
+}
+
+const TASK_STATUS_PILL: Record<string, string> = {
+  pending: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
+  ready: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
+  claimed: 'bg-blue-900/40 text-blue-300 border-blue-800/40',
+  in_progress_agent: 'bg-blue-900/40 text-blue-300 border-blue-800/40',
+  in_progress_jeff: 'bg-cyan-900/40 text-cyan-300 border-cyan-800/40',
+  completed: 'bg-emerald-900/40 text-emerald-300 border-emerald-800/40',
+  failed: 'bg-red-900/40 text-red-300 border-red-800/40',
+  escalated: 'bg-red-900/40 text-red-300 border-red-800/40',
+  blocked: 'bg-amber-900/40 text-amber-300 border-amber-800/40',
+  pending_eval: 'bg-violet-900/40 text-violet-300 border-violet-800/40',
+  review_needed: 'bg-amber-900/40 text-amber-300 border-amber-800/40',
+  pending_jeff_action: 'bg-rose-900/40 text-rose-300 border-rose-800/40',
+  delegated: 'bg-indigo-900/40 text-indigo-300 border-indigo-800/40',
+  cancelled: 'bg-zinc-900/60 text-zinc-500 border-zinc-800/40',
+}
+
+function fmtTaskTime(iso: string | null): string {
+  if (!iso) return '—'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 0) return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const sec = Math.floor(ms / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 48) return `${hr}h ago`
+  const d = Math.floor(hr / 24)
+  return `${d}d ago`
+}
+
+function humanSchedule(s: string): string {
+  const k = s.trim().toLowerCase()
+  if (['hourly', 'daily', 'weekly', 'biweekly', 'monthly', 'yearly', 'weekdays'].includes(k)) {
+    return k === 'weekdays' ? 'Mon–Fri' : `Every ${k.replace('ly', '')}`
+  }
+  const parts = s.trim().split(/\s+/)
+  if (parts.length === 5) {
+    const [min, hr, dom, mon, dow] = parts
+    if (/^\d+$/.test(min) && /^\d+$/.test(hr)) {
+      const t = `${hr.padStart(2, '0')}:${min.padStart(2, '0')}`
+      if (dom === '*' && mon === '*' && dow === '*') return `Daily at ${t}`
+      if (dom === '*' && mon === '*' && dow === '1-5') return `Weekdays at ${t}`
+      if (dom === '*' && mon === '*' && /^[0-6]$/.test(dow)) {
+        return `Weekly (DOW ${dow}) at ${t}`
+      }
+    }
+  }
+  return s
+}
+
+function GoalTasksPanel({ items, latest, goalId }: { items: GoalTaskItem[]; latest?: GoalTaskItem | null; goalId: string }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const list = items.length ? items : (latest ? [latest] : [])
+
+  if (!list.length) {
+    return (
+      <div className="mt-3 px-3 py-2 rounded-lg bg-zinc-900/30 border border-zinc-800/40 text-[11px] text-zinc-600">
+        No tasks queued for this goal yet. Use <span className="text-zinc-400">▶ Run</span> or <span className="text-zinc-400">Schedule</span>.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-lg bg-zinc-900/30 border border-zinc-800/40 overflow-hidden">
+      <div className="px-3 py-1.5 flex items-center justify-between border-b border-zinc-800/40 bg-zinc-900/40">
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+          Tasks <span className="text-zinc-700 normal-case font-normal">({list.length} recent)</span>
+        </div>
+        <a href={`/lab/tasks?goal=${goalId}`} className="text-[10px] text-zinc-600 hover:text-zinc-300">All →</a>
+      </div>
+      <div className="divide-y divide-zinc-800/40">
+        {list.map((t) => {
+          const pillCls = TASK_STATUS_PILL[t.status] ?? TASK_STATUS_PILL.pending
+          const isOpen = expanded === t.id
+          const lastRun = t.claimed_at ?? t.updated_at
+          return (
+            <div key={t.id}>
+              <button
+                onClick={() => setExpanded(isOpen ? null : t.id)}
+                className="w-full text-left px-3 py-2 hover:bg-zinc-800/30 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border uppercase tracking-wide flex-shrink-0 ${pillCls}`}>
+                    {t.status.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-[11px] text-zinc-300 truncate flex-1">{t.title}</span>
+                  {t.attempt_count > 1 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 text-amber-400 border border-amber-900/30 flex-shrink-0" title={`${t.attempt_count} attempts`}>
+                      ×{t.attempt_count}
+                    </span>
+                  )}
+                  {t.schedule && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-900/30 font-mono flex-shrink-0" title={`Recurring: ${t.schedule}`}>
+                      ⏱ {humanSchedule(t.schedule)}
+                    </span>
+                  )}
+                  {!t.schedule && t.scheduled_for && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-900/30 flex-shrink-0" title={`Scheduled for ${t.scheduled_for}`}>
+                      📅 {t.scheduled_for.slice(0, 10)}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-zinc-600 tabular-nums flex-shrink-0" title={lastRun}>
+                    {fmtTaskTime(lastRun)}
+                  </span>
+                  <span className="text-zinc-700 text-[10px] flex-shrink-0">{isOpen ? '▲' : '▼'}</span>
+                </div>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 pt-1 space-y-2 bg-zinc-950/30 border-t border-zinc-800/30">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                    <div className="text-zinc-600">Created <span className="text-zinc-400">{fmtTaskTime(t.created_at)}</span></div>
+                    <div className="text-zinc-600">Last run <span className="text-zinc-400">{fmtTaskTime(lastRun)}</span></div>
+                    {t.claimed_by && <div className="text-zinc-600">Agent <span className="text-blue-400">{t.claimed_by}</span></div>}
+                    <div className="text-zinc-600">Priority <span className="text-zinc-400">P{t.priority}</span></div>
+                  </div>
+                  {t.context_summary && (
+                    <div className="text-[10px]">
+                      <span className="text-zinc-600 uppercase tracking-wider">Context · </span>
+                      <span className="text-zinc-400">{t.context_summary}</span>
+                    </div>
+                  )}
+                  {t.jeff_notes && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                      <span className="font-semibold">Jeff: </span>{t.jeff_notes}
+                    </div>
+                  )}
+                  {t.error && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-red-950/30 border border-red-900/30 text-red-300 whitespace-pre-wrap">
+                      <span className="font-semibold">Error: </span>{t.error.slice(0, 240)}
+                    </div>
+                  )}
+                  {t.blocked_reason && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-900/30 text-amber-300">
+                      <span className="font-semibold">Blocked: </span>{t.blocked_reason}
+                    </div>
+                  )}
+                  {t.result_excerpt && (
+                    <div className="text-[10px] px-2 py-1 rounded bg-emerald-950/20 border border-emerald-900/30 text-zinc-400">
+                      <span className="text-emerald-500 font-semibold">Result: </span>{t.result_excerpt}…
+                    </div>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <a
+                      href={`/lab/tasks?id=${t.id}`}
+                      className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/60 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-zinc-500"
+                    >
+                      Open in Tasks →
+                    </a>
+                    <span className="text-[10px] text-zinc-700 ml-auto font-mono">{t.id.slice(0, 8)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -1523,6 +1712,13 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
         </div>
         )}
 
+        {cardExpanded && (taskStatus?.items?.length || taskStatus?.latest) && (
+          <GoalTasksPanel
+            items={taskStatus.items ?? []}
+            latest={taskStatus.latest ?? null}
+            goalId={goal.id}
+          />
+        )}
         {cardExpanded && showSchedule && (
           <ScheduleForm goal={goal} onClose={() => setShowSchedule(false)} />
         )}

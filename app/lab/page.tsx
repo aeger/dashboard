@@ -4,6 +4,7 @@ import LabMonitor from '@/components/lab/LabMonitor'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
 import SecurityWidget from '@/components/lab/SecurityWidget'
+import BackupsWidget from '@/components/lab/BackupsWidget'
 import AgentHealthBanner from '@/components/shared/AgentHealthBanner'
 import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
 import AgentHealthCard from '@/components/lab/AgentHealthCard'
@@ -78,6 +79,11 @@ export default function LabPage() {
           <ExpandLink href="/lab/security" />
         </div>
         <SecurityWidget />
+      </div>
+
+      {/* Backups */}
+      <div id="backups" className={`${card} mb-4`}>
+        <BackupsWidget />
       </div>
 
     </div>
