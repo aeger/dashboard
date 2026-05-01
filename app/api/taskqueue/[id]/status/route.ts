@@ -46,7 +46,7 @@ export async function POST(
 
   const { id } = await params
 
-  let body: { status: string; jeff_notes?: string; context_summary?: string; action_required?: string }
+  let body: { status: string; jeff_notes?: string; context_summary?: string; action_required?: string; target?: string }
   try {
     body = await req.json()
   } catch {
@@ -107,6 +107,16 @@ export async function POST(
   // Set claimed_at when agent picks up a task
   if (newStatus === 'in_progress_agent' || newStatus === 'claimed') {
     patch.claimed_at = new Date().toISOString()
+  }
+
+  // Optional explicit target update — used by the UI to clear target=jeff when
+  // sending a task back to the agent pool. poll_queue.py's claim filter is
+  // `target IN (claude-code, wren)`, so leaving target=jeff after sending back
+  // means the agent silently ignores the task forever.
+  // Whitelisted to known agent identities + jeff to prevent injection.
+  const ALLOWED_TARGETS = new Set(['jeff', 'claude-code', 'wren', 'cowork', 'desktop', 'atlas', 'iris'])
+  if (typeof body.target === 'string' && ALLOWED_TARGETS.has(body.target)) {
+    patch.target = body.target
   }
 
   const patchRes = await fetch(`${url}/rest/v1/task_queue?id=eq.${id}`, {

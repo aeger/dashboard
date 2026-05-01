@@ -51,91 +51,102 @@ const SECTIONS = [
   { key: 'cancelled',     label: 'Cancelled',     statuses: ['cancelled', 'expired'],         headerCls: 'text-zinc-600',    urgent: false },
 ]
 
+// Action shape — `target` is sent alongside `status` to keep ownership unambiguous.
+// poll_queue.py only claims tasks where target IN (claude-code, wren), so handing
+// a task back to the agent must clear target=jeff in the same operation.
+type ActionSpec = { label: string; status?: string; target?: string; special?: string; cls?: string }
+
+// Convenience: target for "agent takes over" buttons. claude-code is the canonical
+// poll_queue agent identity — it covers Wren on this host. Cowork-bound tasks already
+// have target='cowork' from upstream and shouldn't be rewritten here.
+const T_AGENT = 'claude-code'
+const T_JEFF  = 'jeff'
+
 // Actions available for each status
-const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string; special?: string; cls?: string }>> = {
+const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
   pending_jeff_action: [
-    { label: "I'll Handle It",            status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Return to Agent Queue',     status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: "I'll Handle It",            status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Return to Agent Queue',     status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   review_needed: [
-    { label: 'Approve & Complete',        status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Send Back to Agent',        status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Approve & Complete',        status: 'completed',                          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Send Back to Agent',        status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   in_progress_jeff: [
-    { label: 'Hand Back to Agent Queue',  status: 'ready',             cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
-    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Flag for Review',           status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Block',                     status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
+    { label: 'Hand Back to Agent Queue',  status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Flag for Review',           status: 'review_needed',     target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Block',                     status: 'blocked',                            cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
   ],
   in_progress_agent: [
-    { label: 'Needs My Input',            status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Flag for Review',           status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Needs My Input',            status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',           status: 'review_needed',       target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Mark Complete',             status: 'completed',                            cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'Queue for Agent',           status: 'ready',               cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'Queue for Agent',           status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   blocked: [
-    { label: 'Unblock → Back to Queue',   status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Unblock → Back to Queue',   status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   completed: [
-    { label: 'Reopen',              status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Reopen',              status: 'ready',                                      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   cancelled: [
-    { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Restore to Ready',    status: 'ready',                target: T_AGENT,      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   failed: [
-    { label: 'Retry (Agent)',        status: 'ready',              cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Archive',              special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Retry (Agent)',        status: 'ready',               target: T_AGENT,     cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',    target: T_JEFF,      cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', target: T_JEFF,      cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Archive',              special: 'archive',                                  cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   escalated: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Needs My Action',     status: 'pending_jeff_action',  target: T_JEFF,      cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Retry → Ready',       status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   claimed: [
-    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Flag for Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', target: T_JEFF,      cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',      status: 'review_needed',       target: T_JEFF,      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    target: T_JEFF,      cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
   ],
   delegated: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Needs My Action',     status: 'pending_jeff_action',  target: T_JEFF,      cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Move to Ready',       status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   pending_eval: [
-    { label: 'Approve & Complete',  status: 'completed',          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'Split into Subtasks', special: 'split',             cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
-    { label: 'Review Needed',       status: 'review_needed',      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Send Back to Agent',  status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Approve & Complete',  status: 'completed',                                  cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'Split into Subtasks', special: 'split',                                     cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
+    { label: 'Review Needed',       status: 'review_needed',        target: T_JEFF,      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Send Back to Agent',  status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   expired: [
-    { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Restore to Ready',    status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
 }
 
@@ -166,7 +177,25 @@ function getStatusColor(status: string) {
 }
 
 const isRunning = (s: string) => ['claimed', 'in_progress_agent', 'in_progress_jeff'].includes(s)
-const isJeffUrgent = (s: string) => ['pending_jeff_action', 'review_needed'].includes(s)
+// "Jeff urgent" = something Jeff specifically needs to look at right now.
+// Status alone isn't enough — review_needed with target=agent means "Jeff
+// already kicked it back, agent should be retrying", which shouldn't light
+// up the rose pillbox. Consider it urgent only when target is jeff (or
+// missing — older rows pre-fix).
+function isJeffUrgent(task: { status: string; target?: string | null }): boolean {
+  if (!['pending_jeff_action', 'review_needed'].includes(task.status)) return false
+  // null/undefined target = legacy row, treat as urgent so it doesn't get
+  // silently buried; non-jeff target = explicitly assigned to an agent
+  return !task.target || task.target === 'jeff'
+}
+
+// "With agent" = task is in a normally-Jeff-urgent status but ownership has
+// been handed back to an agent. Distinct visual treatment so Jeff can see
+// "this isn't on me, the agent owns it" at a glance.
+function isWithAgent(task: { status: string; target?: string | null }): boolean {
+  if (!['pending_jeff_action', 'review_needed'].includes(task.status)) return false
+  return !!task.target && task.target !== 'jeff'
+}
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -624,7 +653,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const ctx = task.context ?? {}
   const checklist: ChecklistItem[] = Array.isArray(ctx.checklist) ? ctx.checklist as ChecklistItem[] : []
 
-  async function doAction(action: { label: string; status?: string; special?: string }) {
+  async function doAction(action: ActionSpec) {
     if (action.special === 'split') {
       setShowSplitModal(true)
       return
@@ -644,14 +673,21 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         if (res.ok) { onRefresh() }
         else setActionError(data.error ?? 'Failed to trigger poller')
       } else if (action.status) {
+        const body: Record<string, unknown> = {
+          status: action.status,
+          jeff_notes: jeffNotes,
+          context_summary: contextSummary,
+        }
+        // Send explicit target so ownership is unambiguous after the transition.
+        // Don't override target=cowork (upstream-driven). For everything else, the
+        // action spec's target is the source of truth.
+        if (action.target && task.target !== 'cowork') {
+          body.target = action.target
+        }
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: action.status,
-            jeff_notes: jeffNotes,
-            context_summary: contextSummary,
-          }),
+          body: JSON.stringify(body),
         })
         const data = await res.json()
         if (res.ok && data.task) {
@@ -731,7 +767,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <StatusBadge status={task.status} />
             <PriorityBadge priority={task.priority} />
-            {isJeffUrgent(task.status) && (
+            {isJeffUrgent(task) && (
               <span className="text-[10px] bg-rose-900/40 text-rose-300 px-1.5 py-0.5 rounded animate-pulse">
                 ⚡ Needs You
               </span>
@@ -1093,7 +1129,7 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
   onNeedsAction?: (t: TaskItem) => void
 }) {
   const c = getStatusColor(task.status)
-  const urgent = isJeffUrgent(task.status)
+  const urgent = isJeffUrgent(task)
   const running = isRunning(task.status)
   const showNeedsAction = onNeedsAction && ['in_progress_agent', 'claimed', 'failed', 'escalated', 'waiting', 'delegated', 'pending_eval'].includes(task.status)
 
@@ -1128,6 +1164,14 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
+          {isWithAgent(task) && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded border bg-blue-950/40 border-blue-800/40 text-blue-300"
+              title={`Status is ${task.status} but ownership is with ${task.target} — agent should be working on it, not Jeff`}
+            >
+              ↩ with {task.target}
+            </span>
+          )}
           {task.source && task.target && (
             <span className="text-[10px] text-zinc-600">{task.source} → {task.target}</span>
           )}
@@ -2809,7 +2853,7 @@ export default function TaskQueueExpanded() {
     await fetch(`/api/taskqueue/${task.id}/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'pending_jeff_action' }),
+      body: JSON.stringify({ status: 'pending_jeff_action', target: 'jeff' }),
     }).catch(() => {})
     load()
   }
