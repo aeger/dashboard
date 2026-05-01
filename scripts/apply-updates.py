@@ -60,27 +60,51 @@ def discord(msg: str) -> None:
 
 
 def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str | None]:
-    """Pull + restart. Returns (success, old_digest, new_digest, error)."""
+    """Pull + recreate via podman-compose. `podman restart` keeps the old image
+    binding, so a true update requires recreating the container.
+    Returns (success, old_digest, new_digest, error)."""
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
                        capture_output=True, text=True)
     old_digest = (r.stdout.strip() or 'unknown')[:16]
 
-    r = subprocess.run(['podman', 'pull', '--quiet', image],
-                       capture_output=True, text=True, timeout=300)
+    r = subprocess.run(['podman', 'inspect', container, '--format', '{{json .Config.Labels}}'],
+                       capture_output=True, text=True)
     if r.returncode != 0:
-        return False, old_digest, None, f'Pull failed: {r.stderr.strip()}'
-    new_digest = (r.stdout.strip() or '')[:16]
+        return False, old_digest, None, f'Inspect failed: {r.stderr.strip()}'
+    try:
+        labels = json.loads(r.stdout) or {}
+    except json.JSONDecodeError as e:
+        return False, old_digest, None, f'Could not parse labels: {e}'
 
-    r = subprocess.run(['podman', 'restart', container],
-                       capture_output=True, text=True, timeout=60)
+    working_dir = labels.get('com.docker.compose.project.working_dir')
+    service     = labels.get('com.docker.compose.service')
+    if not working_dir or not service:
+        return False, old_digest, None, 'Container missing compose labels — cannot recreate'
+
+    r = subprocess.run(['podman-compose', 'pull', service],
+                       capture_output=True, text=True, timeout=300, cwd=working_dir)
     if r.returncode != 0:
-        return False, old_digest, new_digest, f'Restart failed: {r.stderr.strip()}'
+        return False, old_digest, None, f'Pull failed: {(r.stderr or r.stdout).strip()[:300]}'
+
+    r = subprocess.run(
+        ['podman-compose', 'up', '-d', '--no-deps', '--force-recreate', service],
+        capture_output=True, text=True, timeout=180, cwd=working_dir,
+    )
+    if r.returncode != 0:
+        return False, old_digest, None, f'Recreate failed: {(r.stderr or r.stdout).strip()[:300]}'
+
+    r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
+                       capture_output=True, text=True)
+    new_digest = (r.stdout.strip() or 'unknown')[:16] if r.returncode == 0 else None
 
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.State.Status}}'],
                        capture_output=True, text=True)
     status = r.stdout.strip() if r.returncode == 0 else 'unknown'
     if status != 'running':
         return False, old_digest, new_digest, f'Container not running after update (status: {status})'
+
+    if new_digest and new_digest == old_digest:
+        return False, old_digest, new_digest, 'Image digest unchanged after recreate — pull may have hit cached tag'
 
     return True, old_digest, new_digest, None
 

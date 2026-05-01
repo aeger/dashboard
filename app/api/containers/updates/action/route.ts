@@ -31,18 +31,30 @@ export async function POST(req: NextRequest) {
       writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + '\n')
 
       // Trigger immediate update via SSH — apply-updates.py handles 'requested' status immediately
+      let output: string
       try {
-        const output = await sshExec(
+        output = await sshExec(
           'python3 /home/almty1/dashboard/scripts/apply-updates.py 2>&1',
           300_000
         )
-        return NextResponse.json({ success: true, status: 'completed', output })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         return NextResponse.json({ success: false, status: 'failed', error: msg }, { status: 500 })
       }
+
+      // Re-read state to verify the script actually completed the update
+      const after = existsSync(STATE_FILE)
+        ? JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
+        : { containers: {} }
+      const result = after.containers?.[container] || {}
+      if (result.status === 'completed') {
+        return NextResponse.json({ success: true, status: 'completed', output })
+      }
+      const err = result.last_result?.error || 'Update did not complete (status: ' + (result.status || 'unknown') + ')'
+      return NextResponse.json({ success: false, status: result.status || 'failed', error: err, output }, { status: 500 })
     } else if (action === 'schedule') {
-      // Schedule for next 3:47 AM UTC
+      // Schedule into the next nightly maintenance window (apply-updates.py runs ~03:48 UTC).
+      // scheduled_time is informational; status='scheduled' triggers apply on next timer run.
       const target = new Date()
       target.setUTCHours(3, 47, 0, 0)
       if (target.getTime() <= Date.now()) {
