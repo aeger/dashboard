@@ -1605,7 +1605,7 @@ const STATUS_DOT: Record<string, string> = {
   unknown: 'bg-zinc-600',
 }
 
-function ScheduledActivityView() {
+function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
   const [rows, setRows] = useState<ScheduledActivityRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1620,10 +1620,11 @@ function ScheduledActivityView() {
         if (d.error) { setError(d.error); return }
         setRows(d.activities ?? [])
         setError(null)
+        if (onCount) onCount(d.total ?? (d.activities?.length ?? 0))
       })
       .catch(e => setError(e instanceof Error ? e.message : 'fetch failed'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [onCount])
 
   useEffect(() => {
     load()
@@ -2601,6 +2602,7 @@ export default function TaskQueueExpanded() {
   const [completedPage, setCompletedPage] = useState(0)
   const [viewTab, setViewTab] = useState<'list' | 'scheduled' | 'dependencies'>('list')
   const [dependencyModal, setDependencyModal] = useState<TaskItem | null>(null)
+  const [scheduledCount, setScheduledCount] = useState<number>(0)
 
   const load = useCallback((page?: number) => {
     const offset = (page ?? completedPage) * 25
@@ -2615,6 +2617,20 @@ export default function TaskQueueExpanded() {
     const id = setInterval(load, 30_000)
     return () => clearInterval(id)
   }, [load])
+
+  // Always fetch the scheduled-activity count so the tab badge stays accurate
+  // even when the user is on the list tab.
+  useEffect(() => {
+    const fetchCount = () => {
+      fetch('/api/scheduled-activity')
+        .then(r => r.json())
+        .then(d => { if (typeof d.total === 'number') setScheduledCount(d.total) })
+        .catch(() => {})
+    }
+    fetchCount()
+    const id = setInterval(fetchCount, 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const allTasks: TaskItem[] = data ? [
     ...(data.jeff_urgent ?? []),
@@ -2728,9 +2744,9 @@ export default function TaskQueueExpanded() {
             }`}
           >
             ⏱ Scheduled
-            {(data?.scheduled?.length ?? 0) > 0 && (
+            {scheduledCount > 0 && (
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${viewTab === 'scheduled' ? 'bg-cyan-700/60 text-cyan-200' : 'bg-zinc-700/60 text-zinc-400'}`}>
-                {data!.scheduled!.length}
+                {scheduledCount}
               </span>
             )}
           </button>
@@ -2749,7 +2765,7 @@ export default function TaskQueueExpanded() {
         {/* Conditional view content */}
         {viewTab === 'scheduled' ? (
           <div className="flex-1 overflow-y-auto">
-            <ScheduledActivityView />
+            <ScheduledActivityView onCount={setScheduledCount} />
           </div>
         ) : viewTab === 'list' ? (
           <>
