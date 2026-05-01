@@ -246,20 +246,35 @@ function SecurityPill() {
 
 function ClaudeVersionPill() {
   const [data, setData] = useState<{ current: string; latest: string; updateAvailable: boolean } | null>(null)
+  const [fetchError, setFetchError] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [updateError, setUpdateError] = useState(false)
 
   const load = useCallback(() =>
     fetch('/api/claude-version')
       .then(r => r.json())
-      .then(d => { if (!d.error) setData(d) })
-      .catch(() => {}), [])
+      .then(d => {
+        if (d.error) {
+          setFetchError(true)
+        } else {
+          setData(d)
+          setFetchError(false)
+        }
+      })
+      .catch(() => { setFetchError(true) }), [])
 
   useEffect(() => {
     load()
-    const id = setInterval(load, 5 * 60_000)
-    return () => clearInterval(id)
+    const slowId = setInterval(load, 5 * 60_000)
+    return () => clearInterval(slowId)
   }, [load])
+
+  // Fast retry while we have no data at all (initial-load failure).
+  useEffect(() => {
+    if (data || !fetchError) return
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
+  }, [data, fetchError, load])
 
   const handleUpdate = async () => {
     if (!data?.updateAvailable || updating) return
@@ -281,6 +296,7 @@ function ClaudeVersionPill() {
   }
 
   const color = updateError ? '#ef4444'
+    : !data && fetchError ? '#ef4444'
     : !data ? '#71717a'
     : data.updateAvailable ? '#f59e0b'
     : '#22c55e'
@@ -312,7 +328,10 @@ function ClaudeVersionPill() {
           {data.updateAvailable && (
             <span className="text-amber-400 font-semibold">↑ v{data.latest}</span>
           )}
+          {fetchError && <span className="text-amber-400" title="Last refresh failed; showing cached version">⚠</span>}
         </>
+      ) : fetchError ? (
+        <span className="text-red-400 font-semibold">unavailable</span>
       ) : (
         <span className="text-zinc-500">—</span>
       )}
