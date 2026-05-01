@@ -1922,6 +1922,30 @@ function ScheduledActivityActions({ row, onChange }: {
     { label: 'indefinitely', ms: null },
   ]
 
+  // Schedule editor state
+  const [editingSchedule, setEditingSchedule] = useState(false)
+  const [scheduleDraft, setScheduleDraft] = useState(row.schedule)
+  const canEditSchedule =
+    row.kind === 'systemd' || row.kind === 'cron'  // ccr_trigger needs PAT, agent_loop & task_queue_recurring rejected by API
+
+  async function saveSchedule() {
+    await patch({ schedule: scheduleDraft.trim() }, 'edit-schedule')
+    if (!error) {
+      setEditingSchedule(false)
+    }
+  }
+
+  const SCHEDULE_HINT = (() => {
+    switch (row.kind) {
+      case 'systemd': return 'Use "oncalendar:<expr>" (e.g. "oncalendar:*-*-* 04:15:00 UTC") or "every:<duration>" (e.g. "every:5min"). Daemon writes a drop-in override + restarts the timer.'
+      case 'cron':    return 'Standard 5-field cron: <min> <hour> <dom> <mon> <dow>. Daemon rewrites the matching crontab line.'
+      case 'ccr_trigger': return 'Schedule editing for CCR triggers needs a claude.ai PAT — not yet wired. Edit the trigger in claude.ai for now.'
+      case 'agent_loop': return 'Agent-loop poll intervals are hardcoded. Edit POLL_INTERVAL in the service unit and restart it.'
+      case 'task_queue_recurring': return 'Schedule is upstream-driven by the cowork CCR trigger. Edit the trigger prompt on the cowork side.'
+      default: return ''
+    }
+  })()
+
   return (
     <div className="pt-2 border-t border-zinc-800/40">
       <div className="flex items-center gap-2 flex-wrap">
@@ -2009,6 +2033,18 @@ function ScheduledActivityActions({ row, onChange }: {
           )
         )}
 
+        {canEditSchedule && (
+          editingSchedule ? null : (
+            <button
+              onClick={() => { setScheduleDraft(row.schedule); setEditingSchedule(true) }}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-cyan-950/30 border border-cyan-800/40 text-cyan-300 hover:bg-cyan-900/40 disabled:opacity-50"
+            >
+              Edit schedule
+            </button>
+          )
+        )}
+
         {error && (
           <span className="text-[10px] text-red-400 ml-2">{error}</span>
         )}
@@ -2017,6 +2053,41 @@ function ScheduledActivityActions({ row, onChange }: {
           Changes propagate to native scheduler within ~30s via control daemon.
         </span>
       </div>
+
+      {editingSchedule && (
+        <div className="mt-2 p-2 rounded border border-cyan-900/40 bg-cyan-950/10 space-y-2">
+          <div className="text-[10px] text-cyan-500/80 uppercase tracking-widest">
+            Edit schedule — {row.kind}
+          </div>
+          <div className="text-[10px] text-zinc-500">{SCHEDULE_HINT}</div>
+          <input
+            value={scheduleDraft}
+            onChange={e => setScheduleDraft(e.target.value)}
+            placeholder={row.schedule}
+            className="w-full px-2 py-1 rounded text-xs bg-zinc-800/60 border border-cyan-800/40 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500"
+            spellCheck={false}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={saveSchedule}
+              disabled={busy !== null || scheduleDraft.trim() === row.schedule.trim() || !scheduleDraft.trim()}
+              className="text-[10px] px-2 py-1 rounded bg-cyan-700/60 border border-cyan-500/50 text-cyan-100 hover:bg-cyan-600/70 disabled:opacity-50"
+            >
+              {busy === 'edit-schedule' ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => setEditingSchedule(false)}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:bg-zinc-700/60"
+            >
+              Cancel
+            </button>
+            <span className="text-[10px] text-zinc-600 ml-auto italic">
+              Daemon applies the change to native config on next tick.
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
