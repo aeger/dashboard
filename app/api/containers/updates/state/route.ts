@@ -29,17 +29,20 @@ export async function GET() {
 
     const stateMap: Record<string, StateEntry> = state.containers || {}
 
+    const checkedAtMs = updates.checked_at ? new Date(updates.checked_at as string).getTime() : 0
     const merged = (updates.containers || []).map((c: UpdateContainer) => {
       const s = stateMap[c.name]
-      // Stale-state guard: if check-updates detects a NEW image for this container
-      // (has_update=true), then a previous-round's "completed" status is by
-      // definition stale — that completion was for an OLDER image. Reset to
-      // pending_review so the UI surfaces the new update. Other in-flight states
-      // (scheduled, in_progress, skipped, pending_review) carry through.
+      // Stale-state guard: only invalidate a "completed" status if the
+      // update-check ran AFTER the completion — that means a NEW image
+      // appeared, so the prior completion was for an older image. If the
+      // completion is newer than the latest update-check (the common case
+      // immediately after Update Now), trust it: updates.json is stale,
+      // not the completion.
       let user_status: string
       if (s?.status) {
         if (c.has_update && s.status === 'completed') {
-          user_status = 'pending_review'
+          const completedAtMs = s.completed_at ? new Date(s.completed_at as string).getTime() : 0
+          user_status = checkedAtMs > completedAtMs ? 'pending_review' : 'completed'
         } else {
           user_status = s.status as string
         }

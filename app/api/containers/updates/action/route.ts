@@ -53,11 +53,14 @@ export async function POST(req: NextRequest) {
       const err = result.last_result?.error || 'Update did not complete (status: ' + (result.status || 'unknown') + ')'
       return NextResponse.json({ success: false, status: result.status || 'failed', error: err, output }, { status: 500 })
     } else if (action === 'schedule') {
-      // Schedule into the next nightly maintenance window (apply-updates.py runs ~03:48 UTC).
-      // scheduled_time is informational; status='scheduled' triggers apply on next timer run.
+      // Schedule into the next nightly maintenance window (apply-updates.py runs ~03:47 UTC).
+      // If today's 03:47 UTC is less than 4h away (user clicked late evening local
+      // time, just before the window), bump to tomorrow so "Schedule overnight"
+      // actually waits overnight and doesn't fire minutes later.
       const target = new Date()
       target.setUTCHours(3, 47, 0, 0)
-      if (target.getTime() <= Date.now()) {
+      const minLeadMs = 4 * 60 * 60 * 1000
+      if (target.getTime() - Date.now() < minLeadMs) {
         target.setUTCDate(target.getUTCDate() + 1)
       }
       entry.status = 'scheduled'
