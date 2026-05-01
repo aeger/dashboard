@@ -21,6 +21,7 @@ export interface ScheduledActivity {
   enabled: boolean
   paused_at: string | null
   pause_reason: string | null
+  unpause_at: string | null
   source_ref: Record<string, unknown>
   last_run_at: string | null
   last_status: string | null
@@ -36,7 +37,7 @@ export interface ScheduledActivity {
 const SELECT = [
   'id', 'name', 'display_name', 'description',
   'kind', 'schedule', 'schedule_tz',
-  'enabled', 'paused_at', 'pause_reason',
+  'enabled', 'paused_at', 'unpause_at', 'pause_reason',
   'source_ref',
   'last_run_at', 'last_status', 'last_result_summary', 'next_run_at',
   'run_count', 'runs',

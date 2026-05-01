@@ -1578,6 +1578,7 @@ interface ScheduledActivityRow {
   schedule_tz: string
   enabled: boolean
   paused_at: string | null
+  unpause_at: string | null
   pause_reason: string | null
   source_ref: Record<string, unknown>
   last_run_at: string | null
@@ -1846,6 +1847,7 @@ function ScheduledActivityActions({ row, onChange }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmRun, setConfirmRun] = useState(false)
+  const [pauseMenu, setPauseMenu] = useState(false)
   const isPaused = !!row.paused_at
   const isDisabled = !row.enabled
   const canRunNow = row.kind !== 'agent_loop' && row.kind !== 'ccr_trigger'
@@ -1869,6 +1871,23 @@ function ScheduledActivityActions({ row, onChange }: {
     }
   }
 
+  async function pauseFor(durationLabel: string, durationMs: number | null) {
+    setPauseMenu(false)
+    const now = new Date()
+    const unpauseAt = durationMs === null ? null : new Date(now.getTime() + durationMs).toISOString()
+    await patch({
+      paused_at: now.toISOString(),
+      unpause_at: unpauseAt,
+      pause_reason: durationMs === null
+        ? 'Manual pause (indefinite)'
+        : `Manual pause until ${unpauseAt}`,
+    }, 'pause-' + durationLabel)
+  }
+
+  async function resume() {
+    await patch({ paused_at: null, unpause_at: null, pause_reason: null }, 'resume')
+  }
+
   async function runNow() {
     setBusy('run-now')
     setError(null)
@@ -1887,20 +1906,66 @@ function ScheduledActivityActions({ row, onChange }: {
     }
   }
 
+  // "until tomorrow" = next 8am local
+  const tomorrow8am = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setHours(8, 0, 0, 0)
+    return d.getTime() - Date.now()
+  })()
+
+  const PAUSE_DURATIONS: Array<{ label: string; ms: number | null }> = [
+    { label: '30m',          ms: 30 * 60 * 1000 },
+    { label: '1h',           ms: 60 * 60 * 1000 },
+    { label: '4h',           ms: 4 * 60 * 60 * 1000 },
+    { label: 'until tomorrow', ms: tomorrow8am },
+    { label: 'indefinitely', ms: null },
+  ]
+
   return (
     <div className="pt-2 border-t border-zinc-800/40">
       <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => patch({ paused_at: isPaused ? null : new Date().toISOString(), pause_reason: isPaused ? null : 'Manual pause from lab page' }, 'pause-toggle')}
-          disabled={busy !== null || isDisabled}
-          className={`text-[10px] px-2 py-1 rounded border transition-colors ${
-            isPaused
-              ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40'
-              : 'bg-amber-950/30 border-amber-800/40 text-amber-300 hover:bg-amber-900/40'
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-        >
-          {busy === 'pause-toggle' ? '…' : isPaused ? 'Resume' : 'Pause'}
-        </button>
+        {isPaused ? (
+          <button
+            onClick={resume}
+            disabled={busy !== null || isDisabled}
+            className="text-[10px] px-2 py-1 rounded border bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={row.unpause_at ? `Auto-resumes at ${row.unpause_at}` : 'Indefinite pause'}
+          >
+            {busy === 'resume' ? '…' : `Resume${row.unpause_at ? ` (auto in ${timeAgo(row.unpause_at).replace(' ago', '').replace('-', '')})` : ''}`}
+          </button>
+        ) : (
+          pauseMenu ? (
+            <span className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-amber-400 mr-1">Pause for:</span>
+              {PAUSE_DURATIONS.map(d => (
+                <button
+                  key={d.label}
+                  onClick={() => pauseFor(d.label, d.ms)}
+                  disabled={busy !== null}
+                  className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-800/40 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50"
+                >
+                  {d.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setPauseMenu(false)}
+                disabled={busy !== null}
+                className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setPauseMenu(true)}
+              disabled={busy !== null || isDisabled}
+              className="text-[10px] px-2 py-1 rounded border bg-amber-950/30 border-amber-800/40 text-amber-300 hover:bg-amber-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Pause
+            </button>
+          )
+        )}
 
         <button
           onClick={() => patch({ enabled: !row.enabled }, 'enable-toggle')}

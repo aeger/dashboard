@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 // Writes to scheduled_activity. The control daemon picks up the change on
 // its next tick (~30s) and reconciles the native scheduler.
 
-const ALLOWED_FIELDS = new Set(['enabled', 'paused_at', 'pause_reason', 'description'])
+const ALLOWED_FIELDS = new Set(['enabled', 'paused_at', 'pause_reason', 'unpause_at', 'description'])
 
 export async function PATCH(
   req: NextRequest,
