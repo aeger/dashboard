@@ -1827,14 +1827,130 @@ function ScheduledActivityView() {
                   </div>
                 )}
 
-                <div className="text-[10px] text-zinc-600 italic">
-                  Phase 4 will add Run-now / Pause / Edit-schedule / Disable buttons here.
-                </div>
+                {/* Action buttons */}
+                <ScheduledActivityActions row={row} onChange={load} />
               </div>
             )}
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function ScheduledActivityActions({ row, onChange }: {
+  row: ScheduledActivityRow
+  onChange: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmRun, setConfirmRun] = useState(false)
+  const isPaused = !!row.paused_at
+  const isDisabled = !row.enabled
+  const canRunNow = row.kind !== 'agent_loop' && row.kind !== 'ccr_trigger'
+
+  async function patch(body: Record<string, unknown>, action: string) {
+    setBusy(action)
+    setError(null)
+    try {
+      const res = await fetch(`/api/scheduled-activity/${encodeURIComponent(row.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function runNow() {
+    setBusy('run-now')
+    setError(null)
+    try {
+      const res = await fetch(`/api/scheduled-activity/${encodeURIComponent(row.name)}/run-now`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setConfirmRun(false)
+      onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="pt-2 border-t border-zinc-800/40">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => patch({ paused_at: isPaused ? null : new Date().toISOString(), pause_reason: isPaused ? null : 'Manual pause from lab page' }, 'pause-toggle')}
+          disabled={busy !== null || isDisabled}
+          className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+            isPaused
+              ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40'
+              : 'bg-amber-950/30 border-amber-800/40 text-amber-300 hover:bg-amber-900/40'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        >
+          {busy === 'pause-toggle' ? '…' : isPaused ? 'Resume' : 'Pause'}
+        </button>
+
+        <button
+          onClick={() => patch({ enabled: !row.enabled }, 'enable-toggle')}
+          disabled={busy !== null}
+          className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+            isDisabled
+              ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40'
+              : 'bg-zinc-950/30 border-zinc-800/40 text-zinc-400 hover:bg-zinc-900/40'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        >
+          {busy === 'enable-toggle' ? '…' : isDisabled ? 'Enable' : 'Disable'}
+        </button>
+
+        {canRunNow && (
+          confirmRun ? (
+            <span className="flex items-center gap-1.5 text-[10px]">
+              <span className="text-amber-300">Run now?</span>
+              <button
+                onClick={runNow}
+                disabled={busy !== null}
+                className="px-2 py-1 rounded bg-blue-700/60 border border-blue-500/50 text-blue-100 hover:bg-blue-600/70 disabled:opacity-50"
+              >
+                {busy === 'run-now' ? '…' : 'Yes, run'}
+              </button>
+              <button
+                onClick={() => setConfirmRun(false)}
+                disabled={busy !== null}
+                className="px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:bg-zinc-700/60"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmRun(true)}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-blue-950/30 border border-blue-800/40 text-blue-300 hover:bg-blue-900/40 disabled:opacity-50"
+            >
+              Run now
+            </button>
+          )
+        )}
+
+        {error && (
+          <span className="text-[10px] text-red-400 ml-2">{error}</span>
+        )}
+
+        <span className="text-[10px] text-zinc-600 ml-auto italic">
+          Changes propagate to native scheduler within ~30s via control daemon.
+        </span>
+      </div>
     </div>
   )
 }
