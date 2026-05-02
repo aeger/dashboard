@@ -218,36 +218,47 @@ function PriorityBadge({ priority }: { priority: number }) {
 // ── Stats bar ─────────────────────────────────────────────────────────────────
 
 function StatsBar({ tasks }: { tasks: TaskItem[] }) {
-  const counts: Record<string, number> = {}
-  for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1
+  // Count tasks by (status, target) pair — review_needed with target=jeff counts as "Needs Jeff"
+  let jeffUrgent = 0
+  let review = 0
+  const statusCounts: Record<string, number> = {}
 
-  // Aggregate new + legacy
+  for (const t of tasks) {
+    statusCounts[t.status] = (statusCounts[t.status] ?? 0) + 1
+    if (t.status === 'pending_jeff_action') {
+      jeffUrgent++
+    } else if (t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+      jeffUrgent++
+    } else if (t.status === 'review_needed' && t.target && t.target !== 'jeff') {
+      review++
+    } else if (t.status === 'review_needed') {
+      review++
+    }
+  }
+
   const pills = [
-    { key: 'jeff_urgent', label: 'Needs Jeff', statuses: ['pending_jeff_action'], accent: '#f43f5e' },
-    { key: 'review',      label: 'Review',      statuses: ['review_needed'],       accent: '#fb923c' },
-    { key: 'running',     label: 'Running',     statuses: ['in_progress_agent', 'in_progress_jeff', 'claimed'], accent: '#60a5fa' },
-    { key: 'ready',       label: 'Ready',       statuses: ['ready', 'backlog', 'pending'],                      accent: '#a1a1aa' },
-    { key: 'blocked',     label: 'Blocked',     statuses: ['blocked'],             accent: '#fbbf24' },
-    { key: 'failed',      label: 'Failed',      statuses: ['failed', 'escalated'], accent: '#f87171' },
-    { key: 'done',        label: 'Done',        statuses: ['completed'],           accent: '#34d399' },
+    { key: 'jeff_urgent', label: 'Needs Jeff', count: jeffUrgent, accent: '#f43f5e' },
+    { key: 'review',      label: 'Review',      count: review, accent: '#fb923c' },
+    { key: 'running',     label: 'Running',     count: (statusCounts['in_progress_agent'] ?? 0) + (statusCounts['in_progress_jeff'] ?? 0) + (statusCounts['claimed'] ?? 0), accent: '#60a5fa' },
+    { key: 'ready',       label: 'Ready',       count: (statusCounts['ready'] ?? 0) + (statusCounts['backlog'] ?? 0) + (statusCounts['pending'] ?? 0), accent: '#a1a1aa' },
+    { key: 'blocked',     label: 'Blocked',     count: statusCounts['blocked'] ?? 0, accent: '#fbbf24' },
+    { key: 'failed',      label: 'Failed',      count: (statusCounts['failed'] ?? 0) + (statusCounts['escalated'] ?? 0), accent: '#f87171' },
+    { key: 'done',        label: 'Done',        count: statusCounts['completed'] ?? 0, accent: '#34d399' },
   ]
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {pills.map(({ key, label, statuses, accent }) => {
-        const n = statuses.reduce((sum, s) => sum + (counts[s] ?? 0), 0)
-        return (
-          <div
-            key={key}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
-            style={{ background: `${accent}14`, border: `1px solid ${accent}28`, color: n > 0 ? accent : '#52525b' }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: n > 0 ? accent : '#3f3f46' }} />
-            <span className="font-bold tabular-nums">{n}</span>
-            <span className="text-zinc-500">{label}</span>
-          </div>
-        )
-      })}
+      {pills.map(({ key, label, count: n, accent }) => (
+        <div
+          key={key}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+          style={{ background: `${accent}14`, border: `1px solid ${accent}28`, color: n > 0 ? accent : '#52525b' }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: n > 0 ? accent : '#3f3f46' }} />
+          <span className="font-bold tabular-nums">{n}</span>
+          <span className="text-zinc-500">{label}</span>
+        </div>
+      ))}
       <span className="text-xs text-zinc-600 ml-1">{tasks.length} total</span>
     </div>
   )
