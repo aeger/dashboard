@@ -278,7 +278,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
           </div>
 
           {update ? (
-            update.has_update ? (
+            update.has_update && update.user_status !== 'completed' ? (
               <div className="border-t border-zinc-700/50 pt-3 space-y-2">
                 {(update.current_version || update.latest_version) && (
                   <div className="flex items-center gap-2 text-xs">
@@ -359,6 +359,9 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500/60" />
                   Image up to date
                   {update.current_version && <span className="ml-1 font-mono">{update.current_version}</span>}
+                  {update.user_status === 'completed' && update.completed_at && (
+                    <span className="ml-1 text-green-500/70">· Updated {formatTimeAgo(update.completed_at)}</span>
+                  )}
                 </span>
               </div>
             )
@@ -554,7 +557,7 @@ export default function ContainerListExpanded() {
 
   const totalRunning = containers.filter((c) => c.state === 'running').length
   const totalStopped = containers.filter((c) => c.state !== 'running').length
-  const byRisk = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').reduce<Record<string, number>>((acc, u) => {
+  const byRisk = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed').reduce<Record<string, number>>((acc, u) => {
     const r = u.risk ?? 'unknown'
     acc[r] = (acc[r] ?? 0) + 1
     return acc
