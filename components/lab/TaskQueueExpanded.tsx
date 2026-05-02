@@ -51,91 +51,102 @@ const SECTIONS = [
   { key: 'cancelled',     label: 'Cancelled',     statuses: ['cancelled', 'expired'],         headerCls: 'text-zinc-600',    urgent: false },
 ]
 
+// Action shape — `target` is sent alongside `status` to keep ownership unambiguous.
+// poll_queue.py only claims tasks where target IN (claude-code, wren), so handing
+// a task back to the agent must clear target=jeff in the same operation.
+type ActionSpec = { label: string; status?: string; target?: string; special?: string; cls?: string }
+
+// Convenience: target for "agent takes over" buttons. claude-code is the canonical
+// poll_queue agent identity — it covers Wren on this host. Cowork-bound tasks already
+// have target='cowork' from upstream and shouldn't be rewritten here.
+const T_AGENT = 'claude-code'
+const T_JEFF  = 'jeff'
+
 // Actions available for each status
-const ACTIONS_FOR_STATUS: Record<string, Array<{ label: string; status?: string; special?: string; cls?: string }>> = {
+const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
   pending_jeff_action: [
-    { label: "I'll Handle It",            status: 'in_progress_jeff',  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Return to Agent Queue',     status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: "I'll Handle It",            status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Return to Agent Queue',     status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   review_needed: [
-    { label: 'Approve & Complete',        status: 'completed',         cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Send Back to Agent',        status: 'ready',             cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'Cancel',                    status: 'cancelled',         cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Approve & Complete',        status: 'completed',                          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Send Back to Agent',        status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   in_progress_jeff: [
-    { label: 'Hand Back to Agent Queue',  status: 'ready',             cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
-    { label: 'Mark Complete',             status: 'completed',         cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
-    { label: 'Flag for Review',           status: 'review_needed',     cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Block',                     status: 'blocked',           cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
+    { label: 'Hand Back to Agent Queue',  status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
+    { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Flag for Review',           status: 'review_needed',     target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Block',                     status: 'blocked',                            cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
   ],
   in_progress_agent: [
-    { label: 'Needs My Input',            status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Flag for Review',           status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Mark Complete',             status: 'completed',           cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: 'Needs My Input',            status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',           status: 'review_needed',       target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Mark Complete',             status: 'completed',                            cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
   ],
   ready: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'Queue for Agent',           status: 'ready',               cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'Queue for Agent',           status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
-    { label: '▶ Run Now',                 special: 'run',                cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
-    { label: 'Needs My Input First',      status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
+    { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   blocked: [
-    { label: 'Unblock → Back to Queue',   status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Cancel',                    status: 'cancelled',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Unblock → Back to Queue',   status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   completed: [
-    { label: 'Reopen',              status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Reopen',              status: 'ready',                                      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   cancelled: [
-    { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Restore to Ready',    status: 'ready',                target: T_AGENT,      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   failed: [
-    { label: 'Retry (Agent)',        status: 'ready',              cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
-    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',   cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
-    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Archive',              special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Retry (Agent)',        status: 'ready',               target: T_AGENT,     cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: 'I\'ll Fix It (Jeff)', status: 'in_progress_jeff',    target: T_JEFF,      cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', target: T_JEFF,      cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Archive',              special: 'archive',                                  cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   escalated: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Retry → Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Needs My Action',     status: 'pending_jeff_action',  target: T_JEFF,      cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Retry → Ready',       status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   claimed: [
-    { label: 'Needs My Input',       status: 'pending_jeff_action', cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
-    { label: 'Flag for Review',      status: 'review_needed',       cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Needs My Input',       status: 'pending_jeff_action', target: T_JEFF,      cls: 'bg-rose-900/60 hover:bg-rose-800/80 text-rose-300' },
+    { label: 'Flag for Review',      status: 'review_needed',       target: T_JEFF,      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'I\'ll Take Over',      status: 'in_progress_jeff',    target: T_JEFF,      cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
   ],
   delegated: [
-    { label: 'Needs My Action',     status: 'pending_jeff_action', cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
-    { label: 'Move to Ready',       status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Needs My Action',     status: 'pending_jeff_action',  target: T_JEFF,      cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Move to Ready',       status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   pending_eval: [
-    { label: 'Approve & Complete',  status: 'completed',          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
-    { label: 'Split into Subtasks', special: 'split',             cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
-    { label: 'Review Needed',       status: 'review_needed',      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
-    { label: 'Send Back to Agent',  status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Approve & Complete',  status: 'completed',                                  cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
+    { label: 'Split into Subtasks', special: 'split',                                     cls: 'bg-indigo-900/60 hover:bg-indigo-800/80 text-indigo-300' },
+    { label: 'Review Needed',       status: 'review_needed',        target: T_JEFF,      cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: 'Send Back to Agent',  status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
   ],
   expired: [
-    { label: 'Restore to Ready',    status: 'ready',              cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
-    { label: 'Archive',             special: 'archive',           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+    { label: 'Restore to Ready',    status: 'ready',                target: T_AGENT,     cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
+    { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
 }
 
@@ -166,7 +177,25 @@ function getStatusColor(status: string) {
 }
 
 const isRunning = (s: string) => ['claimed', 'in_progress_agent', 'in_progress_jeff'].includes(s)
-const isJeffUrgent = (s: string) => ['pending_jeff_action', 'review_needed'].includes(s)
+// "Jeff urgent" = something Jeff specifically needs to look at right now.
+// Status alone isn't enough — review_needed with target=agent means "Jeff
+// already kicked it back, agent should be retrying", which shouldn't light
+// up the rose pillbox. Consider it urgent only when target is jeff (or
+// missing — older rows pre-fix).
+function isJeffUrgent(task: { status: string; target?: string | null }): boolean {
+  if (!['pending_jeff_action', 'review_needed'].includes(task.status)) return false
+  // null/undefined target = legacy row, treat as urgent so it doesn't get
+  // silently buried; non-jeff target = explicitly assigned to an agent
+  return !task.target || task.target === 'jeff'
+}
+
+// "With agent" = task is in a normally-Jeff-urgent status but ownership has
+// been handed back to an agent. Distinct visual treatment so Jeff can see
+// "this isn't on me, the agent owns it" at a glance.
+function isWithAgent(task: { status: string; target?: string | null }): boolean {
+  if (!['pending_jeff_action', 'review_needed'].includes(task.status)) return false
+  return !!task.target && task.target !== 'jeff'
+}
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
@@ -189,36 +218,47 @@ function PriorityBadge({ priority }: { priority: number }) {
 // ── Stats bar ─────────────────────────────────────────────────────────────────
 
 function StatsBar({ tasks }: { tasks: TaskItem[] }) {
-  const counts: Record<string, number> = {}
-  for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1
+  // Count tasks by (status, target) pair — review_needed with target=jeff counts as "Needs Jeff"
+  let jeffUrgent = 0
+  let review = 0
+  const statusCounts: Record<string, number> = {}
 
-  // Aggregate new + legacy
+  for (const t of tasks) {
+    statusCounts[t.status] = (statusCounts[t.status] ?? 0) + 1
+    if (t.status === 'pending_jeff_action') {
+      jeffUrgent++
+    } else if (t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+      jeffUrgent++
+    } else if (t.status === 'review_needed' && t.target && t.target !== 'jeff') {
+      review++
+    } else if (t.status === 'review_needed') {
+      review++
+    }
+  }
+
   const pills = [
-    { key: 'jeff_urgent', label: 'Needs Jeff', statuses: ['pending_jeff_action'], accent: '#f43f5e' },
-    { key: 'review',      label: 'Review',      statuses: ['review_needed'],       accent: '#fb923c' },
-    { key: 'running',     label: 'Running',     statuses: ['in_progress_agent', 'in_progress_jeff', 'claimed'], accent: '#60a5fa' },
-    { key: 'ready',       label: 'Ready',       statuses: ['ready', 'backlog', 'pending'],                      accent: '#a1a1aa' },
-    { key: 'blocked',     label: 'Blocked',     statuses: ['blocked'],             accent: '#fbbf24' },
-    { key: 'failed',      label: 'Failed',      statuses: ['failed', 'escalated'], accent: '#f87171' },
-    { key: 'done',        label: 'Done',        statuses: ['completed'],           accent: '#34d399' },
+    { key: 'jeff_urgent', label: 'Needs Jeff', count: jeffUrgent, accent: '#f43f5e' },
+    { key: 'review',      label: 'Review',      count: review, accent: '#fb923c' },
+    { key: 'running',     label: 'Running',     count: (statusCounts['in_progress_agent'] ?? 0) + (statusCounts['in_progress_jeff'] ?? 0) + (statusCounts['claimed'] ?? 0), accent: '#60a5fa' },
+    { key: 'ready',       label: 'Ready',       count: (statusCounts['ready'] ?? 0) + (statusCounts['backlog'] ?? 0) + (statusCounts['pending'] ?? 0), accent: '#a1a1aa' },
+    { key: 'blocked',     label: 'Blocked',     count: statusCounts['blocked'] ?? 0, accent: '#fbbf24' },
+    { key: 'failed',      label: 'Failed',      count: (statusCounts['failed'] ?? 0) + (statusCounts['escalated'] ?? 0), accent: '#f87171' },
+    { key: 'done',        label: 'Done',        count: statusCounts['completed'] ?? 0, accent: '#34d399' },
   ]
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {pills.map(({ key, label, statuses, accent }) => {
-        const n = statuses.reduce((sum, s) => sum + (counts[s] ?? 0), 0)
-        return (
-          <div
-            key={key}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
-            style={{ background: `${accent}14`, border: `1px solid ${accent}28`, color: n > 0 ? accent : '#52525b' }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: n > 0 ? accent : '#3f3f46' }} />
-            <span className="font-bold tabular-nums">{n}</span>
-            <span className="text-zinc-500">{label}</span>
-          </div>
-        )
-      })}
+      {pills.map(({ key, label, count: n, accent }) => (
+        <div
+          key={key}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+          style={{ background: `${accent}14`, border: `1px solid ${accent}28`, color: n > 0 ? accent : '#52525b' }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: n > 0 ? accent : '#3f3f46' }} />
+          <span className="font-bold tabular-nums">{n}</span>
+          <span className="text-zinc-500">{label}</span>
+        </div>
+      ))}
       <span className="text-xs text-zinc-600 ml-1">{tasks.length} total</span>
     </div>
   )
@@ -624,7 +664,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   const ctx = task.context ?? {}
   const checklist: ChecklistItem[] = Array.isArray(ctx.checklist) ? ctx.checklist as ChecklistItem[] : []
 
-  async function doAction(action: { label: string; status?: string; special?: string }) {
+  async function doAction(action: ActionSpec) {
     if (action.special === 'split') {
       setShowSplitModal(true)
       return
@@ -644,14 +684,21 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         if (res.ok) { onRefresh() }
         else setActionError(data.error ?? 'Failed to trigger poller')
       } else if (action.status) {
+        const body: Record<string, unknown> = {
+          status: action.status,
+          jeff_notes: jeffNotes,
+          context_summary: contextSummary,
+        }
+        // Send explicit target so ownership is unambiguous after the transition.
+        // Don't override target=cowork (upstream-driven). For everything else, the
+        // action spec's target is the source of truth.
+        if (action.target && task.target !== 'cowork') {
+          body.target = action.target
+        }
         const res = await fetch(`/api/taskqueue/${task.id}/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: action.status,
-            jeff_notes: jeffNotes,
-            context_summary: contextSummary,
-          }),
+          body: JSON.stringify(body),
         })
         const data = await res.json()
         if (res.ok && data.task) {
@@ -731,7 +778,7 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <StatusBadge status={task.status} />
             <PriorityBadge priority={task.priority} />
-            {isJeffUrgent(task.status) && (
+            {isJeffUrgent(task) && (
               <span className="text-[10px] bg-rose-900/40 text-rose-300 px-1.5 py-0.5 rounded animate-pulse">
                 ⚡ Needs You
               </span>
@@ -1093,7 +1140,7 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
   onNeedsAction?: (t: TaskItem) => void
 }) {
   const c = getStatusColor(task.status)
-  const urgent = isJeffUrgent(task.status)
+  const urgent = isJeffUrgent(task)
   const running = isRunning(task.status)
   const showNeedsAction = onNeedsAction && ['in_progress_agent', 'claimed', 'failed', 'escalated', 'waiting', 'delegated', 'pending_eval'].includes(task.status)
 
@@ -1128,6 +1175,14 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
         <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
+          {isWithAgent(task) && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded border bg-blue-950/40 border-blue-800/40 text-blue-300"
+              title={`Status is ${task.status} but ownership is with ${task.target} — agent should be working on it, not Jeff`}
+            >
+              ↩ with {task.target}
+            </span>
+          )}
           {task.source && task.target && (
             <span className="text-[10px] text-zinc-600">{task.source} → {task.target}</span>
           )}
@@ -1557,6 +1612,536 @@ function ScheduleEditor({
           placeholder="e.g. 0 9 * * 1  (Mon 9am UTC)"
           className={`${inputCls} font-mono`}
         />
+      )}
+    </div>
+  )
+}
+
+// ── Unified Scheduled Activity view (Phase 2) ─────────────────────────────────
+// Reads from /api/scheduled-activity (which queries the scheduled_activity
+// registry seeded by scripts/scheduled_activity_seed.py). Surfaces every
+// scheduler in az-lab — systemd timers, cron, CCR triggers, agent loops,
+// task_queue recurring rows — in one view.
+
+interface ScheduledActivityRow {
+  id: string
+  name: string
+  display_name: string | null
+  description: string | null
+  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring'
+  schedule: string
+  schedule_tz: string
+  enabled: boolean
+  paused_at: string | null
+  unpause_at: string | null
+  pause_reason: string | null
+  source_ref: Record<string, unknown>
+  last_run_at: string | null
+  last_status: string | null
+  last_result_summary: string | null
+  next_run_at: string | null
+  run_count: number
+  runs: Array<{ run_at: string; status?: string; result_summary?: string | null; duration_sec?: number | null; notes?: string | null }>
+  tags: string[]
+}
+
+const KIND_LABEL: Record<ScheduledActivityRow['kind'], { short: string; long: string; cls: string }> = {
+  systemd:              { short: 'systemd',  long: 'systemd timer',          cls: 'bg-blue-950/40 border-blue-800/40 text-blue-300' },
+  cron:                 { short: 'cron',     long: 'user crontab',           cls: 'bg-amber-950/30 border-amber-800/40 text-amber-300' },
+  ccr_trigger:          { short: 'ccr',      long: 'claude.ai trigger',      cls: 'bg-purple-950/30 border-purple-800/40 text-purple-300' },
+  agent_loop:           { short: 'agent',    long: 'always-on agent loop',   cls: 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300' },
+  task_queue_recurring: { short: 'task',     long: 'task_queue recurring',   cls: 'bg-cyan-950/30 border-cyan-800/40 text-cyan-300' },
+}
+
+const STATUS_DOT: Record<string, string> = {
+  success: 'bg-emerald-400',
+  failure: 'bg-red-400',
+  running: 'bg-blue-400 animate-pulse',
+  skipped: 'bg-zinc-500',
+  unknown: 'bg-zinc-600',
+}
+
+function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
+  const [rows, setRows] = useState<ScheduledActivityRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [kindFilter, setKindFilter] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+
+  const load = useCallback(() => {
+    fetch('/api/scheduled-activity')
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { setError(d.error); return }
+        setRows(d.activities ?? [])
+        setError(null)
+        if (onCount) onCount(d.total ?? (d.activities?.length ?? 0))
+      })
+      .catch(e => setError(e instanceof Error ? e.message : 'fetch failed'))
+      .finally(() => setLoading(false))
+  }, [onCount])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
+  }, [load])
+
+  const filtered = rows.filter(r => {
+    if (kindFilter && r.kind !== kindFilter) return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!r.name.toLowerCase().includes(q) &&
+          !(r.display_name ?? '').toLowerCase().includes(q) &&
+          !(r.description ?? '').toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+
+  const kindCounts: Record<string, number> = {}
+  for (const r of rows) kindCounts[r.kind] = (kindCounts[r.kind] ?? 0) + 1
+
+  if (loading && rows.length === 0) {
+    return <div className="text-zinc-600 text-sm text-center py-16">Loading scheduled activity…</div>
+  }
+  if (error) {
+    return <div className="text-red-400 text-sm text-center py-16">Error: {error}</div>
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="text-zinc-600 text-sm text-center py-16">
+        <div className="text-2xl mb-2">⏱</div>
+        Nothing in <code className="text-zinc-400">scheduled_activity</code> yet.
+        Run <code className="text-zinc-400">azlab/scripts/scheduled_activity_seed.py</code> to populate.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 pr-1 overflow-y-auto">
+      {/* Kind filter chips */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setKindFilter(null)}
+          className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+            !kindFilter
+              ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
+              : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
+          }`}
+        >
+          All ({rows.length})
+        </button>
+        {(Object.keys(KIND_LABEL) as ScheduledActivityRow['kind'][]).map(k => {
+          const count = kindCounts[k] ?? 0
+          if (count === 0) return null
+          const isActive = kindFilter === k
+          return (
+            <button
+              key={k}
+              onClick={() => setKindFilter(isActive ? null : k)}
+              className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
+                isActive
+                  ? KIND_LABEL[k].cls + ' ring-1 ring-current'
+                  : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
+              }`}
+            >
+              {KIND_LABEL[k].short} ({count})
+            </button>
+          )
+        })}
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="search…"
+          className="ml-auto text-xs px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-zinc-600 text-xs text-center py-8 italic">No matches.</div>
+      ) : filtered.map(row => {
+        const kindCfg = KIND_LABEL[row.kind]
+        const expanded = expandedId === row.id
+        const statusDot = STATUS_DOT[row.last_status ?? 'unknown'] ?? STATUS_DOT.unknown
+        const sourceTitle = row.display_name ?? row.name
+
+        return (
+          <div
+            key={row.id}
+            className={`rounded-lg border p-3 transition-colors ${
+              !row.enabled
+                ? 'border-zinc-800/40 bg-zinc-950/30 opacity-60'
+                : row.paused_at
+                ? 'border-amber-900/40 bg-amber-950/10'
+                : 'border-zinc-800/60 bg-zinc-900/30 hover:border-zinc-700/60'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setExpandedId(expanded ? null : row.id)}
+              className="w-full text-left"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot}`}
+                          title={row.last_status ?? 'no runs recorded'} />
+                    <span className="text-xs text-zinc-200 font-medium truncate">{sourceTitle}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${kindCfg.cls}`}>
+                      {kindCfg.short}
+                    </span>
+                    {!row.enabled && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 uppercase">disabled</span>
+                    )}
+                    {row.paused_at && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300 uppercase">paused</span>
+                    )}
+                    {row.run_count > 0 && (
+                      <span className="text-[10px] text-zinc-600">×{row.run_count}</span>
+                    )}
+                  </div>
+                  <div className="ml-3.5 flex items-center gap-3 text-[11px] text-zinc-500 flex-wrap">
+                    <span className="px-2 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/40 text-cyan-300 font-mono text-[10px]">
+                      ⏱ {row.schedule}
+                    </span>
+                    {row.last_run_at && (
+                      <span title={row.last_run_at}>
+                        last <span className="text-zinc-300">{timeAgo(row.last_run_at)}</span>
+                      </span>
+                    )}
+                    {row.next_run_at && (
+                      <span title={row.next_run_at} className="text-blue-400/80">
+                        next {timeAgo(row.next_run_at).replace(' ago', ' from now').replace('-', '')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="text-zinc-600 text-xs">{expanded ? '▾' : '▸'}</span>
+              </div>
+            </button>
+
+            {expanded && (
+              <div className="mt-3 ml-3.5 space-y-2 text-xs">
+                {row.description && (
+                  <p className="text-zinc-400 leading-relaxed">{row.description}</p>
+                )}
+
+                {/* source_ref — points at native config */}
+                <div>
+                  <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">
+                    Source ({kindCfg.long})
+                  </div>
+                  <div className="rounded bg-zinc-950/50 border border-zinc-800/40 p-2 font-mono text-[10px] text-zinc-400">
+                    {Object.entries(row.source_ref).map(([k, v]) => (
+                      <div key={k}>
+                        <span className="text-zinc-600">{k}</span>: {String(v)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* last result */}
+                {row.last_result_summary && (
+                  <div>
+                    <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Last result</div>
+                    <div className="rounded bg-zinc-950/50 border border-zinc-800/40 p-2 text-zinc-400 leading-relaxed">
+                      {row.last_result_summary.length > 600
+                        ? row.last_result_summary.slice(0, 600) + '…'
+                        : row.last_result_summary}
+                    </div>
+                  </div>
+                )}
+
+                {/* runs[] history */}
+                {row.runs && row.runs.length > 0 && (
+                  <div>
+                    <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">
+                      Run history ({row.runs.length})
+                    </div>
+                    <div className="space-y-1 max-h-60 overflow-y-auto">
+                      {[...row.runs].reverse().slice(0, 12).map((r, idx) => {
+                        const dot = STATUS_DOT[r.status ?? 'unknown'] ?? STATUS_DOT.unknown
+                        return (
+                          <div key={idx} className="flex items-start gap-2 text-[11px] py-1 border-b border-zinc-800/30 last:border-b-0">
+                            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${dot}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 text-zinc-500 text-[10px]">
+                                <span title={r.run_at}>{timeAgo(r.run_at)}</span>
+                                {r.status && <span className="uppercase tracking-wider">{r.status}</span>}
+                                {r.duration_sec != null && <span>{r.duration_sec.toFixed(1)}s</span>}
+                              </div>
+                              {r.result_summary && (
+                                <div className="text-zinc-400 mt-0.5">
+                                  {r.result_summary.length > 120 ? r.result_summary.slice(0, 120) + '…' : r.result_summary}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <ScheduledActivityActions row={row} onChange={load} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ScheduledActivityActions({ row, onChange }: {
+  row: ScheduledActivityRow
+  onChange: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmRun, setConfirmRun] = useState(false)
+  const [pauseMenu, setPauseMenu] = useState(false)
+  const isPaused = !!row.paused_at
+  const isDisabled = !row.enabled
+  const canRunNow = row.kind !== 'agent_loop' && row.kind !== 'ccr_trigger'
+
+  async function patch(body: Record<string, unknown>, action: string) {
+    setBusy(action)
+    setError(null)
+    try {
+      const res = await fetch(`/api/scheduled-activity/${encodeURIComponent(row.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
+      onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function pauseFor(durationLabel: string, durationMs: number | null) {
+    setPauseMenu(false)
+    const now = new Date()
+    const unpauseAt = durationMs === null ? null : new Date(now.getTime() + durationMs).toISOString()
+    await patch({
+      paused_at: now.toISOString(),
+      unpause_at: unpauseAt,
+      pause_reason: durationMs === null
+        ? 'Manual pause (indefinite)'
+        : `Manual pause until ${unpauseAt}`,
+    }, 'pause-' + durationLabel)
+  }
+
+  async function resume() {
+    await patch({ paused_at: null, unpause_at: null, pause_reason: null }, 'resume')
+  }
+
+  async function runNow() {
+    setBusy('run-now')
+    setError(null)
+    try {
+      const res = await fetch(`/api/scheduled-activity/${encodeURIComponent(row.name)}/run-now`, {
+        method: 'POST',
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`)
+      setConfirmRun(false)
+      onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // "until tomorrow" = next 8am local
+  const tomorrow8am = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setHours(8, 0, 0, 0)
+    return d.getTime() - Date.now()
+  })()
+
+  const PAUSE_DURATIONS: Array<{ label: string; ms: number | null }> = [
+    { label: '30m',          ms: 30 * 60 * 1000 },
+    { label: '1h',           ms: 60 * 60 * 1000 },
+    { label: '4h',           ms: 4 * 60 * 60 * 1000 },
+    { label: 'until tomorrow', ms: tomorrow8am },
+    { label: 'indefinitely', ms: null },
+  ]
+
+  // Schedule editor state
+  const [editingSchedule, setEditingSchedule] = useState(false)
+  const [scheduleDraft, setScheduleDraft] = useState(row.schedule)
+  const canEditSchedule =
+    row.kind === 'systemd' || row.kind === 'cron'  // ccr_trigger needs PAT, agent_loop & task_queue_recurring rejected by API
+
+  async function saveSchedule() {
+    await patch({ schedule: scheduleDraft.trim() }, 'edit-schedule')
+    if (!error) {
+      setEditingSchedule(false)
+    }
+  }
+
+  const SCHEDULE_HINT = (() => {
+    switch (row.kind) {
+      case 'systemd': return 'Use "oncalendar:<expr>" (e.g. "oncalendar:*-*-* 04:15:00 UTC") or "every:<duration>" (e.g. "every:5min"). Daemon writes a drop-in override + restarts the timer.'
+      case 'cron':    return 'Standard 5-field cron: <min> <hour> <dom> <mon> <dow>. Daemon rewrites the matching crontab line.'
+      case 'ccr_trigger': return 'Schedule editing for CCR triggers needs a claude.ai PAT — not yet wired. Edit the trigger in claude.ai for now.'
+      case 'agent_loop': return 'Agent-loop poll intervals are hardcoded. Edit POLL_INTERVAL in the service unit and restart it.'
+      case 'task_queue_recurring': return 'Schedule is upstream-driven by the cowork CCR trigger. Edit the trigger prompt on the cowork side.'
+      default: return ''
+    }
+  })()
+
+  return (
+    <div className="pt-2 border-t border-zinc-800/40">
+      <div className="flex items-center gap-2 flex-wrap">
+        {isPaused ? (
+          <button
+            onClick={resume}
+            disabled={busy !== null || isDisabled}
+            className="text-[10px] px-2 py-1 rounded border bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={row.unpause_at ? `Auto-resumes at ${row.unpause_at}` : 'Indefinite pause'}
+          >
+            {busy === 'resume' ? '…' : `Resume${row.unpause_at ? ` (auto in ${timeAgo(row.unpause_at).replace(' ago', '').replace('-', '')})` : ''}`}
+          </button>
+        ) : (
+          pauseMenu ? (
+            <span className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-amber-400 mr-1">Pause for:</span>
+              {PAUSE_DURATIONS.map(d => (
+                <button
+                  key={d.label}
+                  onClick={() => pauseFor(d.label, d.ms)}
+                  disabled={busy !== null}
+                  className="text-[10px] px-2 py-1 rounded bg-amber-950/30 border border-amber-800/40 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50"
+                >
+                  {d.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setPauseMenu(false)}
+                disabled={busy !== null}
+                className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setPauseMenu(true)}
+              disabled={busy !== null || isDisabled}
+              className="text-[10px] px-2 py-1 rounded border bg-amber-950/30 border-amber-800/40 text-amber-300 hover:bg-amber-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Pause
+            </button>
+          )
+        )}
+
+        <button
+          onClick={() => patch({ enabled: !row.enabled }, 'enable-toggle')}
+          disabled={busy !== null}
+          className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+            isDisabled
+              ? 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300 hover:bg-emerald-900/40'
+              : 'bg-zinc-950/30 border-zinc-800/40 text-zinc-400 hover:bg-zinc-900/40'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        >
+          {busy === 'enable-toggle' ? '…' : isDisabled ? 'Enable' : 'Disable'}
+        </button>
+
+        {canRunNow && (
+          confirmRun ? (
+            <span className="flex items-center gap-1.5 text-[10px]">
+              <span className="text-amber-300">Run now?</span>
+              <button
+                onClick={runNow}
+                disabled={busy !== null}
+                className="px-2 py-1 rounded bg-blue-700/60 border border-blue-500/50 text-blue-100 hover:bg-blue-600/70 disabled:opacity-50"
+              >
+                {busy === 'run-now' ? '…' : 'Yes, run'}
+              </button>
+              <button
+                onClick={() => setConfirmRun(false)}
+                disabled={busy !== null}
+                className="px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:bg-zinc-700/60"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmRun(true)}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-blue-950/30 border border-blue-800/40 text-blue-300 hover:bg-blue-900/40 disabled:opacity-50"
+            >
+              Run now
+            </button>
+          )
+        )}
+
+        {canEditSchedule && (
+          editingSchedule ? null : (
+            <button
+              onClick={() => { setScheduleDraft(row.schedule); setEditingSchedule(true) }}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-cyan-950/30 border border-cyan-800/40 text-cyan-300 hover:bg-cyan-900/40 disabled:opacity-50"
+            >
+              Edit schedule
+            </button>
+          )
+        )}
+
+        {error && (
+          <span className="text-[10px] text-red-400 ml-2">{error}</span>
+        )}
+
+        <span className="text-[10px] text-zinc-600 ml-auto italic">
+          Changes propagate to native scheduler within ~30s via control daemon.
+        </span>
+      </div>
+
+      {editingSchedule && (
+        <div className="mt-2 p-2 rounded border border-cyan-900/40 bg-cyan-950/10 space-y-2">
+          <div className="text-[10px] text-cyan-500/80 uppercase tracking-widest">
+            Edit schedule — {row.kind}
+          </div>
+          <div className="text-[10px] text-zinc-500">{SCHEDULE_HINT}</div>
+          <input
+            value={scheduleDraft}
+            onChange={e => setScheduleDraft(e.target.value)}
+            placeholder={row.schedule}
+            className="w-full px-2 py-1 rounded text-xs bg-zinc-800/60 border border-cyan-800/40 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500"
+            spellCheck={false}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={saveSchedule}
+              disabled={busy !== null || scheduleDraft.trim() === row.schedule.trim() || !scheduleDraft.trim()}
+              className="text-[10px] px-2 py-1 rounded bg-cyan-700/60 border border-cyan-500/50 text-cyan-100 hover:bg-cyan-600/70 disabled:opacity-50"
+            >
+              {busy === 'edit-schedule' ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => setEditingSchedule(false)}
+              disabled={busy !== null}
+              className="text-[10px] px-2 py-1 rounded bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 hover:bg-zinc-700/60"
+            >
+              Cancel
+            </button>
+            <span className="text-[10px] text-zinc-600 ml-auto italic">
+              Daemon applies the change to native config on next tick.
+            </span>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -2208,6 +2793,7 @@ export default function TaskQueueExpanded() {
   const [completedPage, setCompletedPage] = useState(0)
   const [viewTab, setViewTab] = useState<'list' | 'scheduled' | 'dependencies'>('list')
   const [dependencyModal, setDependencyModal] = useState<TaskItem | null>(null)
+  const [scheduledCount, setScheduledCount] = useState<number>(0)
 
   const load = useCallback((page?: number) => {
     const offset = (page ?? completedPage) * 25
@@ -2222,6 +2808,20 @@ export default function TaskQueueExpanded() {
     const id = setInterval(load, 30_000)
     return () => clearInterval(id)
   }, [load])
+
+  // Always fetch the scheduled-activity count so the tab badge stays accurate
+  // even when the user is on the list tab.
+  useEffect(() => {
+    const fetchCount = () => {
+      fetch('/api/scheduled-activity')
+        .then(r => r.json())
+        .then(d => { if (typeof d.total === 'number') setScheduledCount(d.total) })
+        .catch(() => {})
+    }
+    fetchCount()
+    const id = setInterval(fetchCount, 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const allTasks: TaskItem[] = data ? [
     ...(data.jeff_urgent ?? []),
@@ -2264,7 +2864,7 @@ export default function TaskQueueExpanded() {
     await fetch(`/api/taskqueue/${task.id}/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'pending_jeff_action' }),
+      body: JSON.stringify({ status: 'pending_jeff_action', target: 'jeff' }),
     }).catch(() => {})
     load()
   }
@@ -2335,9 +2935,9 @@ export default function TaskQueueExpanded() {
             }`}
           >
             ⏱ Scheduled
-            {(data?.scheduled?.length ?? 0) > 0 && (
+            {scheduledCount > 0 && (
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${viewTab === 'scheduled' ? 'bg-cyan-700/60 text-cyan-200' : 'bg-zinc-700/60 text-zinc-400'}`}>
-                {data!.scheduled!.length}
+                {scheduledCount}
               </span>
             )}
           </button>
@@ -2356,7 +2956,7 @@ export default function TaskQueueExpanded() {
         {/* Conditional view content */}
         {viewTab === 'scheduled' ? (
           <div className="flex-1 overflow-y-auto">
-            <ScheduledView tasks={data?.scheduled ?? []} onRefresh={() => load()} />
+            <ScheduledActivityView onCount={setScheduledCount} />
           </div>
         ) : viewTab === 'list' ? (
           <>

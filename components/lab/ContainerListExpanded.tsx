@@ -104,7 +104,7 @@ function RiskBadge({ update }: { update: UpdateInfo }) {
       : 0
     return <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/50 text-zinc-500 font-medium">SKIPPED{daysLeft > 0 ? ` ${daysLeft}d` : ''}</span>
   }
-  if (status === 'auto_approved') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">AUTO 3AM</span>
+  if (status === 'auto_approved') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium" title="Auto-applies during 03:00–04:00 UTC maintenance window">AUTO</span>
   if (status === 'requested' || status === 'in_progress') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-medium animate-pulse">UPDATING</span>
   if (status === 'scheduled') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-600/50 text-zinc-300 font-medium">SCHEDULED</span>
   if (status === 'ignored') return null
@@ -278,7 +278,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
           </div>
 
           {update ? (
-            update.has_update ? (
+            update.has_update && update.user_status !== 'completed' ? (
               <div className="border-t border-zinc-700/50 pt-3 space-y-2">
                 {(update.current_version || update.latest_version) && (
                   <div className="flex items-center gap-2 text-xs">
@@ -315,21 +315,24 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                 {update.user_status === 'requested' && (
                   <p className="text-xs text-blue-400 animate-pulse">Update queued — processing shortly</p>
                 )}
-                {update.user_status === 'scheduled' && update.scheduled_time && (
-                  <p className="text-xs text-zinc-400">Scheduled for {new Date(update.scheduled_time).toLocaleString()}</p>
-                )}
+                {update.user_status === 'scheduled' && update.scheduled_time && (() => {
+                  const d = new Date(update.scheduled_time)
+                  const local = d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+                  const utc   = d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
+                  return <p className="text-xs text-zinc-400" title={`${utc} UTC`}>Scheduled for {local}</p>
+                })()}
                 {update.user_status === 'skipped' && update.skip_reassess_at && (
                   <p className="text-xs text-zinc-500">Skipped — reassess {new Date(update.skip_reassess_at).toLocaleDateString()}</p>
                 )}
                 <div className="flex gap-2 pt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                   {['pending_review', 'failed', 'notified'].includes(update.user_status) && (<>
                     <button onClick={() => onUpdateAction(c.name, 'update_now')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors">Update Now</button>
-                    <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule 3 AM</button>
+                    <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} title="Apply during nightly maintenance window (03:00–04:00 UTC)" className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule overnight</button>
                     <button onClick={() => onUpdateAction(c.name, 'skip')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors">Skip 30d</button>
                     <button onClick={() => onUpdateAction(c.name, 'ignore')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-600 hover:text-zinc-400 disabled:opacity-50 transition-colors">Ignore</button>
                   </>)}
                   {update.user_status === 'auto_approved' && (<>
-                    <span className="text-xs text-blue-400 self-center">Auto-updating at 3:47 AM</span>
+                    <span className="text-xs text-blue-400 self-center" title="03:47 UTC = 8:47 PM MST / 11:47 PM EST">Auto-updates overnight (03:47 UTC)</span>
                     <button onClick={() => onUpdateAction(c.name, 'update_now')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Update Now</button>
                     <button onClick={() => onUpdateAction(c.name, 'skip')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors">Skip</button>
                   </>)}
@@ -339,7 +342,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                   </>)}
                   {update.user_status === 'skipped' && (<>
                     <button onClick={() => onUpdateAction(c.name, 'update_now')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 transition-colors">Update Now</button>
-                    <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule 3 AM</button>
+                    <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} title="Apply during nightly maintenance window (03:00–04:00 UTC)" className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule overnight</button>
                   </>)}
                   {update.user_status === 'ignored' && (
                     <button onClick={() => onUpdateAction(c.name, 'unignore')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Unignore</button>
@@ -356,6 +359,9 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500/60" />
                   Image up to date
                   {update.current_version && <span className="ml-1 font-mono">{update.current_version}</span>}
+                  {update.user_status === 'completed' && update.completed_at && (
+                    <span className="ml-1 text-green-500/70">· Updated {formatTimeAgo(update.completed_at)}</span>
+                  )}
                 </span>
               </div>
             )
@@ -551,7 +557,7 @@ export default function ContainerListExpanded() {
 
   const totalRunning = containers.filter((c) => c.state === 'running').length
   const totalStopped = containers.filter((c) => c.state !== 'running').length
-  const byRisk = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored').reduce<Record<string, number>>((acc, u) => {
+  const byRisk = updates.containers.filter((u) => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed').reduce<Record<string, number>>((acc, u) => {
     const r = u.risk ?? 'unknown'
     acc[r] = (acc[r] ?? 0) + 1
     return acc

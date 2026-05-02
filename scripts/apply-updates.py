@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 UPDATES_FILE = Path('/home/almty1/azlab/services/dashboard/data/updates.json')
@@ -60,27 +60,51 @@ def discord(msg: str) -> None:
 
 
 def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str | None]:
-    """Pull + restart. Returns (success, old_digest, new_digest, error)."""
+    """Pull + recreate via podman-compose. `podman restart` keeps the old image
+    binding, so a true update requires recreating the container.
+    Returns (success, old_digest, new_digest, error)."""
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
                        capture_output=True, text=True)
     old_digest = (r.stdout.strip() or 'unknown')[:16]
 
-    r = subprocess.run(['podman', 'pull', '--quiet', image],
-                       capture_output=True, text=True, timeout=300)
+    r = subprocess.run(['podman', 'inspect', container, '--format', '{{json .Config.Labels}}'],
+                       capture_output=True, text=True)
     if r.returncode != 0:
-        return False, old_digest, None, f'Pull failed: {r.stderr.strip()}'
-    new_digest = (r.stdout.strip() or '')[:16]
+        return False, old_digest, None, f'Inspect failed: {r.stderr.strip()}'
+    try:
+        labels = json.loads(r.stdout) or {}
+    except json.JSONDecodeError as e:
+        return False, old_digest, None, f'Could not parse labels: {e}'
 
-    r = subprocess.run(['podman', 'restart', container],
-                       capture_output=True, text=True, timeout=60)
+    working_dir = labels.get('com.docker.compose.project.working_dir')
+    service     = labels.get('com.docker.compose.service')
+    if not working_dir or not service:
+        return False, old_digest, None, 'Container missing compose labels — cannot recreate'
+
+    r = subprocess.run(['podman-compose', 'pull', service],
+                       capture_output=True, text=True, timeout=300, cwd=working_dir)
     if r.returncode != 0:
-        return False, old_digest, new_digest, f'Restart failed: {r.stderr.strip()}'
+        return False, old_digest, None, f'Pull failed: {(r.stderr or r.stdout).strip()[:300]}'
+
+    r = subprocess.run(
+        ['podman-compose', 'up', '-d', '--no-deps', '--force-recreate', service],
+        capture_output=True, text=True, timeout=180, cwd=working_dir,
+    )
+    if r.returncode != 0:
+        return False, old_digest, None, f'Recreate failed: {(r.stderr or r.stdout).strip()[:300]}'
+
+    r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
+                       capture_output=True, text=True)
+    new_digest = (r.stdout.strip() or 'unknown')[:16] if r.returncode == 0 else None
 
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.State.Status}}'],
                        capture_output=True, text=True)
     status = r.stdout.strip() if r.returncode == 0 else 'unknown'
     if status != 'running':
         return False, old_digest, new_digest, f'Container not running after update (status: {status})'
+
+    if new_digest and new_digest == old_digest:
+        return False, old_digest, new_digest, 'Image digest unchanged after recreate — pull may have hit cached tag'
 
     return True, old_digest, new_digest, None
 
@@ -148,6 +172,49 @@ def main() -> None:
                 discord(f'❌ **Update failed** — `{name}`\nError: {err}')
             continue
 
+        # "Schedule overnight" — user explicitly approved, apply during the
+        # maintenance window regardless of risk (the schedule click IS the
+        # approval). Without this branch, scheduled containers with
+        # risk=minor/unknown fall through to the notify branch below and
+        # silently get reset to status=notified, so the schedule never fires.
+        if user_status == 'scheduled':
+            sched_str = state.get('scheduled_time')
+            sched_ready = True
+            if sched_str:
+                try:
+                    sched_dt = datetime.fromisoformat(sched_str.replace('Z', '+00:00'))
+                    sched_ready = utcnow() >= sched_dt - timedelta(minutes=15)
+                except ValueError:
+                    pass
+            if not (in_window and sched_ready):
+                print(f'  {name}: scheduled, waiting (window={in_window}, ready={sched_ready})')
+                continue
+            print(f'  {name}: applying scheduled update...', flush=True)
+            start  = utcnow()
+            ok, old_d, new_d, err = apply_update(name, image)
+            elapsed = (utcnow() - start).total_seconds()
+            state_data['containers'][name] = {
+                **state,
+                'status':      'completed' if ok else 'failed',
+                'started_at':  start.isoformat(),
+                **({'completed_at': utcnow().isoformat()} if ok else {'failed_at': utcnow().isoformat()}),
+                'last_result': {
+                    'success':          ok,
+                    'old_digest':       old_d,
+                    'new_digest':       new_d,
+                    'duration_seconds': round(elapsed, 1),
+                    'error':            err,
+                },
+            }
+            if ok:
+                print(f'    ✓ done in {elapsed:.1f}s')
+                applied.append(name)
+                discord(f'✅ **Updated** `{name}` (scheduled)\nDuration: {elapsed:.1f}s')
+            else:
+                print(f'    ✗ failed: {err}')
+                discord(f'❌ **Scheduled update failed** — `{name}`\nError: {err}')
+            continue
+
         # Major: skip — dashboard "Flag for Wren" button handles these
         if risk == 'major':
             print(f'  {name}: major risk, skipping (use Flag for Wren)')
@@ -170,9 +237,9 @@ def main() -> None:
             notified.append(name)
             continue
 
-        # Patch / rebuild: auto-apply during window (or if explicitly scheduled)
+        # Patch / rebuild: auto-apply during window
         if risk_within_threshold(risk, threshold):
-            if in_window or user_status == 'scheduled':
+            if in_window:
                 print(f'  {name}: applying {risk} update...', flush=True)
                 start   = utcnow()
                 ok, old_d, new_d, err = apply_update(name, image)
@@ -204,6 +271,16 @@ def main() -> None:
             print(f'  {name}: risk {risk} exceeds threshold {threshold}, skipping')
 
     STATE_FILE.write_text(json.dumps(state_data, indent=2) + '\n')
+
+    # Mark applied containers as has_update=false in updates.json so the UI
+    # stops counting them in the "needs update" totals immediately, instead of
+    # waiting for the next daily check-updates run to refresh the snapshot.
+    if applied:
+        applied_set = set(applied)
+        for c in updates_data.get('containers', []):
+            if c.get('name') in applied_set:
+                c['has_update'] = False
+        UPDATES_FILE.write_text(json.dumps(updates_data, indent=2) + '\n')
 
     if applied:
         discord(

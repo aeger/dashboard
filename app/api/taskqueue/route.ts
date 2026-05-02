@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
       // Completed: paginated by updated_at
       fetch(`${base}?select=${SELECT}&status=eq.completed&order=updated_at.desc&limit=${COMPLETED_PAGE_SIZE}&offset=${completedOffset}`, opts),
       // Last 24h for summary
-      fetch(`${base}?select=status&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
+      fetch(`${base}?select=status,target&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
       // Total completed count for pagination
       fetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
       // Scheduled: canonical recurring rows (recurring=true, post-migration 031),
@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
     ])
 
     const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw]: [
-      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string }>, TaskItem[]
+      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string; target: string | null }>, TaskItem[]
     ] = await Promise.all([
       jeffUrgentRes.ok ? jeffUrgentRes.json() : [],
       problemsRes.ok ? problemsRes.json() : [],
@@ -138,9 +138,19 @@ export async function GET(req: NextRequest) {
     ])
     const completedTotal = parseInt(completedCountRes.headers.get('content-range')?.split('/')[1] ?? '0', 10) || 0
 
+    // Synthetic summary keys: split review_needed into needs-jeff vs with-agent based
+    // on target — keeps the pillbox counter aligned with the in-row "↩ with X" badge.
+    // pending_jeff_action always counts toward needs_jeff regardless of target.
     const summary24h: Record<string, number> = {}
-    for (const { status } of summary24hRaw) {
+    for (const { status, target } of summary24hRaw) {
       summary24h[status] = (summary24h[status] ?? 0) + 1
+      const withAgent = target && target !== 'jeff'
+      if (status === 'pending_jeff_action' || (status === 'review_needed' && !withAgent)) {
+        summary24h['needs_jeff'] = (summary24h['needs_jeff'] ?? 0) + 1
+      }
+      if (status === 'review_needed' && withAgent) {
+        summary24h['with_agent'] = (summary24h['with_agent'] ?? 0) + 1
+      }
     }
 
     // Merge jeff_urgent into problems for the "problems" bucket (displayed together)

@@ -278,8 +278,8 @@ function RecentRow({ task }: { task: TaskItem }) {
 function SummaryBar({ summary }: { summary: Record<string, number> }) {
   const items = [
     { key: 'completed',           label: 'done',       cls: 'text-green-400' },
-    { key: 'pending_jeff_action', label: 'needs jeff', cls: 'text-rose-400' },
-    { key: 'review_needed',       label: 'review',     cls: 'text-orange-400' },
+    { key: 'needs_jeff',          label: 'needs jeff', cls: 'text-rose-400' },
+    { key: 'with_agent',          label: 'with agent', cls: 'text-blue-400' },
     { key: 'failed',              label: 'failed',     cls: 'text-red-400' },
     { key: 'escalated',           label: 'escalated',  cls: 'text-orange-400' },
     { key: 'claimed',             label: 'active',     cls: 'text-blue-400' },
@@ -289,7 +289,11 @@ function SummaryBar({ summary }: { summary: Record<string, number> }) {
     { key: 'pending',             label: 'pending',    cls: 'text-zinc-400' },
     { key: 'ready',               label: 'ready',      cls: 'text-zinc-400' },
   ]
-  const total = Object.values(summary).reduce((s, v) => s + v, 0)
+  // Synthetic needs_jeff/with_agent already cover pending_jeff_action + review_needed,
+  // so the raw status counts would double-count if added to the total.
+  const total = Object.entries(summary)
+    .filter(([k]) => k !== 'pending_jeff_action' && k !== 'review_needed')
+    .reduce((s, [, v]) => s + v, 0)
 
   return (
     <div className="flex items-center gap-3 px-2 py-1.5 bg-zinc-800/30 rounded-lg text-[11px] flex-wrap">
