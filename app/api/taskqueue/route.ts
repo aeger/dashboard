@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { supaFetch } from '@/lib/supabase-fetch'
 
 export interface ChecklistItem {
   id: string
@@ -62,6 +63,7 @@ export interface TaskQueueData {
   active: TaskItem[]
   recent: TaskItem[]
   completed: TaskItem[]
+  paused: TaskItem[]
   scheduled: TaskItem[]
   summary24h: Record<string, number>
 }
@@ -100,32 +102,34 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes, scheduledRes] = await Promise.all([
+    const [jeffUrgentRes, problemsRes, waitingRes, activeRes, recentRes, completedRes, summary24hRes, completedCountRes, scheduledRes, pausedRes] = await Promise.all([
       // Jeff urgent: pending_jeff_action and review_needed — highest priority
-      fetch(`${base}?select=${SELECT}&${inFilter(JEFF_URGENT)}&order=updated_at.desc&limit=20`, opts),
+      supaFetch(`${base}?select=${SELECT}&${inFilter(JEFF_URGENT)}&order=updated_at.desc&limit=20`, opts),
       // Problems: failed or escalated
-      fetch(`${base}?select=${SELECT}&${inFilter(PROBLEM)}&order=updated_at.desc&limit=20`, opts),
+      supaFetch(`${base}?select=${SELECT}&${inFilter(PROBLEM)}&order=updated_at.desc&limit=20`, opts),
       // Waiting: blocked, delegated, pending_eval
-      fetch(`${base}?select=${SELECT}&${inFilter(WAITING)}&order=updated_at.desc&limit=10`, opts),
+      supaFetch(`${base}?select=${SELECT}&${inFilter(WAITING)}&order=updated_at.desc&limit=10`, opts),
       // Active: claimed/in_progress_*
-      fetch(`${base}?select=${SELECT}&${inFilter(ACTIVE)}&order=claimed_at.asc`, opts),
-      // Recent 20 non-archived non-completed by updated_at (active pipeline view)
-      fetch(`${base}?select=${SELECT}&status=neq.archived&status=neq.completed&order=updated_at.desc&limit=20`, opts),
+      supaFetch(`${base}?select=${SELECT}&${inFilter(ACTIVE)}&order=claimed_at.asc`, opts),
+      // Recent 20 non-archived non-completed non-paused by updated_at (active pipeline view)
+      supaFetch(`${base}?select=${SELECT}&status=neq.archived&status=neq.completed&status=neq.paused&order=updated_at.desc&limit=20`, opts),
       // Completed: paginated by updated_at
-      fetch(`${base}?select=${SELECT}&status=eq.completed&order=updated_at.desc&limit=${COMPLETED_PAGE_SIZE}&offset=${completedOffset}`, opts),
+      supaFetch(`${base}?select=${SELECT}&status=eq.completed&order=updated_at.desc&limit=${COMPLETED_PAGE_SIZE}&offset=${completedOffset}`, opts),
       // Last 24h for summary
-      fetch(`${base}?select=status,target&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
+      supaFetch(`${base}?select=status,target&updated_at=gte.${new Date(Date.now() - 86400000).toISOString()}`, opts),
       // Total completed count for pagination
-      fetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
+      supaFetch(`${base}?select=id&status=eq.completed`, { headers: { ...headers, Prefer: 'count=exact' }, cache: 'no-store' }),
       // Scheduled: canonical recurring rows (recurring=true, post-migration 031),
       // not archived/cancelled. Sort by last_run_at desc so the most recently fired
       // task lands on top. Legacy recurring_schedule rows still show through the
       // OR clause until they're migrated.
-      fetch(`${base}?select=${SELECT}&or=(recurring.eq.true,context->>recurring_schedule.not.is.null)&status=neq.archived&status=neq.cancelled&archived_at=is.null&order=last_run_at.desc.nullslast,created_at.desc&limit=50`, opts),
+      supaFetch(`${base}?select=${SELECT}&or=(recurring.eq.true,context->>recurring_schedule.not.is.null)&status=neq.archived&status=neq.cancelled&archived_at=is.null&order=last_run_at.desc.nullslast,created_at.desc&limit=50`, opts),
+      // Paused: parked tasks — separate fetch like completed, collapsed by default in UI
+      supaFetch(`${base}?select=${SELECT}&status=eq.paused&order=updated_at.desc&limit=50`, opts),
     ])
 
-    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw]: [
-      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string; target: string | null }>, TaskItem[]
+    const [jeffUrgentRaw, problemsRaw, waitingRaw, activeRaw, recentRaw, completedRaw, summary24hRaw, scheduledRaw, pausedRaw]: [
+      TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], TaskItem[], Array<{ status: string; target: string | null }>, TaskItem[], TaskItem[]
     ] = await Promise.all([
       jeffUrgentRes.ok ? jeffUrgentRes.json() : [],
       problemsRes.ok ? problemsRes.json() : [],
@@ -135,6 +139,7 @@ export async function GET(req: NextRequest) {
       completedRes.ok ? completedRes.json() : [],
       summary24hRes.ok ? summary24hRes.json() : [],
       scheduledRes.ok ? scheduledRes.json() : [],
+      pausedRes.ok ? pausedRes.json() : [],
     ])
     const completedTotal = parseInt(completedCountRes.headers.get('content-range')?.split('/')[1] ?? '0', 10) || 0
 
@@ -188,13 +193,14 @@ export async function GET(req: NextRequest) {
       active: activeRaw,
       recent: recentRaw,
       completed: completedRaw,
+      paused: pausedRaw,
       scheduled: scheduledDedup,
       completedTotal,
       completedOffset,
       completedPageSize: COMPLETED_PAGE_SIZE,
       summary24h,
       jeff_urgent: jeffUrgentRaw,
-    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; scheduled: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
+    } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; paused: TaskItem[]; scheduled: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch task queue' }, { status: 500 })
   }
@@ -216,7 +222,7 @@ export async function POST(req: NextRequest) {
       taskContext.recurring_schedule = recurring_schedule.trim()
     }
 
-    const res = await fetch(`${url}/rest/v1/task_queue`, {
+    const res = await supaFetch(`${url}/rest/v1/task_queue`, {
       method: 'POST',
       headers: {
         apikey: key,
@@ -265,7 +271,7 @@ export async function PATCH(req: NextRequest) {
     }
     if (!Object.keys(patch).length) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
 
-    const res = await fetch(`${url}/rest/v1/task_queue?id=eq.${id}`, {
+    const res = await supaFetch(`${url}/rest/v1/task_queue?id=eq.${id}`, {
       method: 'PATCH',
       headers: {
         apikey: key,
