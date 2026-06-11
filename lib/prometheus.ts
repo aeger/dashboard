@@ -14,6 +14,66 @@ export interface HostMetrics {
   load_1m: number | null
 }
 
+export interface StoragePool {
+  name: string          // e.g. nvme-fast
+  id: string            // e.g. storage/az-lab/nvme-fast
+  used_percent: number | null
+  used_gb: number | null
+  size_gb: number | null
+}
+
+// Proxmox storage capacity from prometheus-pve-exporter (pve_disk_*). Keyed by
+// the `id` label (storage/<node>/<name>), not `instance`. Note: for ZFS pools
+// this is the COMMITTED figure (includes refreservations), which is what PVE
+// enforces for allocation — i.e. the number that actually matters for "full".
+export async function fetchStoragePools(): Promise<StoragePool[]> {
+  const baseUrl = process.env.PROMETHEUS_URL
+  if (!baseUrl) return []
+
+  const byId = async (query: string): Promise<Record<string, number>> => {
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ query }),
+        next: { revalidate: 30 },
+      })
+      if (!res.ok) return {}
+      const data = await res.json()
+      const out: Record<string, number> = {}
+      for (const item of data.data?.result ?? []) {
+        const id = item.metric?.id
+        if (id) out[id] = parseFloat(item.value?.[1] ?? '0')
+      }
+      return out
+    } catch {
+      return {}
+    }
+  }
+
+  const [usage, size] = await Promise.all([
+    byId(`pve_disk_usage_bytes{id=~"storage/.*"}`),
+    byId(`pve_disk_size_bytes{id=~"storage/.*"}`),
+  ])
+
+  const toGB = (v: number | undefined) => (v != null ? Math.round((v / 1073741824) * 10) / 10 : null)
+  const pools: StoragePool[] = []
+  for (const id of Object.keys(size)) {
+    const sz = size[id]
+    if (!sz || sz <= 0) continue
+    const used = usage[id] ?? 0
+    pools.push({
+      name: id.split('/').pop() || id,
+      id,
+      used_percent: Math.round((used / sz) * 1000) / 10,
+      used_gb: toGB(used),
+      size_gb: toGB(sz),
+    })
+  }
+  pools.sort((a, b) => (b.used_percent ?? 0) - (a.used_percent ?? 0))
+  return pools
+}
+
 async function promQuery(baseUrl: string, query: string): Promise<Record<string, number>> {
   try {
     const res = await fetch(`${baseUrl}/api/v1/query`, {
