@@ -146,14 +146,16 @@ export async function GET(req: NextRequest) {
     // Synthetic summary keys: split review_needed into needs-jeff vs with-agent based
     // on target — keeps the pillbox counter aligned with the in-row "↩ with X" badge.
     // pending_jeff_action always counts toward needs_jeff regardless of target.
+    // review_needed with target=null or 'jeff' counts toward needs_jeff.
+    // review_needed with any other target counts toward with_agent.
     const summary24h: Record<string, number> = {}
     for (const { status, target } of summary24hRaw) {
       summary24h[status] = (summary24h[status] ?? 0) + 1
-      const withAgent = target && target !== 'jeff'
-      if (status === 'pending_jeff_action' || (status === 'review_needed' && !withAgent)) {
+      const isForJeff = !target || target === 'jeff'
+      if (status === 'pending_jeff_action' || (status === 'review_needed' && isForJeff)) {
         summary24h['needs_jeff'] = (summary24h['needs_jeff'] ?? 0) + 1
       }
-      if (status === 'review_needed' && withAgent) {
+      if (status === 'review_needed' && !isForJeff) {
         summary24h['with_agent'] = (summary24h['with_agent'] ?? 0) + 1
       }
     }
