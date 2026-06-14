@@ -3077,18 +3077,31 @@ export default function TaskQueueExpanded() {
 
         {/* Sections */}
         <div className="flex-1 overflow-y-auto pr-1">
-          {SECTIONS.filter(s => !s.statuses.every(st => hiddenStatuses.has(st))).map(section => (
-            <Section
-              key={section.key}
-              section={section}
-              tasks={filteredTasks.filter(t => section.statuses.includes(t.status))}
-              selected={selected?.id ?? null}
-              onSelect={t => setSelected(prev => prev?.id === t.id ? null : t)}
-              onContextMenu={(e, t) => setCtxMenu({ x: e.clientX, y: e.clientY, task: t })}
-              onNeedsAction={handleNeedsAction}
-              defaultOpen={['jeff_urgent', 'review', 'failed', 'waiting', 'jeff_working', 'agent_running'].includes(section.key)}
-            />
-          ))}
+          {SECTIONS.filter(s => !s.statuses.every(st => hiddenStatuses.has(st))).map(section => {
+            const sectionTasks = filteredTasks.filter(t => {
+              // Special case: review_needed with target=jeff belongs in jeff_urgent
+              if (section.key === 'jeff_urgent' && t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+                return true
+              }
+              // Review section excludes tasks that belong in jeff_urgent
+              if (section.key === 'review' && t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+                return false
+              }
+              return section.statuses.includes(t.status)
+            })
+            return (
+              <Section
+                key={section.key}
+                section={section}
+                tasks={sectionTasks}
+                selected={selected?.id ?? null}
+                onSelect={t => setSelected(prev => prev?.id === t.id ? null : t)}
+                onContextMenu={(e, t) => setCtxMenu({ x: e.clientX, y: e.clientY, task: t })}
+                onNeedsAction={handleNeedsAction}
+                defaultOpen={['jeff_urgent', 'review', 'failed', 'waiting', 'jeff_working', 'agent_running'].includes(section.key)}
+              />
+            )
+          })}
           {filteredTasks.length === 0 && (
             <div className="text-zinc-600 text-sm text-center py-12">No tasks match</div>
           )}
