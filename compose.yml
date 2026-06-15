@@ -9,6 +9,16 @@ services:
       dockerfile: Dockerfile
     container_name: az-dashboard
     restart: unless-stopped
+    # Upstream resolvers for aardvark-dns. Without these the container rode the
+    # full aardvark → systemd-resolved → AdGuard chain, whose occasional blips
+    # surfaced as intermittent EAI_AGAIN on external API calls (calendar/weather,
+    # ~21/day). AdGuard (split-DNS, internal + external) primary, public fallback
+    # so a momentary AdGuard hiccup can't stall external lookups. aardvark still
+    # resolves sibling container names (immich-server, uptime-kuma, etc.).
+    dns:
+      - 192.168.99.2
+      - 1.1.1.1
+      - 1.0.0.1
     environment:
       - IMMICH_URL=${IMMICH_URL:-http://immich-server:2283}
       - IMMICH_API_KEY=${IMMICH_API_KEY:-}
