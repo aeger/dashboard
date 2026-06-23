@@ -8,7 +8,7 @@ import json, subprocess, sys, os
 from datetime import datetime, timezone
 from pathlib import Path
 
-OUTPUT = Path('/home/almty1/azlab/services/dashboard/data/updates.json')
+OUTPUT = Path('/home/almty1/dashboard/data/updates.json')
 
 # Containers to skip (locally built, no registry to check)
 SKIP_PREFIXES = ('localhost/',)

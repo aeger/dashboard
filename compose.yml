@@ -54,7 +54,7 @@ services:
       - TERMINAL_SSH_USER=almty1
     volumes:
       - ./config:/app/config:ro
-      - /home/almty1/azlab/services/dashboard/data:/app/data:rw
+      - ./data:/app/data:rw
       - /home/almty1/.dashboard-terminal-key:/run/secrets/terminal_ssh_key:ro
       - /home/almty1/azlab/infrastructure/traefik/dynamic:/traefik-dynamic:rw
       - /home/almty1/azlab/services/rustdesk/data:/app/rustdesk-data:ro
