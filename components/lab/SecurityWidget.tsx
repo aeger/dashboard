@@ -88,6 +88,7 @@ export default function SecurityWidget() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all')
   const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   const load = () =>
     fetch('/api/security')
@@ -100,9 +101,16 @@ export default function SecurityWidget() {
 
   async function triggerScan() {
     setScanning(true)
+    setScanError(null)
     try {
-      await fetch('/api/security/scan', { method: 'POST' })
+      const r = await fetch('/api/security/scan', { method: 'POST' })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        setScanError(body.error || `Scan failed (HTTP ${r.status})`)
+      }
       await load()
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : 'Scan request failed')
     } finally {
       setScanning(false)
     }
@@ -179,6 +187,9 @@ export default function SecurityWidget() {
               {scanning ? '⟳ scanning…' : '⟳ rescan'}
             </button>
           </div>
+          {scanError && (
+            <div className="text-[10px] text-red-400 pl-1">{scanError}</div>
+          )}
         </div>
       </div>
 

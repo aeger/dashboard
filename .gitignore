@@ -49,3 +49,7 @@ token.json
 Context/
 app/favicon.ico.bak-*
 public/header-banner.png.bak-*
+
+# stale data backups (junk) — Wren 2026-06-28
+*.stale-bak-*
+data.stale-bak-*/
