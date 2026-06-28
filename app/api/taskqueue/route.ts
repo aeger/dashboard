@@ -81,6 +81,16 @@ const PROBLEM = ['failed', 'escalated']
 
 const COMPLETED_PAGE_SIZE = 25
 
+// The UI only ever renders the most recent 12 runs (run_count carries the true total),
+// but the runs[] JSONB grows unbounded on recurring tasks (~84KB of payload). Cap it
+// server-side so the dashboard payload stays small over slow links.
+const RUNS_CAP = 12
+function trimRuns<T extends { runs?: TaskRun[] | null }>(tasks: T[]): T[] {
+  return tasks.map(t =>
+    Array.isArray(t.runs) && t.runs.length > RUNS_CAP ? { ...t, runs: t.runs.slice(-RUNS_CAP) } : t
+  )
+}
+
 export async function GET(req: NextRequest) {
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SECRET_KEY
@@ -190,18 +200,18 @@ export async function GET(req: NextRequest) {
     })
 
     return NextResponse.json({
-      problems: mergedProblems,
-      waiting: waitingRaw,
-      active: activeRaw,
-      recent: recentRaw,
-      completed: completedRaw,
-      paused: pausedRaw,
-      scheduled: scheduledDedup,
+      problems: trimRuns(mergedProblems),
+      waiting: trimRuns(waitingRaw),
+      active: trimRuns(activeRaw),
+      recent: trimRuns(recentRaw),
+      completed: trimRuns(completedRaw),
+      paused: trimRuns(pausedRaw),
+      scheduled: trimRuns(scheduledDedup),
       completedTotal,
       completedOffset,
       completedPageSize: COMPLETED_PAGE_SIZE,
       summary24h,
-      jeff_urgent: jeffUrgentRaw,
+      jeff_urgent: trimRuns(jeffUrgentRaw),
     } satisfies TaskQueueData & { jeff_urgent: TaskItem[]; completed: TaskItem[]; paused: TaskItem[]; scheduled: TaskItem[]; completedTotal: number; completedOffset: number; completedPageSize: number })
   } catch {
     return NextResponse.json({ error: 'Failed to fetch task queue' }, { status: 500 })
