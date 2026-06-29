@@ -8,6 +8,7 @@ async function promRangeQuery(baseUrl: string, query: string, start: number, end
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ query, start: String(start), end: String(end), step: String(STEP) }),
+      signal: AbortSignal.timeout(4000),
       next: { revalidate: 60 },
     })
     if (!res.ok) return []

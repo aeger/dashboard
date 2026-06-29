@@ -36,6 +36,7 @@ export async function fetchStoragePools(): Promise<StoragePool[]> {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ query }),
+        signal: AbortSignal.timeout(2500),
         next: { revalidate: 30 },
       })
       if (!res.ok) return {}
@@ -80,6 +81,7 @@ async function promQuery(baseUrl: string, query: string): Promise<Record<string,
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ query }),
+      signal: AbortSignal.timeout(2500),
       next: { revalidate: 30 },
     })
 

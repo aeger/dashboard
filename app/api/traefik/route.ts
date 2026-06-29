@@ -22,6 +22,7 @@ async function promQuery(query: string): Promise<{ metric: Record<string, string
   if (!baseUrl) return []
   try {
     const res = await fetch(`${baseUrl}/api/v1/query?query=${encodeURIComponent(query)}`, {
+      signal: AbortSignal.timeout(2500),
       next: { revalidate: 30 },
     })
     const data = await res.json()
