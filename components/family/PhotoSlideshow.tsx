@@ -44,15 +44,24 @@ export default function PhotoSlideshow({ intervalSeconds }: PhotoSlideshowProps)
 
   return (
     <div className="relative h-full rounded-xl overflow-hidden bg-zinc-900">
-      {photos.map((photo, i) => (
-        <img
-          key={photo.id}
-          src={photo.url}
-          alt=""
-          className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === current ? 'opacity-100' : 'opacity-0'}`}
-          onLoad={() => i === 0 && setLoaded(true)}
-        />
-      ))}
+      {photos.map((photo, i) => {
+        // Only load the current slide and its immediate neighbors. Setting src on every
+        // image fired all photo-proxy requests at once and caused 30s+ load pile-ups.
+        const near =
+          i === current ||
+          i === (current + 1) % photos.length ||
+          i === (current - 1 + photos.length) % photos.length
+        return (
+          <img
+            key={photo.id}
+            src={near ? photo.url : undefined}
+            loading="lazy"
+            alt=""
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === current ? 'opacity-100' : 'opacity-0'}`}
+            onLoad={() => i === current && setLoaded(true)}
+          />
+        )
+      })}
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-6 h-6 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />

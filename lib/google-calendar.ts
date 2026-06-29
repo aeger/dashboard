@@ -2,6 +2,11 @@ import { JWT } from 'google-auth-library'
 
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
 
+// Google requires start/end timeZone on recurring timed events (a bare dateTime
+// is rejected with "Missing time zone definition for start time"). We set it on
+// all timed events. Jeff is in Arizona (no DST); override via env if needed.
+const CALENDAR_TZ = process.env.CALENDAR_TIMEZONE || 'America/Phoenix'
+
 let _client: JWT | null = null
 let _subscribed = false
 
@@ -254,8 +259,8 @@ export async function createEvent(input: EventInput): Promise<CalendarEvent> {
     body.start = { date: input.start }
     body.end = { date: input.end }
   } else {
-    body.start = { dateTime: input.start }
-    body.end = { dateTime: input.end }
+    body.start = { dateTime: input.start, timeZone: CALENDAR_TZ }
+    body.end = { dateTime: input.end, timeZone: CALENDAR_TZ }
   }
 
   if (input.recurrence?.length) {
@@ -303,8 +308,8 @@ export async function updateEvent(
       if (input.start) body.start = { date: input.start }
       if (input.end) body.end = { date: input.end }
     } else {
-      if (input.start) body.start = { dateTime: input.start }
-      if (input.end) body.end = { dateTime: input.end }
+      if (input.start) body.start = { dateTime: input.start, timeZone: CALENDAR_TZ }
+      if (input.end) body.end = { dateTime: input.end, timeZone: CALENDAR_TZ }
     }
   }
 

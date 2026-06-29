@@ -4,7 +4,7 @@ import { sshExec } from '@/lib/ssh-exec'
 // Stack = one compose directory that contains multiple dependent services
 export const STACK_DEFINITIONS: Record<string, { path: string; containers: string[]; label: string }> = {
   immich: {
-    path: '/home/almty1/azlab/services/dashboard',
+    path: '/home/almty1/azlab/services/immich',
     label: 'Immich',
     containers: ['immich-server', 'immich-machine-learning', 'immich-redis', 'immich-postgres'],
   },
@@ -19,7 +19,7 @@ export const STACK_DEFINITIONS: Record<string, { path: string; containers: strin
     containers: ['hbbs', 'hbbr'],
   },
   dashboard: {
-    path: '/home/almty1/azlab/services/dashboard',
+    path: '/home/almty1/dashboard',
     label: 'Dashboard',
     containers: ['az-dashboard', 'uptime-kuma'],
   },

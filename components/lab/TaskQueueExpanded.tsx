@@ -19,6 +19,7 @@ const STATUS_COLOR: Record<string, { bg: string; text: string; dot: string; acce
   ready:               { bg: 'bg-zinc-700/60',      text: 'text-zinc-300',    dot: 'bg-zinc-400',    accent: '#a1a1aa' },
   backlog:             { bg: 'bg-zinc-800/60',      text: 'text-zinc-400',    dot: 'bg-zinc-600',    accent: '#71717a' },
   completed:           { bg: 'bg-emerald-900/60',   text: 'text-emerald-200', dot: 'bg-emerald-400', accent: '#34d399' },
+  paused:              { bg: 'bg-violet-900/40',     text: 'text-violet-300',  dot: 'bg-violet-500',  accent: '#a78bfa' },
   cancelled:           { bg: 'bg-zinc-800/40',      text: 'text-zinc-500',    dot: 'bg-zinc-700',    accent: '#52525b' },
   archived:            { bg: 'bg-zinc-900/40',      text: 'text-zinc-600',    dot: 'bg-zinc-800',    accent: '#3f3f46' },
   // Legacy compat
@@ -48,6 +49,7 @@ const SECTIONS = [
   { key: 'agent_running', label: 'Agent Running', statuses: ['in_progress_agent', 'claimed'], headerCls: 'text-blue-400',    urgent: false },
   { key: 'ready',         label: 'Ready',         statuses: ['ready', 'pending', 'backlog'],  headerCls: 'text-zinc-400',    urgent: false },
   { key: 'completed',     label: 'Completed',     statuses: ['completed'],                    headerCls: 'text-emerald-400', urgent: false },
+  { key: 'paused',        label: 'Paused',        statuses: ['paused'],                       headerCls: 'text-violet-400',  urgent: false },
   { key: 'cancelled',     label: 'Cancelled',     statuses: ['cancelled', 'expired'],         headerCls: 'text-zinc-600',    urgent: false },
 ]
 
@@ -68,18 +70,21 @@ const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
     { label: "I'll Handle It",            status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Return to Agent Queue',     status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
     { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: '⏸ Pause',                   status: 'paused',                             cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   review_needed: [
     { label: 'Approve & Complete',        status: 'completed',                          cls: 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-300' },
     { label: 'I\'ll Fix It (take over)', status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
     { label: 'Send Back to Agent',        status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/40 hover:bg-blue-800/60 text-blue-300' },
+    { label: '⏸ Pause',                   status: 'paused',                             cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   in_progress_jeff: [
     { label: 'Hand Back to Agent Queue',  status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
     { label: 'Mark Complete',             status: 'completed',                          cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
     { label: 'Flag for Review',           status: 'review_needed',     target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
+    { label: '⏸ Pause',                   status: 'paused',                             cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Block',                     status: 'blocked',                            cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
   ],
   in_progress_agent: [
@@ -87,17 +92,20 @@ const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
     { label: 'Flag for Review',           status: 'review_needed',       target: T_JEFF,  cls: 'bg-orange-900/40 hover:bg-orange-800/60 text-orange-300' },
     { label: 'I\'ll Take Over',           status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
     { label: 'Mark Complete',             status: 'completed',                            cls: 'bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300' },
+    { label: '⏸ Pause',                   status: 'paused',                              cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
   ],
   ready: [
     { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
     { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: '⏸ Pause',                   status: 'paused',                               cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   backlog: [
     { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
     { label: 'Queue for Agent',           status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
     { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: '⏸ Pause',                   status: 'paused',                               cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   pending: [
@@ -109,11 +117,18 @@ const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
   blocked: [
     { label: 'Unblock → Back to Queue',   status: 'ready',               target: T_AGENT, cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
     { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: '⏸ Pause',                   status: 'paused',                               cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   completed: [
     { label: 'Reopen',              status: 'ready',                                      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
     { label: 'Archive',             special: 'archive',                                   cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
+  ],
+  paused: [
+    { label: '▶ Resume → Agent Queue', status: 'ready',             target: T_AGENT, cls: 'bg-blue-900/60 hover:bg-blue-800/80 text-blue-300' },
+    { label: 'Resume → I\'ll Handle', status: 'in_progress_jeff',  target: T_JEFF,  cls: 'bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300' },
+    { label: 'Cancel',               status: 'cancelled',                          cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+    { label: 'Archive',              special: 'archive',                           cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-500' },
   ],
   cancelled: [
     { label: 'Restore to Ready',    status: 'ready',                target: T_AGENT,      cls: 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300' },
@@ -1954,6 +1969,11 @@ function ScheduledActivityActions({ row, onChange }: {
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`)
       setConfirmRun(false)
       onChange()
+      // The control daemon polls systemd every ~30s to populate last_run_at/runs[].
+      // Refetch a few times so the UI catches the recorded run without a manual reload.
+      for (const delay of [5_000, 15_000, 35_000]) {
+        setTimeout(() => { try { onChange() } catch {} }, delay)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed')
     } finally {
@@ -1999,6 +2019,39 @@ function ScheduledActivityActions({ row, onChange }: {
       case 'task_queue_recurring': return 'Schedule is upstream-driven by the cowork CCR trigger. Edit the trigger prompt on the cowork side.'
       default: return ''
     }
+  })()
+
+  // Preset schedules keyed by kind — Jeff picks one to fill the input,
+  // then can tweak freely. Empty array hides the dropdown.
+  const SCHEDULE_PRESETS: Array<{ label: string; value: string }> = (() => {
+    if (row.kind === 'systemd') {
+      return [
+        { label: 'Every 5 minutes',           value: 'every:5min' },
+        { label: 'Every 15 minutes',          value: 'every:15min' },
+        { label: 'Every 30 minutes',          value: 'every:30min' },
+        { label: 'Every hour',                value: 'every:1h' },
+        { label: 'Hourly (top of hour, UTC)', value: 'oncalendar:hourly' },
+        { label: 'Daily 02:00 UTC',           value: 'oncalendar:*-*-* 02:00:00 UTC' },
+        { label: 'Daily 04:00 UTC',           value: 'oncalendar:*-*-* 04:00:00 UTC' },
+        { label: 'Daily 12:00 UTC',           value: 'oncalendar:*-*-* 12:00:00 UTC' },
+        { label: 'Weekly — Sunday 03:00 UTC', value: 'oncalendar:Sun *-*-* 03:00:00 UTC' },
+        { label: 'Monthly — 1st 04:00 UTC',   value: 'oncalendar:*-*-01 04:00:00 UTC' },
+      ]
+    }
+    if (row.kind === 'cron') {
+      return [
+        { label: 'Every minute',              value: '* * * * *' },
+        { label: 'Every 5 minutes',           value: '*/5 * * * *' },
+        { label: 'Every 15 minutes',          value: '*/15 * * * *' },
+        { label: 'Every 30 minutes',          value: '*/30 * * * *' },
+        { label: 'Hourly (top of hour)',      value: '0 * * * *' },
+        { label: 'Daily at midnight',         value: '0 0 * * *' },
+        { label: 'Daily at 06:00',            value: '0 6 * * *' },
+        { label: 'Weekly — Sunday midnight',  value: '0 0 * * 0' },
+        { label: 'Monthly — 1st at midnight', value: '0 0 1 * *' },
+      ]
+    }
+    return []
   })()
 
   return (
@@ -2111,10 +2164,34 @@ function ScheduledActivityActions({ row, onChange }: {
 
       {editingSchedule && (
         <div className="mt-2 p-2 rounded border border-cyan-900/40 bg-cyan-950/10 space-y-2">
-          <div className="text-[10px] text-cyan-500/80 uppercase tracking-widest">
-            Edit schedule — {row.kind}
+          <div className="flex items-center gap-1.5 text-[10px] text-cyan-500/80 uppercase tracking-widest">
+            <span>Edit schedule — {row.kind}</span>
+            <span
+              title={SCHEDULE_HINT}
+              className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-cyan-500/60 text-cyan-300 text-[9px] font-bold cursor-help leading-none normal-case tracking-normal"
+              aria-label="Schedule format help"
+            >
+              i
+            </span>
           </div>
           <div className="text-[10px] text-zinc-500">{SCHEDULE_HINT}</div>
+          {SCHEDULE_PRESETS.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-zinc-500 shrink-0">Preset:</label>
+              <select
+                value={SCHEDULE_PRESETS.some(p => p.value === scheduleDraft) ? scheduleDraft : ''}
+                onChange={e => { if (e.target.value) setScheduleDraft(e.target.value) }}
+                className="flex-1 px-2 py-1 rounded text-[10px] bg-zinc-800/60 border border-cyan-800/40 text-zinc-200 font-mono focus:outline-none focus:border-cyan-500"
+              >
+                <option value="">— Custom (use input below) —</option>
+                {SCHEDULE_PRESETS.map(p => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}  →  {p.value}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <input
             value={scheduleDraft}
             onChange={e => setScheduleDraft(e.target.value)}
@@ -2782,7 +2859,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function TaskQueueExpanded() {
-  const [data, setData] = useState<(TaskQueueData & { jeff_urgent?: TaskItem[]; completedTotal?: number; completedOffset?: number; completedPageSize?: number }) | null>(null)
+  const [data, setData] = useState<(TaskQueueData & { jeff_urgent?: TaskItem[]; paused?: TaskItem[]; completedTotal?: number; completedOffset?: number; completedPageSize?: number }) | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<TaskItem | null>(null)
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
@@ -2830,6 +2907,7 @@ export default function TaskQueueExpanded() {
     ...data.active,
     ...(data.recent ?? []),
     ...(data.completed ?? []),
+    ...(data.paused ?? []),
   ].filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i) : []
 
   const filteredTasks = allTasks.filter(t => {
@@ -2969,7 +3047,7 @@ export default function TaskQueueExpanded() {
             onChange={e => setSearch(e.target.value)}
             className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs bg-zinc-800/60 border border-zinc-700/50 text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
           />
-          {['cancelled', 'completed', 'expired'].map(s => {
+          {['cancelled', 'completed', 'paused', 'expired'].map(s => {
             const hidden = hiddenStatuses.has(s)
             const c = STATUS_COLOR[s]
             return (
@@ -2999,18 +3077,31 @@ export default function TaskQueueExpanded() {
 
         {/* Sections */}
         <div className="flex-1 overflow-y-auto pr-1">
-          {SECTIONS.filter(s => !s.statuses.every(st => hiddenStatuses.has(st))).map(section => (
-            <Section
-              key={section.key}
-              section={section}
-              tasks={filteredTasks.filter(t => section.statuses.includes(t.status))}
-              selected={selected?.id ?? null}
-              onSelect={t => setSelected(prev => prev?.id === t.id ? null : t)}
-              onContextMenu={(e, t) => setCtxMenu({ x: e.clientX, y: e.clientY, task: t })}
-              onNeedsAction={handleNeedsAction}
-              defaultOpen={['jeff_urgent', 'review', 'failed', 'waiting', 'jeff_working', 'agent_running'].includes(section.key)}
-            />
-          ))}
+          {SECTIONS.filter(s => !s.statuses.every(st => hiddenStatuses.has(st))).map(section => {
+            const sectionTasks = filteredTasks.filter(t => {
+              // Special case: review_needed with target=jeff belongs in jeff_urgent
+              if (section.key === 'jeff_urgent' && t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+                return true
+              }
+              // Review section excludes tasks that belong in jeff_urgent
+              if (section.key === 'review' && t.status === 'review_needed' && (t.target === 'jeff' || t.target === null)) {
+                return false
+              }
+              return section.statuses.includes(t.status)
+            })
+            return (
+              <Section
+                key={section.key}
+                section={section}
+                tasks={sectionTasks}
+                selected={selected?.id ?? null}
+                onSelect={t => setSelected(prev => prev?.id === t.id ? null : t)}
+                onContextMenu={(e, t) => setCtxMenu({ x: e.clientX, y: e.clientY, task: t })}
+                onNeedsAction={handleNeedsAction}
+                defaultOpen={['jeff_urgent', 'review', 'failed', 'waiting', 'jeff_working', 'agent_running'].includes(section.key)}
+              />
+            )
+          })}
           {filteredTasks.length === 0 && (
             <div className="text-zinc-600 text-sm text-center py-12">No tasks match</div>
           )}

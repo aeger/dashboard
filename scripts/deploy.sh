@@ -1,22 +1,13 @@
 #!/usr/bin/env bash
-# Deploy dashboard: sync source → build context, rebuild image, restart container
-# data/ is excluded — it's a bind-mounted runtime directory, not source
+# Deploy dashboard: rebuild image and restart container, in place.
+# ~/dashboard is the single source-of-truth + build context (consolidated
+# 2026-06-23; the old rsync to ~/azlab/services/dashboard was removed).
+# data/ is a bind-mounted runtime dir (./data), not rebuilt here.
 set -e
 
-SRC="$HOME/dashboard"
-DST="$HOME/azlab/services/dashboard"
-
-echo "[deploy] Syncing source to build context..."
-rsync -a --delete \
-  --exclude='.git' \
-  --exclude='node_modules' \
-  --exclude='.next' \
-  --exclude='data/' \
-  --exclude='docs/' \
-  "$SRC/" "$DST/"
+cd "$HOME/dashboard"
 
 echo "[deploy] Building image..."
-cd "$DST"
 podman compose build --no-cache
 
 echo "[deploy] Restarting container..."

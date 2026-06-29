@@ -22,7 +22,9 @@ export interface Goal {
   children?: Goal[]
 }
 
-const SELECT = 'id,parent_id,title,description,level,status,priority,target_date,completed_at,progress,tags,notes,sort_order,created_at,updated_at,implementation_prompt,last_queued_at,auto_queue'
+// implementation_prompt is large and never read by the dashboard UI — omit it from the
+// list payload (it's loaded server-side when a goal is queued, not needed client-side).
+const SELECT = 'id,parent_id,title,description,level,status,priority,target_date,completed_at,progress,tags,notes,sort_order,created_at,updated_at,last_queued_at,auto_queue'
 
 function buildTree(flat: Goal[]): Goal[] {
   const map = new Map<string, Goal>()

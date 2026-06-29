@@ -6,13 +6,14 @@ import type { TaskItem } from '@/app/api/taskqueue/route'
 // Any in-progress status must be able to reach pending_eval so agents can hand results off for evaluation.
 const TRANSITIONS: Record<string, string[]> = {
   // New JeffLoop statuses
-  backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval'],
-  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval'],
-  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed'],
-  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval'],
-  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready'],
-  review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled', 'pending_eval', 'ready'],
-  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled'],
+  backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval', 'paused'],
+  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval', 'paused'],
+  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed', 'paused'],
+  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval', 'paused'],
+  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready', 'paused'],
+  review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled', 'pending_eval', 'ready', 'paused'],
+  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled', 'paused'],
+  paused:               ['ready', 'in_progress_jeff', 'in_progress_agent', 'cancelled'],  // Resume → agent / Jeff / cancel
   completed:            ['ready'],  // Reopen
   cancelled:            ['ready'],  // Restore
   archived:             [],         // Use restore endpoint

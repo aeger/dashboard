@@ -16,8 +16,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-UPDATES_FILE = Path('/home/almty1/azlab/services/dashboard/data/updates.json')
-STATE_FILE   = Path('/home/almty1/azlab/services/dashboard/data/update_state.json')
+UPDATES_FILE = Path('/home/almty1/dashboard/data/updates.json')
+STATE_FILE   = Path('/home/almty1/dashboard/data/update_state.json')
 
 DISCORD_TOKEN   = os.environ.get('DISCORD_BOT_TOKEN', '')
 DISCORD_CHANNEL = os.environ.get('DISCORD_CHANNEL_ID', '')
@@ -86,12 +86,23 @@ def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str
     if r.returncode != 0:
         return False, old_digest, None, f'Pull failed: {(r.stderr or r.stdout).strip()[:300]}'
 
+    # podman-compose --force-recreate hits a "name already in use" conflict and
+    # silently falls back to `podman start` on the OLD container (image/digest
+    # unchanged). Remove the container (and anything that depends on it) and
+    # recreate the stack so the freshly-pulled image is actually used.
+    rm = subprocess.run(['podman', 'rm', '-f', '--depend', container],
+                        capture_output=True, text=True, timeout=120)
+    if rm.returncode != 0:
+        return False, old_digest, None, f'Remove failed: {rm.stderr.strip()[:300]}'
+
+    # stderr ONLY in the error message — podman-compose echoes the full `podman run`
+    # (including -e env secrets) to STDOUT, which must never reach logs.
     r = subprocess.run(
-        ['podman-compose', 'up', '-d', '--no-deps', '--force-recreate', service],
-        capture_output=True, text=True, timeout=180, cwd=working_dir,
+        ['podman-compose', 'up', '-d'],
+        capture_output=True, text=True, timeout=600, cwd=working_dir,
     )
     if r.returncode != 0:
-        return False, old_digest, None, f'Recreate failed: {(r.stderr or r.stdout).strip()[:300]}'
+        return False, old_digest, None, f'Recreate failed: {r.stderr.strip()[:300]}'
 
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
                        capture_output=True, text=True)

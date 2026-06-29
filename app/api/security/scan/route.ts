@@ -9,8 +9,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const output = await sshExec(
-      'python3 /home/almty1/claude/tools/infra/security_scan.py',
-      90_000
+      'python3 /home/almty1/claude/tools/infra/check_updates.py && python3 /home/almty1/claude/tools/infra/security_scan.py',
+      180_000
     )
     return NextResponse.json({ success: true, output })
   } catch (e) {

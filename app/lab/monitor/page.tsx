@@ -3,6 +3,8 @@ import HostMetrics from '@/components/lab/HostMetrics'
 import LabMonitor from '@/components/lab/LabMonitor'
 import NetworkStats from '@/components/lab/NetworkStats'
 import ContainerMetrics from '@/components/lab/ContainerMetrics'
+import AnomalyWidget from '@/components/lab/AnomalyWidget'
+import StoragePools from '@/components/lab/StoragePools'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +18,16 @@ export default function MonitorPage() {
       <div className={`${card} mb-4`}>
         <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Host Metrics</h2>
         <HostMetrics />
+      </div>
+
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Storage / ZFS Pools</h2>
+        <StoragePools />
+      </div>
+
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-3">Agent Anomalies</h2>
+        <AnomalyWidget />
       </div>
 
       <div className={`${card} mb-4`}>

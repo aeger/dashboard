@@ -104,8 +104,10 @@ export default function NotificationBell() {
   // Sound system
   const { settings: soundSettings } = useSoundSettings()
   const seenIds = useRef<Set<string>>(new Set())
+  const alreadyPlayedRef = useRef<Set<string>>(new Set())
   const initialLoad = useRef(true)
   const interacted = useRef(false)
+  const discordMessageSentTimes = useRef<Map<string, number>>(new Map())
 
   const handleInteraction = useCallback(() => {
     if (!interacted.current) {
@@ -119,6 +121,23 @@ export default function NotificationBell() {
     return () => document.removeEventListener('click', handleInteraction)
   }, [handleInteraction])
 
+  const shouldPlaySound = useCallback((notif: Notification): boolean => {
+    // Don't play if already played
+    if (alreadyPlayedRef.current.has(notif.id)) return false
+
+    // Discord: only play if 5+ minutes have elapsed since last Discord message
+    if (notif.source === 'discord') {
+      const channelKey = String(notif.metadata?.channel || 'default')
+      const lastSentTime = discordMessageSentTimes.current.get(channelKey)
+      if (lastSentTime !== undefined) {
+        const elapsedMs = Date.now() - lastSentTime
+        if (elapsedMs < 5 * 60 * 1000) return false
+      }
+    }
+
+    return true
+  }, [])
+
   const playAlertsForNew = useCallback((notifications: Notification[]) => {
     if (initialLoad.current) {
       notifications.forEach(n => seenIds.current.add(n.id))
@@ -131,10 +150,17 @@ export default function NotificationBell() {
     const sorted = [...newNotifs].sort(
       (a, b) => URGENCY_ORDER[normalizeUrgency(b)] - URGENCY_ORDER[normalizeUrgency(a)]
     )
-    const top = sorted[0]
-    const urgency = normalizeUrgency(top)
+
+    // Find first notification that should play sound
+    const toPlay = sorted.find(n => shouldPlaySound(n))
+    if (!toPlay) return
+
+    const urgency = normalizeUrgency(toPlay)
     const cfg = soundSettings[urgency]
     if (!cfg?.enabled || !interacted.current) return
+
+    alreadyPlayedRef.current.add(toPlay.id)
+
     const engine = getSoundEngine()
     if (cfg.sound.startsWith('custom:')) {
       const customId = cfg.sound.slice(7)
@@ -152,9 +178,9 @@ export default function NotificationBell() {
       engine.play(cfg.sound, cfg.volume)
     }
     if (urgency === 'critical' && cfg.tts) {
-      setTimeout(() => engine.speakTTS(top.title, cfg.volume), 600)
+      setTimeout(() => engine.speakTTS(toPlay.title, cfg.volume), 600)
     }
-  }, [soundSettings])
+  }, [soundSettings, shouldPlaySound])
 
   const fetchNotifications = useCallback(async (limit = 25) => {
     try {
@@ -173,9 +199,25 @@ export default function NotificationBell() {
   }, [playAlertsForNew])
 
   useEffect(() => {
+    // Monitor localStorage for Discord message timestamps from Lumen
+    const checkDiscordState = () => {
+      try {
+        const stored = localStorage.getItem('lumen:discord:lastMessageTime')
+        if (stored) {
+          const ts = parseInt(stored, 10)
+          discordMessageSentTimes.current.set('default', ts)
+        }
+      } catch { /* localStorage may be unavailable */ }
+    }
+
     fetchNotifications(25)
+    checkDiscordState()
     const interval = setInterval(() => fetchNotifications(25), 30_000)
-    return () => clearInterval(interval)
+    const stateCheckInterval = setInterval(checkDiscordState, 5000)
+    return () => {
+      clearInterval(interval)
+      clearInterval(stateCheckInterval)
+    }
   }, [fetchNotifications])
 
   // Close on outside click — checks both bell wrapper and portal panel
