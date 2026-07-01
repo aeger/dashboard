@@ -15,6 +15,12 @@ services:
       dockerfile: Dockerfile
     container_name: az-dashboard
     restart: unless-stopped
+    # Run as the container's userns-root, which (rootless podman uid_map 0→1000)
+    # maps to host `almty1` — the identity the web terminal / container-update
+    # feature SSHes as. Without this the app runs as uid 1001 and cannot read the
+    # 0640 almty1-owned terminal SSH key mounted at /run/secrets/terminal_ssh_key
+    # ("Cannot read SSH key"). Keeps the key at 0640 (not world-readable).
+    user: "0:0"
     # Upstream resolvers for aardvark-dns. Without these the container rode the
     # full aardvark → systemd-resolved → AdGuard chain, whose occasional blips
     # surfaced as intermittent EAI_AGAIN on external API calls (calendar/weather,

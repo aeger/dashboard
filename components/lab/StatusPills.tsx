@@ -388,7 +388,7 @@ function SpendPill() {
 
 export default function StatusPills() {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
       <GoalsPill />
       <ContainerPill />
       <TaskPill />

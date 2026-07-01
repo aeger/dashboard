@@ -15,17 +15,18 @@ export default function LabPage() {
       <AgentHealthBanner />
       <GmailReauthBanner />
 
-      {/* Page action bar */}
-      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-        {/* Tool shortcuts — wraps to second row when crowded */}
+      {/* Page action bar — two tidy rows: tools + auth, then status pills.
+          (Single-row justify-between wrapped awkwardly once both grew.) */}
+      <div className="flex flex-col gap-3 mb-5">
         <div className="flex items-center gap-2 flex-wrap">
           <ToolPills />
+          <div className="flex items-center gap-2 ml-auto">
+            <AuthIndicator />
+            <RefreshButton />
+          </div>
         </div>
-        {/* Status pills + auth — grouped right, always justified right */}
-        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap ml-auto">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusPills />
-          <AuthIndicator />
-          <RefreshButton />
         </div>
       </div>
 

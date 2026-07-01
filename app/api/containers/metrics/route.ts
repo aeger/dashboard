@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 
+// navidys/prometheus-podman-exporter `podman_container_state` enum:
+// 0=created 1=initialized 2=running 3=stopped 4=paused 5=exited 6=removing 7=stopping
+export const PODMAN_STATE_RUNNING = 2
+
 export interface ContainerMetric {
   id: string
   name: string
   image: string
-  state: number  // 4=running
+  state: number             // raw podman_container_state (see PODMAN_STATE_RUNNING)
+  running: boolean          // derived — widgets should use this, not the raw enum
   cpu_pct: number | null
   mem_bytes: number | null
   mem_limit: number | null
@@ -64,11 +69,13 @@ export async function GET() {
       const mem  = memMap[id]  ?? null
       const lim  = memLimMap[id] ?? null
       const memPct = mem != null && lim != null && lim > 0 ? (mem / lim) * 100 : null
+      const state = stateMap[id] ?? -1
       return {
         id,
         name,
         image,
-        state: stateMap[id] ?? 0,
+        state,
+        running: state === PODMAN_STATE_RUNNING,
         cpu_pct: cpuMap[id] != null ? Math.round(cpuMap[id] * 100) / 100 : null,
         mem_bytes: mem,
         mem_limit: lim,
@@ -79,7 +86,7 @@ export async function GET() {
     })
     .sort((a, b) => {
       // Running first, then by memory desc
-      if (a.state !== b.state) return b.state - a.state
+      if (a.running !== b.running) return Number(b.running) - Number(a.running)
       return (b.mem_bytes ?? 0) - (a.mem_bytes ?? 0)
     })
 
