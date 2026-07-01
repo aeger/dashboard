@@ -5,7 +5,7 @@ import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
 import ToolPills from '@/components/lab/ToolPills'
 import StatusPills from '@/components/lab/StatusPills'
 import LabTile from '@/components/lab/LabTile'
-import { labWidgets } from '@/lib/lab-widgets'
+import { labWidgets, labSectionOrder } from '@/lib/lab-widgets'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,27 +29,36 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Tiles are driven entirely by the registry — add a tile in
-          lib/lab-widgets.tsx, not here. See docs/widgets.md. */}
-      <div className="space-y-4">
-        {labWidgets
-          .filter((w) => w.enabled !== false)
-          .map((w) => {
-            const Widget = w.component
-            return (
-              <LabTile
-                key={w.id}
-                id={w.id}
-                title={w.title}
-                accent={w.accent}
-                expandHref={w.expandHref}
-                bare={w.bare}
-              >
-                <Widget />
-              </LabTile>
-            )
-          })}
-      </div>
+      {/* Tiles are driven entirely by the registry, grouped into sections —
+          add a tile in lib/lab-widgets.tsx, not here. See docs/widgets.md. */}
+      {labSectionOrder.map((section) => {
+        const widgets = labWidgets.filter((w) => w.enabled !== false && w.section === section)
+        if (widgets.length === 0) return null
+        return (
+          <section key={section} className="mb-6">
+            <h2 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-3 px-1">
+              {section}
+            </h2>
+            <div className="space-y-4">
+              {widgets.map((w) => {
+                const Widget = w.component
+                return (
+                  <LabTile
+                    key={w.id}
+                    id={w.id}
+                    title={w.title}
+                    accent={w.accent}
+                    expandHref={w.expandHref}
+                    bare={w.bare}
+                  >
+                    <Widget />
+                  </LabTile>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

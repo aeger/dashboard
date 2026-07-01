@@ -19,9 +19,21 @@ import EndpointProbes from '@/components/lab/EndpointProbes'
  *  - To add a tile: build the component + its /api route, then add ONE entry
  *    here. No edits to app/lab/page.tsx are required.
  */
+/** Landing-page section a tile belongs to. Rendered in `labSectionOrder`. */
+export type LabSection = 'Infrastructure' | 'Agents & Spend' | 'Security & Backups'
+
+/** Order sections render top-to-bottom on the /lab landing page. */
+export const labSectionOrder: LabSection[] = [
+  'Infrastructure',
+  'Agents & Spend',
+  'Security & Backups',
+]
+
 export interface LabWidget {
   /** Stable id — also the DOM anchor (e.g. StatusPills links to #security). */
   id: string
+  /** Landing-page section grouping. */
+  section: LabSection
   /** Header label. Omit for `bare` widgets that render their own header. */
   title?: string
   /** The tile component. */
@@ -51,6 +63,7 @@ function HostMetricsPanel() {
 export const labWidgets: LabWidget[] = [
   {
     id: 'host-metrics',
+    section: 'Infrastructure',
     title: 'Host Metrics',
     component: HostMetricsPanel,
     endpoint: '/api/metrics',
@@ -58,6 +71,7 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'lab-monitor',
+    section: 'Infrastructure',
     title: 'Lab Monitor',
     component: LabMonitor,
     endpoint: '/api/services',
@@ -65,6 +79,7 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'endpoint-health',
+    section: 'Infrastructure',
     title: 'Endpoint Health',
     component: EndpointProbes,
     endpoint: '/api/probes',
@@ -72,6 +87,7 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'storage-pools',
+    section: 'Infrastructure',
     title: 'Storage / ZFS Pools',
     component: StoragePools,
     endpoint: '/api/storage',
@@ -79,12 +95,14 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'agent-health',
+    section: 'Agents & Spend',
     component: AgentHealthCard,
     endpoint: '/api/agent-health',
     bare: true,
   },
   {
     id: 'claude-spend',
+    section: 'Agents & Spend',
     title: 'Claude Spend',
     component: ClaudeSpendWidget,
     endpoint: '/api/claude-spend',
@@ -93,6 +111,7 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'security',
+    section: 'Security & Backups',
     title: 'Security',
     component: SecurityWidget,
     endpoint: '/api/security',
@@ -100,6 +119,7 @@ export const labWidgets: LabWidget[] = [
   },
   {
     id: 'backups',
+    section: 'Security & Backups',
     component: BackupsWidget,
     endpoint: '/api/backups',
     bare: true,

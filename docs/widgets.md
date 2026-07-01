@@ -44,6 +44,7 @@ the poll timer. The effect only re-runs when `endpoint` or `intervalMs` change.
 ```ts
 {
   id: 'zfs-pools',            // stable — also the #anchor
+  section: 'Infrastructure',  // which landing section it groups under
   title: 'ZFS Pools',
   component: ZfsPoolsWidget,
   endpoint: '/api/storage',
@@ -55,6 +56,14 @@ the poll timer. The effect only re-runs when `endpoint` or `intervalMs` change.
 ```
 
 No change to `app/lab/page.tsx` is needed.
+
+## Sections
+
+The landing page groups tiles into sections rendered in `labSectionOrder`
+(`Infrastructure` → `Agents & Spend` → `Security & Backups`). Every widget
+declares a `section`. To add a section, extend the `LabSection` union and
+`labSectionOrder` in `lib/lab-widgets.tsx`; the page renders any section that
+has at least one enabled widget.
 
 ## Notes
 
