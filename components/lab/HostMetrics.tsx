@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import type { HostMetrics as HostMetricsType } from '@/lib/prometheus'
 
 function tileColor(value: number | null, type: 'pct' | 'uptime' | 'load'): string {
@@ -46,22 +46,12 @@ function StatTile({
 }
 
 export default function HostMetrics() {
-  const [metrics, setMetrics] = useState<HostMetricsType[]>([])
-  const [loading, setLoading] = useState(true)
+  // Reference implementation of the shared widget data-source contract.
+  const { data: metrics, loading } = useWidgetData<HostMetricsType[]>('/api/metrics', {
+    select: (raw) => (raw as { metrics?: HostMetricsType[] }).metrics ?? [],
+  })
 
-  const load = () =>
-    fetch('/api/metrics')
-      .then((r) => r.json())
-      .then((d) => setMetrics(d.metrics ?? []))
-      .catch(() => {})
-
-  useEffect(() => {
-    load().finally(() => setLoading(false))
-    const id = setInterval(load, 30000)
-    return () => clearInterval(id)
-  }, [])
-
-  if (loading) return (
+  if (loading || metrics == null) return (
     <div className="flex items-center justify-center h-24">
       <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
     </div>

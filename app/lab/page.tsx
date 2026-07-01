@@ -1,33 +1,13 @@
-import Link from 'next/link'
-import HostMetrics from '@/components/lab/HostMetrics'
-import LabMonitor from '@/components/lab/LabMonitor'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
-import SecurityWidget from '@/components/lab/SecurityWidget'
-import BackupsWidget from '@/components/lab/BackupsWidget'
 import AgentHealthBanner from '@/components/shared/AgentHealthBanner'
 import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
-import AgentHealthCard from '@/components/lab/AgentHealthCard'
-import HostMetricsCharts from '@/components/lab/HostMetricsCharts'
 import ToolPills from '@/components/lab/ToolPills'
 import StatusPills from '@/components/lab/StatusPills'
-import ClaudeSpendWidget from '@/components/lab/ClaudeSpendWidget'
+import LabTile from '@/components/lab/LabTile'
+import { labWidgets } from '@/lib/lab-widgets'
 
 export const dynamic = 'force-dynamic'
-
-const card = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
-
-function ExpandLink({ href, label = '↗ expand' }: { href: string; label?: string }) {
-  return (
-    <Link
-      href={href}
-      className="text-[10px] font-semibold text-zinc-600 hover:text-zinc-300 uppercase tracking-widest transition-colors"
-    >
-      {label}
-    </Link>
-  )
-}
-
 
 export default function LabPage() {
   return (
@@ -49,55 +29,27 @@ export default function LabPage() {
         </div>
       </div>
 
-      {/* Host Metrics + Charts */}
-      <div className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Host Metrics</h2>
-          <ExpandLink href="/lab/monitor" />
-        </div>
-        <HostMetrics />
-        <HostMetricsCharts />
+      {/* Tiles are driven entirely by the registry — add a tile in
+          lib/lab-widgets.tsx, not here. See docs/widgets.md. */}
+      <div className="space-y-4">
+        {labWidgets
+          .filter((w) => w.enabled !== false)
+          .map((w) => {
+            const Widget = w.component
+            return (
+              <LabTile
+                key={w.id}
+                id={w.id}
+                title={w.title}
+                accent={w.accent}
+                expandHref={w.expandHref}
+                bare={w.bare}
+              >
+                <Widget />
+              </LabTile>
+            )
+          })}
       </div>
-
-      {/* Lab Monitor */}
-      <div className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Lab Monitor</h2>
-          <ExpandLink href="/lab/monitor" />
-        </div>
-        <LabMonitor />
-      </div>
-
-      {/* Agent Health */}
-      <div className={`${card} overflow-hidden mb-4`}>
-        <AgentHealthCard />
-      </div>
-
-      {/* Claude Programmatic Spend — Max-plan bucket (Phase 2) */}
-      <div id="claude-spend" className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest">
-            Claude Spend
-          </h2>
-          <ExpandLink href="/lab/monitor" />
-        </div>
-        <ClaudeSpendWidget />
-      </div>
-
-      {/* Security */}
-      <div id="security" className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Security</h2>
-          <ExpandLink href="/lab/security" />
-        </div>
-        <SecurityWidget />
-      </div>
-
-      {/* Backups */}
-      <div id="backups" className={`${card} mb-4`}>
-        <BackupsWidget />
-      </div>
-
     </div>
   )
 }
