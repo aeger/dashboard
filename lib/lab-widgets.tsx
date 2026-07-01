@@ -6,6 +6,8 @@ import AgentHealthCard from '@/components/lab/AgentHealthCard'
 import ClaudeSpendWidget from '@/components/lab/ClaudeSpendWidget'
 import SecurityWidget from '@/components/lab/SecurityWidget'
 import BackupsWidget from '@/components/lab/BackupsWidget'
+import StoragePools from '@/components/lab/StoragePools'
+import EndpointProbes from '@/components/lab/EndpointProbes'
 
 /**
  * Lab widget registry — the single source of truth for the /lab landing page.
@@ -59,6 +61,20 @@ export const labWidgets: LabWidget[] = [
     title: 'Lab Monitor',
     component: LabMonitor,
     endpoint: '/api/services',
+    expandHref: '/lab/monitor',
+  },
+  {
+    id: 'endpoint-health',
+    title: 'Endpoint Health',
+    component: EndpointProbes,
+    endpoint: '/api/probes',
+    expandHref: '/lab/monitor',
+  },
+  {
+    id: 'storage-pools',
+    title: 'Storage / ZFS Pools',
+    component: StoragePools,
+    endpoint: '/api/storage',
     expandHref: '/lab/monitor',
   },
   {

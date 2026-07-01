@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import type { StoragePool } from '@/lib/prometheus'
 
 // green < 70, amber 70-85, red > 85 — matches HostMetrics tileColor thresholds
@@ -13,33 +13,12 @@ function barColor(pct: number | null): string {
 }
 
 export default function StoragePools() {
-  const [pools, setPools] = useState<StoragePool[] | null>(null)
-  const [err, setErr] = useState(false)
+  const { data: pools, loading, error } = useWidgetData<StoragePool[]>('/api/storage', {
+    select: (raw) => (raw as { pools?: StoragePool[] }).pools ?? [],
+  })
 
-  useEffect(() => {
-    let alive = true
-    const load = async () => {
-      try {
-        const res = await fetch('/api/storage', { cache: 'no-store' })
-        const data = await res.json()
-        if (alive) {
-          setPools(data.pools ?? [])
-          setErr(false)
-        }
-      } catch {
-        if (alive) setErr(true)
-      }
-    }
-    load()
-    const t = setInterval(load, 30000)
-    return () => {
-      alive = false
-      clearInterval(t)
-    }
-  }, [])
-
-  if (err) return <div className="text-xs text-red-400/80">Storage metrics unavailable</div>
-  if (pools == null) return <div className="text-xs text-zinc-600">Loading…</div>
+  if (error && pools == null) return <div className="text-xs text-red-400/80">Storage metrics unavailable</div>
+  if (loading || pools == null) return <div className="text-xs text-zinc-600">Loading…</div>
   if (pools.length === 0) return <div className="text-xs text-zinc-600">No storage data</div>
 
   return (

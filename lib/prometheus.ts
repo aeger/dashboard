@@ -75,6 +75,97 @@ export async function fetchStoragePools(): Promise<StoragePool[]> {
   return pools
 }
 
+export interface EndpointProbe {
+  name: string                      // host derived from the probed URL
+  url: string                       // full probed URL (prometheus `instance`)
+  scope: 'public' | 'internal' | 'protected'
+  success: boolean
+  status_code: number | null
+  duration_ms: number | null
+  cert_expiry_days: number | null   // days until earliest TLS cert expiry, null if not TLS
+}
+
+// Blackbox-exporter endpoint probes (probe_* metrics). Joins probe_success,
+// probe_http_status_code, probe_duration_seconds and probe_ssl_earliest_cert_expiry
+// by the `instance` label (the probed URL). `job` names carry the scope
+// (blackbox-http-{public,internal,protected}).
+export async function fetchEndpointProbes(): Promise<EndpointProbe[]> {
+  const baseUrl = process.env.PROMETHEUS_URL
+  if (!baseUrl) return []
+
+  const raw = async (query: string): Promise<Array<{ metric: Record<string, string>; value: [number, string] }>> => {
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ query }),
+        signal: AbortSignal.timeout(2500),
+        next: { revalidate: 15 },
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      return data.data?.result ?? []
+    } catch {
+      return []
+    }
+  }
+
+  const [success, status, duration, cert] = await Promise.all([
+    raw('probe_success'),
+    raw('probe_http_status_code'),
+    raw('probe_duration_seconds'),
+    raw('probe_ssl_earliest_cert_expiry'),
+  ])
+
+  const byInstance = (rows: Array<{ metric: Record<string, string>; value: [number, string] }>) => {
+    const m: Record<string, number> = {}
+    for (const r of rows) {
+      const inst = r.metric?.instance
+      if (inst) m[inst] = parseFloat(r.value?.[1] ?? 'NaN')
+    }
+    return m
+  }
+
+  const statusM = byInstance(status)
+  const durM = byInstance(duration)
+  const certM = byInstance(cert)
+  const nowSec = Date.now() / 1000
+
+  const scopeOf = (job: string): EndpointProbe['scope'] =>
+    job.includes('public') ? 'public' : job.includes('protected') ? 'protected' : 'internal'
+  const hostOf = (url: string) => {
+    try {
+      return new URL(url).host
+    } catch {
+      return url
+    }
+  }
+
+  const probes: EndpointProbe[] = success.map((r) => {
+    const url = r.metric?.instance ?? ''
+    const certTs = certM[url]
+    return {
+      name: hostOf(url),
+      url,
+      scope: scopeOf(r.metric?.job ?? ''),
+      success: parseFloat(r.value?.[1] ?? '0') === 1,
+      status_code: Number.isFinite(statusM[url]) ? Math.round(statusM[url]) : null,
+      duration_ms: Number.isFinite(durM[url]) ? Math.round(durM[url] * 1000) : null,
+      cert_expiry_days:
+        Number.isFinite(certTs) && certTs > 0 ? Math.round((certTs - nowSec) / 86400) : null,
+    }
+  })
+
+  // Failing probes first, then by scope, then name — most actionable at top.
+  probes.sort(
+    (a, b) =>
+      Number(a.success) - Number(b.success) ||
+      a.scope.localeCompare(b.scope) ||
+      a.name.localeCompare(b.name),
+  )
+  return probes
+}
+
 async function promQuery(baseUrl: string, query: string): Promise<Record<string, number>> {
   try {
     const res = await fetch(`${baseUrl}/api/v1/query`, {
