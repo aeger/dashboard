@@ -58,12 +58,15 @@ services:
       - TERMINAL_SSH_KEY=/run/secrets/terminal_ssh_key
       - TERMINAL_SSH_HOST=192.168.1.181
       - TERMINAL_SSH_USER=almty1
+      # Phase 2: Claude programmatic-spend log (written by ~/claude/lib/claude_call.py)
+      - CLAUDE_SPEND_LOG=/app/spend/usage.jsonl
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
       - /home/almty1/.dashboard-terminal-key:/run/secrets/terminal_ssh_key:ro
       - /home/almty1/azlab/infrastructure/traefik/dynamic:/traefik-dynamic:rw
       - /home/almty1/azlab/services/rustdesk/data:/app/rustdesk-data:ro
+      - /home/almty1/.local/state/claude-spend:/app/spend:ro
     networks:
       - proxy
     labels:

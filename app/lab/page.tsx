@@ -11,6 +11,7 @@ import AgentHealthCard from '@/components/lab/AgentHealthCard'
 import HostMetricsCharts from '@/components/lab/HostMetricsCharts'
 import ToolPills from '@/components/lab/ToolPills'
 import StatusPills from '@/components/lab/StatusPills'
+import ClaudeSpendWidget from '@/components/lab/ClaudeSpendWidget'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +71,17 @@ export default function LabPage() {
       {/* Agent Health */}
       <div className={`${card} overflow-hidden mb-4`}>
         <AgentHealthCard />
+      </div>
+
+      {/* Claude Programmatic Spend — Max-plan bucket (Phase 2) */}
+      <div id="claude-spend" className={`${card} mb-4`}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest">
+            Claude Spend
+          </h2>
+          <ExpandLink href="/lab/monitor" />
+        </div>
+        <ClaudeSpendWidget />
       </div>
 
       {/* Security */}

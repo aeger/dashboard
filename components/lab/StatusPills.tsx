@@ -339,12 +339,60 @@ function ClaudeVersionPill() {
   )
 }
 
+function SpendPill() {
+  const [data, setData] = useState<{ bucketSpend: number; bucketLimit: number; bucketPct: number; apiSpend: number; available: boolean } | null>(null)
+
+  useEffect(() => {
+    const load = () =>
+      fetch('/api/claude-spend')
+        .then(r => r.json())
+        .then(d => { if (d && !d.error) setData(d) })
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const exhausted = data ? data.bucketSpend >= data.bucketLimit : false
+  const color = !data ? '#71717a'
+    : exhausted ? '#f59e0b'
+    : data.bucketPct >= 85 ? '#eab308'
+    : '#10b981'
+
+  return (
+    <a
+      href="#claude-spend"
+      onClick={(e) => {
+        e.preventDefault()
+        document.getElementById('claude-spend')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:brightness-125 cursor-pointer"
+      style={{ background: `${color}12`, borderColor: `${color}30`, color }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      <span className="text-zinc-400 font-normal">spend</span>
+      {data && data.available ? (
+        <>
+          <span className="font-semibold tabular-nums" style={{ color }}>
+            ${data.bucketSpend < 0.01 ? data.bucketSpend.toFixed(3) : data.bucketSpend.toFixed(2)}
+          </span>
+          <span className="text-zinc-600 tabular-nums">/{data.bucketLimit}</span>
+          {data.apiSpend > 0 && <span className="text-amber-400 tabular-nums font-semibold">+${data.apiSpend.toFixed(2)}</span>}
+        </>
+      ) : (
+        <span className="text-zinc-600">—</span>
+      )}
+    </a>
+  )
+}
+
 export default function StatusPills() {
   return (
     <div className="flex items-center gap-2">
       <GoalsPill />
       <ContainerPill />
       <TaskPill />
+      <SpendPill />
       <ClaudeVersionPill />
       <SecurityPill />
     </div>
