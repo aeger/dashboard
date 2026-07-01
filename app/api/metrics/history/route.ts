@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 
+// Live 12h range from Prometheus — must never be cached/prerendered, or the
+// charts freeze at the build-time/first (empty) result. See /api/metrics.
+export const dynamic = 'force-dynamic'
+
 const STEP = 300 // 5-min intervals → 144 points over 12h
 
 async function promRangeQuery(baseUrl: string, query: string, start: number, end: number): Promise<[number, string][]> {

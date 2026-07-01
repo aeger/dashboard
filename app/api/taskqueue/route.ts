@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supaFetch } from '@/lib/supabase-fetch'
 
+// Live data — never cache/prerender (stale-widget fix 2026-07-01).
+export const dynamic = 'force-dynamic'
+
 export interface ChecklistItem {
   id: string
   text: string

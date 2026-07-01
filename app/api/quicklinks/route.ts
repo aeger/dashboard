@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAllQuickLinks, saveQuickLinks } from '@/lib/quicklinks'
 import type { QuickLink } from '@/lib/config'
 
+// Live data — never cache/prerender (stale-widget fix 2026-07-01).
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   return NextResponse.json(getAllQuickLinks())
 }

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { sshExec } from '@/lib/ssh-exec'
 
+// Live data — never cache/prerender (stale-widget fix 2026-07-01).
+export const dynamic = 'force-dynamic'
+
 let cachedLatest: { value: string; at: number } | null = null
 const LATEST_TTL_MS = 60 * 60_000
 

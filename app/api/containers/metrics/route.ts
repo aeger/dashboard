@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 
+// Live container metrics — never cache/prerender (else it freezes stale/empty).
+export const dynamic = 'force-dynamic'
+
 // navidys/prometheus-podman-exporter `podman_container_state` enum:
 // 0=created 1=initialized 2=running 3=stopped 4=paused 5=exited 6=removing 7=stopping
 export const PODMAN_STATE_RUNNING = 2

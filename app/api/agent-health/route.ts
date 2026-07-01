@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 
+// Live agent heartbeats — never cache/prerender.
+export const dynamic = 'force-dynamic'
+
 interface AgentHeartbeat {
   agent: string
   status: string
