@@ -44,8 +44,11 @@ export default function LabPage() {
               <hr className="flex-1 border-0 border-t border-zinc-800/50" />
             </div>
             {/* 12-col grid at lg+; tiles declare their span in the registry and
-                stack full-width below lg. An expanded tile grows to the full row. */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+                stack full-width below lg. Default stretch alignment equalizes
+                card heights per row — short-next-to-tall reads intentional
+                instead of leaving ragged holes. An expanded tile grows to the
+                full row. */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
               {widgets.map((w) => {
                 const Widget = w.component
                 const Detail = w.detail

@@ -1,6 +1,7 @@
 'use client'
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { StatusChip, StatusDot } from '@/components/lab/Status'
 import type { EndpointProbe } from '@/lib/prometheus'
 
 const scopeBadge: Record<EndpointProbe['scope'], string> = {
@@ -51,9 +52,7 @@ export default function EndpointProbes() {
           key={p.url}
           className="flex items-center gap-2 py-1 border-b border-zinc-800/40 last:border-0 min-w-0"
         >
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.success ? 'bg-green-400' : 'bg-red-500'}`}
-          />
+          <StatusDot tone={p.success ? 'ok' : 'crit'} pulse={!p.success} />
           <a
             href={p.url}
             target="_blank"
@@ -74,14 +73,12 @@ export default function EndpointProbes() {
                 {p.cert_expiry_days}d cert
               </span>
             )}
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-[11px] text-zinc-500 tabular-nums">
               {p.duration_ms != null ? `${p.duration_ms}ms` : '—'}
             </span>
-            <span
-              className={`text-[11px] font-semibold ${p.success ? 'text-zinc-400' : 'text-red-400'}`}
-            >
+            <StatusChip tone={p.success ? 'ok' : 'crit'}>
               {p.status_code ?? (p.success ? 'OK' : 'DOWN')}
-            </span>
+            </StatusChip>
           </span>
         </div>
       ))}

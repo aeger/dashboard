@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
 import type { BackupStatus } from '@/app/api/backups/route'
 
-const HEALTH_STYLE: Record<string, { badge: string; dot: string; label: string }> = {
-  ok:              { badge: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50', dot: 'bg-emerald-400',                   label: 'OK' },
-  overdue:         { badge: 'bg-amber-900/40 text-amber-300 border-amber-700/40',       dot: 'bg-amber-400 animate-pulse',       label: 'Overdue' },
-  failed:          { badge: 'bg-red-900/50 text-red-300 border-red-700/50',             dot: 'bg-red-400 animate-pulse',         label: 'Failed' },
-  never_succeeded: { badge: 'bg-red-900/50 text-red-300 border-red-700/50',             dot: 'bg-red-400 animate-pulse',         label: 'No data' },
+const HEALTH_STYLE: Record<string, { tone: StatusTone; pulse: boolean; label: string }> = {
+  ok:              { tone: 'ok',   pulse: false, label: 'OK' },
+  overdue:         { tone: 'warn', pulse: true,  label: 'Overdue' },
+  failed:          { tone: 'crit', pulse: true,  label: 'Failed' },
+  never_succeeded: { tone: 'crit', pulse: true,  label: 'No data' },
 }
 
 function fmtAge(iso: string | null): string {
@@ -77,20 +78,16 @@ export default function BackupsWidget() {
             return (
               <div key={b.name} className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+                  <StatusDot tone={style.tone} pulse={style.pulse} />
                   <span className="text-xs text-zinc-300 truncate">{b.name}</span>
                   <span className="text-[10px] text-zinc-700 uppercase">{b.cadence}</span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[10px] text-zinc-600 hidden sm:block">
+                  <span className="text-[10px] text-zinc-600 hidden sm:block tabular-nums">
                     {fmtBytes(b.last_success_bytes ?? b.last_bytes)}
                   </span>
-                  <span className="text-[10px] text-zinc-600">{fmtAge(b.last_success_at)}</span>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${style.badge}`}
-                  >
-                    {style.label}
-                  </span>
+                  <span className="text-[10px] text-zinc-600 tabular-nums">{fmtAge(b.last_success_at)}</span>
+                  <StatusChip tone={style.tone}>{style.label}</StatusChip>
                 </div>
               </div>
             )

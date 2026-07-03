@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
 import type { AdGuardStats } from '@/lib/adguard'
 import type { NetworkStats } from '@/app/api/network/route'
 import type { Monitor } from '@/lib/uptime-kuma'
@@ -123,13 +124,13 @@ function BlockedDonut({ total, blocked }: { total: number; blocked: number }) {
   )
 }
 
-// ── Tab button ─────────────────────────────────────────────────────────────
+// ── Tab button (segmented control) ─────────────────────────────────────────
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={`text-xs px-3 py-1.5 rounded-t transition-colors ${
-        active ? 'text-white bg-zinc-800 border border-zinc-700 border-b-zinc-800' : 'text-zinc-500 hover:text-zinc-300'
+      className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
+        active ? 'bg-zinc-700/70 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
       }`}
     >
       {children}
@@ -201,24 +202,21 @@ function ServicesTab() {
         <span><span className="text-red-400">■</span> &lt;90%</span>
       </div>
 
-      {/* Monitor grid */}
+      {/* Monitor grid — single-line rows: arc + name · ping + uptime chip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
         {monitors.map((m) => {
-          const statusColor = m.status === 'up' ? 'bg-green-400' : m.status === 'down' ? 'bg-red-400' : 'bg-amber-400'
-          const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-400'
+          const statusTone: StatusTone = m.status === 'up' ? 'ok' : m.status === 'down' ? 'crit' : 'warn'
+          const uptimeTone: StatusTone = m.uptime >= 99 ? 'ok' : m.uptime >= 90 ? 'warn' : 'crit'
+          const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-500'
           return (
-            <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-2">
+            <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-1.5 min-w-0">
               <UptimeArc pct={m.uptime} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor}`} />
-                  <span className="text-xs text-zinc-200 truncate">{m.name}</span>
-                </div>
-                <div className="text-[10px] text-zinc-600 mt-0.5">{m.uptime}% uptime</div>
-              </div>
+              <StatusDot tone={statusTone} pulse={m.status === 'down'} />
+              <span className="text-xs text-zinc-200 truncate flex-1">{m.name}</span>
               {m.ping != null && (
-                <span className={`text-xs flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
+                <span className={`text-[11px] tabular-nums flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
               )}
+              <StatusChip tone={uptimeTone}>{m.uptime}%</StatusChip>
             </div>
           )
         })}
@@ -366,8 +364,8 @@ export default function LabMonitor() {
 
   return (
     <div className="space-y-0">
-      {/* Tab bar */}
-      <div className="flex gap-0.5 border-b border-zinc-800 mb-4">
+      {/* Tab bar — segmented control */}
+      <div className="inline-flex gap-0.5 bg-zinc-800/50 border border-zinc-700/40 rounded-lg p-0.5 mb-4">
         <TabBtn active={tab === 'services'} onClick={() => setTab('services')}>Services</TabBtn>
         <TabBtn active={tab === 'network'} onClick={() => setTab('network')}>WAN & Network</TabBtn>
         <TabBtn active={tab === 'dns'} onClick={() => setTab('dns')}>DNS / AdGuard</TabBtn>
