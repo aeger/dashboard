@@ -1,6 +1,7 @@
 'use client'
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { useTileMeta } from '@/components/lab/LabTile'
 import type { StoragePool } from '@/lib/prometheus'
 
 // green < 70, amber 70-85, red > 85 — matches HostMetrics tileColor thresholds
@@ -16,6 +17,7 @@ export default function StoragePools() {
   const { data: pools, loading, error } = useWidgetData<StoragePool[]>('/api/storage', {
     select: (raw) => (raw as { pools?: StoragePool[] }).pools ?? [],
   })
+  useTileMeta(pools?.length ? `proxmox · ${pools.length} pools` : undefined)
 
   if (error && pools == null) return <div className="text-xs text-red-400/80">Storage metrics unavailable</div>
   if (loading || pools == null) return <div className="text-xs text-zinc-600">Loading…</div>

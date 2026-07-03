@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTileMeta } from '@/components/lab/LabTile'
 
 interface Finding {
   id: string
@@ -89,6 +90,7 @@ export default function SecurityWidget() {
   const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
+  useTileMeta(data ? `last scan ${timeAgo(data.scanned_at)}` : undefined)
 
   const load = () =>
     fetch('/api/security')

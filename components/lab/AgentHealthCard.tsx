@@ -105,7 +105,10 @@ export default function AgentHealthCard() {
       {/* Header accent — color-coded by worst agent status */}
       <div className="w-1 absolute left-0 top-4 bottom-4 rounded-full" style={{ left: '0', marginLeft: '-1px', background: `${accentColor}99` }} />
 
-      <h2 className="text-[10px] font-semibold text-green-400/70 uppercase tracking-widest mb-3">Agent Health</h2>
+      <div className="flex items-baseline gap-2.5 mb-3">
+        <h2 className="text-[10px] font-semibold text-green-400/70 uppercase tracking-widest">Agent Health</h2>
+        <span className="text-[10px] text-zinc-600">heartbeats · 30s</span>
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center h-20">

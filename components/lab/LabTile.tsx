@@ -1,7 +1,22 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+
+/**
+ * Channel for a widget to surface a short dynamic context line in ITS tile's
+ * header (e.g. "svc-podman-01 · up 23.4d", "uptime-kuma · 19 monitors").
+ * Widgets call useTileMeta(...) once their data arrives; LabTile renders it
+ * dimmed next to the title.
+ */
+const TileMetaContext = createContext<(meta: string) => void>(() => {})
+
+export function useTileMeta(meta: string | null | undefined) {
+  const setMeta = useContext(TileMetaContext)
+  useEffect(() => {
+    if (meta != null && meta !== '') setMeta(meta)
+  }, [meta, setMeta])
+}
 
 /** Shared card chrome for every lab tile. Kept in sync with the family cards. */
 const CARD = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
@@ -75,6 +90,7 @@ export default function LabTile({
 }: LabTileProps) {
   const [expanded, setExpanded] = useState(false)
   const [everExpanded, setEverExpanded] = useState(false)
+  const [meta, setMeta] = useState('')
 
   const toggle = () => {
     setExpanded((v) => !v)
@@ -87,7 +103,12 @@ export default function LabTile({
     <div id={id} className={`${CARD} ${spanClass} min-w-0 ${className}`}>
       {!bare && title && (
         <div className="flex items-center justify-between gap-2 mb-3">
-          <h2 className={`text-[10px] font-semibold ${accent} uppercase tracking-widest`}>{title}</h2>
+          <div className="flex items-baseline gap-2.5 min-w-0">
+            <h2 className={`text-[10px] font-semibold ${accent} uppercase tracking-widest whitespace-nowrap`}>{title}</h2>
+            {meta && (
+              <span className="text-[10px] text-zinc-600 tabular-nums truncate">{meta}</span>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             {detail != null && (
               <button
@@ -108,17 +129,19 @@ export default function LabTile({
           </div>
         </div>
       )}
-      {children}
-      {detail != null && everExpanded && (
-        <div
-          className="grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none"
-          style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
-        >
-          <div className="overflow-hidden min-w-0">
-            <div className="pt-4 mt-4 border-t border-dashed border-zinc-800/60">{detail}</div>
+      <TileMetaContext.Provider value={setMeta}>
+        {children}
+        {detail != null && everExpanded && (
+          <div
+            className="grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none"
+            style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
+          >
+            <div className="overflow-hidden min-w-0">
+              <div className="pt-4 mt-4 border-t border-dashed border-zinc-800/60">{detail}</div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </TileMetaContext.Provider>
     </div>
   )
 }

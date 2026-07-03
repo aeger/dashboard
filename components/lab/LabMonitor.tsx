@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
+import { useTileMeta } from '@/components/lab/LabTile'
 import type { AdGuardStats } from '@/lib/adguard'
 import type { NetworkStats } from '@/app/api/network/route'
 import type { Monitor } from '@/lib/uptime-kuma'
@@ -154,6 +155,7 @@ function ServicesTab() {
   const { data: monitors, error } = useWidgetData<Monitor[]>('/api/services', {
     select: (raw) => (raw as { monitors?: Monitor[] }).monitors ?? [],
   })
+  useTileMeta(monitors?.length ? `uptime-kuma · ${monitors.length} monitors` : undefined)
 
   if (error && monitors == null)
     return <div className="text-xs text-red-400/80 text-center py-6">Service monitors unavailable</div>

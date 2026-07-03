@@ -2,6 +2,7 @@
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { StatusChip, StatusDot } from '@/components/lab/Status'
+import { useTileMeta } from '@/components/lab/LabTile'
 import type { EndpointProbe } from '@/lib/prometheus'
 
 const scopeBadge: Record<EndpointProbe['scope'], string> = {
@@ -22,6 +23,7 @@ export default function EndpointProbes() {
     intervalMs: 30000,
     select: (raw) => (raw as { probes?: EndpointProbe[] }).probes ?? [],
   })
+  useTileMeta(data?.length ? `blackbox · ${data.length} probes · 30s` : undefined)
 
   // Error check MUST precede the null-data spinner — data stays null while the
   // endpoint fails, so the old order rendered a spinner forever.

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTileMeta } from '@/components/lab/LabTile'
 
 interface TierBreakdown {
   tier: number
@@ -97,6 +98,9 @@ function Sparkline({ data }: { data: { date: string; cost: number }[] }) {
 export default function ClaudeSpendWidget() {
   const [data, setData] = useState<Spend | null>(null)
   const [err, setErr] = useState(false)
+  useTileMeta(
+    data?.available ? `${data.monthLabel} · ${data.mtdCalls} calls MTD` : undefined,
+  )
 
   useEffect(() => {
     let alive = true

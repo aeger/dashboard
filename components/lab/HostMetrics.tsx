@@ -1,7 +1,52 @@
 'use client'
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { useTileMeta } from '@/components/lab/LabTile'
 import type { HostMetrics as HostMetricsType } from '@/lib/prometheus'
+
+/** Compact CPU-over-last-hour sparkline in a stat cell (12 × 5-min samples). */
+function CpuSparkCell() {
+  const { data: points } = useWidgetData<{ t: number; v: number }[]>('/api/metrics/history', {
+    intervalMs: 60000,
+    select: (raw) => ((raw as { cpu?: { t: number; v: number }[] }).cpu ?? []).slice(-12),
+  })
+  const last = points?.length ? points[points.length - 1].v : null
+
+  let svg: React.ReactNode = null
+  if (points && points.length > 1) {
+    const W = 100
+    const H = 26
+    const max = Math.max(...points.map((p) => p.v), 1) * 1.15
+    const pts = points.map((p, i) => [
+      (i / (points.length - 1)) * W,
+      H - 2 - (p.v / max) * (H - 5),
+    ])
+    const line = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+    const area = `M0,${H} L${line.split(' ').join(' L')} L${W},${H} Z`
+    svg = (
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-7 mt-1">
+        <path d={area} fill="rgba(139,92,246,0.12)" />
+        <polyline points={line} fill="none" stroke="#8b5cf6" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.2" fill="#a78bfa" />
+      </svg>
+    )
+  }
+
+  return (
+    <div
+      className="flex flex-col justify-between rounded-lg p-3 min-w-0 bg-zinc-800/40 border border-zinc-700/30"
+      style={{ minHeight: '88px' }}
+    >
+      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider truncate">CPU · 1h</div>
+      <div>
+        <span className="text-sm font-semibold text-zinc-300 tabular-nums">
+          {last != null ? `${last.toFixed(1)}%` : '—'}
+        </span>
+        {svg}
+      </div>
+    </div>
+  )
+}
 
 type Tone = 'ok' | 'warn' | 'crit' | 'none'
 
@@ -74,6 +119,14 @@ export default function HostMetrics() {
     select: (raw) => (raw as { metrics?: HostMetricsType[] }).metrics ?? [],
   })
 
+  // Surface host + uptime as the tile-header context line (mockup pattern).
+  const first = metrics?.[0]
+  useTileMeta(
+    first
+      ? `${first.name}${first.uptime_days != null ? ` · up ${first.uptime_days.toFixed(1)}d` : ''}`
+      : undefined,
+  )
+
   // Error check MUST precede the null-data spinner: on a failing endpoint the hook
   // never sets data, so checking `data == null` first spins forever.
   if (error && metrics == null) return (
@@ -92,7 +145,7 @@ export default function HostMetrics() {
 
   return (
     <div className="space-y-4">
-      {metrics.map((host) => {
+      {metrics.map((host, hostIdx) => {
         const uptimeDays = host.uptime_days != null
           ? `${host.uptime_days.toFixed(2)} days`
           : '—'
@@ -136,7 +189,9 @@ export default function HostMetrics() {
                 tone={toneFor(host.load_1m, 'load')}
                 barPct={host.load_1m != null ? (host.load_1m / 4) * 100 : null}
               />
-              <StatTile label="Uptime" value={uptimeDays} />
+              {/* First host: uptime lives in the header meta; the cell becomes a
+                  CPU-over-1h sparkline. Extra hosts keep the plain uptime cell. */}
+              {hostIdx === 0 ? <CpuSparkCell /> : <StatTile label="Uptime" value={uptimeDays} />}
               <StatTile
                 label="Root Disk Usage"
                 value={diskPct}
