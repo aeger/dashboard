@@ -47,9 +47,15 @@ function StatTile({
 
 export default function HostMetrics() {
   // Reference implementation of the shared widget data-source contract.
-  const { data: metrics, loading } = useWidgetData<HostMetricsType[]>('/api/metrics', {
+  const { data: metrics, loading, error } = useWidgetData<HostMetricsType[]>('/api/metrics', {
     select: (raw) => (raw as { metrics?: HostMetricsType[] }).metrics ?? [],
   })
+
+  // Error check MUST precede the null-data spinner: on a failing endpoint the hook
+  // never sets data, so checking `data == null` first spins forever.
+  if (error && metrics == null) return (
+    <div className="text-xs text-red-400/80 text-center py-6">Host metrics unavailable</div>
+  )
 
   if (loading || metrics == null) return (
     <div className="flex items-center justify-center h-24">

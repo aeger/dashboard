@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import type { AdGuardStats } from '@/lib/adguard'
 import type { NetworkStats } from '@/app/api/network/route'
 import type { Monitor } from '@/lib/uptime-kuma'
@@ -147,15 +148,14 @@ function Spinner() {
 
 // ── Services Tab ───────────────────────────────────────────────────────────
 function ServicesTab() {
-  const [monitors, setMonitors] = useState<Monitor[] | null>(null)
+  // Shared hook: 30s poll + error state (tabs previously fetched once and went
+  // stale on a long-open page; a failed fetch spun forever).
+  const { data: monitors, error } = useWidgetData<Monitor[]>('/api/services', {
+    select: (raw) => (raw as { monitors?: Monitor[] }).monitors ?? [],
+  })
 
-  useEffect(() => {
-    fetch('/api/services')
-      .then((r) => r.json())
-      .then((d) => setMonitors(d.monitors ?? null))
-      .catch(() => setMonitors([]))
-  }, [])
-
+  if (error && monitors == null)
+    return <div className="text-xs text-red-400/80 text-center py-6">Service monitors unavailable</div>
   if (!monitors) return <Spinner />
   if (!monitors.length) return <div className="text-zinc-500 text-sm text-center py-6">No monitors configured</div>
 
@@ -231,15 +231,10 @@ function ServicesTab() {
 
 // ── Network Tab ────────────────────────────────────────────────────────────
 function NetworkTab() {
-  const [stats, setStats] = useState<NetworkStats | null>(null)
+  const { data: stats, error } = useWidgetData<NetworkStats>('/api/network')
 
-  useEffect(() => {
-    fetch('/api/network')
-      .then((r) => r.json())
-      .then((d) => setStats(d))
-      .catch(() => {})
-  }, [])
-
+  if (error && stats == null)
+    return <div className="text-xs text-red-400/80 text-center py-6">Network stats unavailable</div>
   if (!stats) return <Spinner />
 
   const maxBw = Math.max(...(stats.interfaces.flatMap((i) => [i.rx_bytes_per_sec, i.tx_bytes_per_sec])), 1)
@@ -297,20 +292,20 @@ function NetworkTab() {
 
 // ── DNS Tab ────────────────────────────────────────────────────────────────
 function DnsTab() {
-  const [dns, setDns] = useState<AdGuardStats | null>(null)
-  const [loaded, setLoaded] = useState(false)
   const [subTab, setSubTab] = useState<'queried' | 'blocked' | 'clients'>('queried')
+  // select maps an AdGuard error payload to null → "not configured" below.
+  const { data: dns, loading, error } = useWidgetData<AdGuardStats | null>('/api/dns', {
+    intervalMs: 60000,
+    select: (raw) => ((raw as { error?: unknown })?.error ? null : (raw as AdGuardStats)),
+  })
 
-  useEffect(() => {
-    fetch('/api/dns')
-      .then((r) => r.json())
-      .then((d) => setDns(d.error ? null : d))
-      .catch(() => {})
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded) return <Spinner />
-  if (!dns) return <div className="text-zinc-500 text-sm text-center py-6">AdGuard not configured</div>
+  if (loading) return <Spinner />
+  if (!dns)
+    return (
+      <div className="text-zinc-500 text-sm text-center py-6">
+        {error ? 'DNS stats unavailable' : 'AdGuard not configured'}
+      </div>
+    )
 
   const maxDomain = Math.max(
     ...(subTab === 'queried' ? dns.top_queried_domains : subTab === 'blocked' ? dns.top_blocked_domains : dns.top_clients)

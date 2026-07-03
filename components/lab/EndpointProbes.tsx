@@ -22,15 +22,17 @@ export default function EndpointProbes() {
     select: (raw) => (raw as { probes?: EndpointProbe[] }).probes ?? [],
   })
 
+  // Error check MUST precede the null-data spinner — data stays null while the
+  // endpoint fails, so the old order rendered a spinner forever.
+  if (error && data == null)
+    return <div className="text-xs text-red-400/80">Endpoint probes unavailable</div>
+
   if (loading || data == null)
     return (
       <div className="flex items-center justify-center h-16">
         <div className="w-5 h-5 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
       </div>
     )
-
-  if (error && data.length === 0)
-    return <div className="text-xs text-red-400/80">Endpoint probes unavailable</div>
 
   if (data.length === 0)
     return <div className="text-xs text-zinc-600 py-2">No endpoint probes configured</div>
