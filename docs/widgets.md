@@ -48,12 +48,25 @@ the poll timer. The effect only re-runs when `endpoint` or `intervalMs` change.
   title: 'ZFS Pools',
   component: ZfsPoolsWidget,
   endpoint: '/api/storage',
-  expandHref: '/lab/monitor', // optional
+  span: 4,                    // grid columns at lg+ (4/5/6/7/8/12); rows sum to 12
+  // detail: ZfsDatasets,     // in-place expand content (inline, no navigation)
+  // detailLabel: 'datasets', // toggle label (default "expand")
+  // expandHref: '/lab/x',    // ⤢ deep link — only if a genuinely richer page exists
   accent: 'text-emerald-400/70', // optional header color
   // bare: true,              // set if the widget draws its own header
   // enabled: false,          // set to hide without deleting the entry
 }
 ```
+
+### Grid & in-place expand
+
+The landing grid is 12 columns at `lg+` (tiles stack full-width below). Each tile
+declares `span`; each section's spans should sum to 12 per row. `detail` is the
+in-place expansion: LabTile reveals it inline (animated `grid-template-rows`
+0fr→1fr) and grows the tile to the full row — no navigation, no lost scroll.
+The detail node mounts on first expand and stays mounted, so self-fetching
+detail widgets don't refetch on every toggle. `expandHref` (the ⤢ link) is only
+for genuinely richer full pages — not a substitute for `detail`.
 
 No change to `app/lab/page.tsx` is needed.
 

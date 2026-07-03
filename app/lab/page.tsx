@@ -37,18 +37,29 @@ export default function LabPage() {
         if (widgets.length === 0) return null
         return (
           <section key={section} className="mb-6">
-            <h2 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em] mb-3 px-1">
-              {section}
-            </h2>
-            <div className="space-y-4">
+            <div className="flex items-center gap-3 mb-3 px-1">
+              <h2 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
+                {section}
+              </h2>
+              <hr className="flex-1 border-0 border-t border-zinc-800/50" />
+            </div>
+            {/* 12-col grid at lg+; tiles declare their span in the registry and
+                stack full-width below lg. An expanded tile grows to the full row. */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
               {widgets.map((w) => {
                 const Widget = w.component
+                const Detail = w.detail
                 return (
                   <LabTile
                     key={w.id}
                     id={w.id}
                     title={w.title}
                     accent={w.accent}
+                    span={w.span}
+                    // Pass a rendered node, not the component fn — this page is a
+                    // server component and LabTile is a client component.
+                    detail={Detail ? <Detail /> : undefined}
+                    detailLabel={w.detailLabel}
                     expandHref={w.expandHref}
                     bare={w.bare}
                   >

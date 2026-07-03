@@ -40,7 +40,15 @@ export interface LabWidget {
   component: ComponentType
   /** The API route this widget consumes — documents the data-source contract. */
   endpoint?: string
-  /** Detail route for the header "expand" link. */
+  /** Grid columns at lg+ (4/5/6/7/8/12). Default 12. Rows should sum to 12. */
+  span?: number
+  /** In-place expand content, revealed inline by LabTile — no navigation. */
+  detail?: ComponentType
+  /** Label for the in-place expand toggle (default "expand"). */
+  detailLabel?: string
+  /** Deep link to a full detail route — the header "⤢" link. Only give one
+   *  where a genuinely richer page exists; in-place `detail` replaces the old
+   *  everything-links-to-/lab/monitor pattern. */
   expandHref?: string
   /** Tailwind text-color class for the header label. */
   accent?: string
@@ -50,39 +58,16 @@ export interface LabWidget {
   enabled?: boolean
 }
 
-/** Host Metrics tile pairs the stat grid with its sparkline charts. */
-function HostMetricsPanel() {
-  return (
-    <>
-      <HostMetrics />
-      <HostMetricsCharts />
-    </>
-  )
-}
-
 export const labWidgets: LabWidget[] = [
   {
     id: 'host-metrics',
     section: 'Infrastructure',
     title: 'Host Metrics',
-    component: HostMetricsPanel,
+    component: HostMetrics,
     endpoint: '/api/metrics',
-    expandHref: '/lab/monitor',
-  },
-  {
-    id: 'lab-monitor',
-    section: 'Infrastructure',
-    title: 'Lab Monitor',
-    component: LabMonitor,
-    endpoint: '/api/services',
-    expandHref: '/lab/monitor',
-  },
-  {
-    id: 'endpoint-health',
-    section: 'Infrastructure',
-    title: 'Endpoint Health',
-    component: EndpointProbes,
-    endpoint: '/api/probes',
+    span: 8,
+    detail: HostMetricsCharts,
+    detailLabel: 'history',
     expandHref: '/lab/monitor',
   },
   {
@@ -91,13 +76,31 @@ export const labWidgets: LabWidget[] = [
     title: 'Storage / ZFS Pools',
     component: StoragePools,
     endpoint: '/api/storage',
+    span: 4,
+  },
+  {
+    id: 'lab-monitor',
+    section: 'Infrastructure',
+    title: 'Lab Monitor',
+    component: LabMonitor,
+    endpoint: '/api/services (+ /api/network, /api/dns per tab)',
+    span: 7,
     expandHref: '/lab/monitor',
+  },
+  {
+    id: 'endpoint-health',
+    section: 'Infrastructure',
+    title: 'Endpoint Health',
+    component: EndpointProbes,
+    endpoint: '/api/probes',
+    span: 5,
   },
   {
     id: 'agent-health',
     section: 'Agents & Spend',
     component: AgentHealthCard,
     endpoint: '/api/agent-health',
+    span: 5,
     bare: true,
   },
   {
@@ -107,7 +110,7 @@ export const labWidgets: LabWidget[] = [
     component: ClaudeSpendWidget,
     endpoint: '/api/claude-spend',
     accent: 'text-emerald-400/70',
-    expandHref: '/lab/monitor',
+    span: 7,
   },
   {
     id: 'security',
@@ -115,6 +118,7 @@ export const labWidgets: LabWidget[] = [
     title: 'Security',
     component: SecurityWidget,
     endpoint: '/api/security',
+    span: 7,
     expandHref: '/lab/security',
   },
   {
@@ -122,6 +126,7 @@ export const labWidgets: LabWidget[] = [
     section: 'Security & Backups',
     component: BackupsWidget,
     endpoint: '/api/backups',
+    span: 5,
     bare: true,
   },
 ]
