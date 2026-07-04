@@ -79,7 +79,7 @@ function KeyboardHelpModal({ onClose }: { onClose: () => void }) {
   ]
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70"
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">

@@ -3623,7 +3623,7 @@ export default function GoalsPage() {
             </button>
             {showNewDropdown && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowNewDropdown(false)} />
+                <div className="fixed inset-0 z-[120]" onClick={() => setShowNewDropdown(false)} />
                 <div
                   className="absolute right-0 top-full mt-1 rounded-xl border border-zinc-800 shadow-2xl z-50 overflow-hidden py-1 min-w-[140px]"
                   style={{ background: 'rgba(14,14,16,0.98)' }}

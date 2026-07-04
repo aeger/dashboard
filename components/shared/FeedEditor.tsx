@@ -393,7 +393,7 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       aria-modal="true"
       role="dialog"
       aria-label={`Manage ${label} Feeds`}
