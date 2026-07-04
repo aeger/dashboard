@@ -12,6 +12,17 @@ interface ProxyConfig {
   auth: boolean
   tls: boolean
   staticIp: string
+  /** AdGuard split-DNS rewrite state (server-computed on GET). */
+  adguardOk?: boolean
+  adguardAnswer?: string | null
+}
+
+interface SyncResult {
+  success: boolean
+  added: string[]
+  fixed: string[]
+  ok: string[]
+  failed: string[]
 }
 
 type Tab = 'list' | 'create' | 'edit'
@@ -116,6 +127,7 @@ function ProxyForm({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [dnsStatus, setDnsStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
+  const [adguardStatus, setAdguardStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
 
   function set<K extends keyof ProxyConfig>(key: K, value: ProxyConfig[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -139,6 +151,7 @@ function ProxyForm({
         return
       }
       setDnsStatus(data.dns ? 'ok' : 'fail')
+      setAdguardStatus(data.adguard ? 'ok' : 'fail')
       setTimeout(() => {
         onSave(form)
       }, 800)
@@ -211,7 +224,13 @@ function ProxyForm({
         <p className="text-xs text-green-400">DNS record created/updated ✓</p>
       )}
       {dnsStatus === 'fail' && (
-        <p className="text-xs text-yellow-400">Proxy saved — DNS record may need manual creation</p>
+        <p className="text-xs text-yellow-400">Proxy saved — Cloudflare record may need manual creation</p>
+      )}
+      {adguardStatus === 'ok' && (
+        <p className="text-xs text-green-400">AdGuard LAN rewrite in place ✓</p>
+      )}
+      {adguardStatus === 'fail' && (
+        <p className="text-xs text-yellow-400">AdGuard rewrite failed — use Sync DNS on the list tab</p>
       )}
 
       <div className="flex gap-2 pt-1">
@@ -288,6 +307,16 @@ function ProxyList({
                   TLS
                 </span>
               )}
+              {p.adguardOk === false && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-800/50"
+                  title={p.adguardAnswer
+                    ? `AdGuard rewrite points at ${p.adguardAnswer} — use Sync DNS to fix`
+                    : 'No AdGuard rewrite — LAN clients resolve via Cloudflare and hairpin. Use Sync DNS.'}
+                >
+                  no LAN DNS
+                </span>
+              )}
             </div>
             <div className="text-xs text-indigo-400 mt-0.5 truncate">
               <a href={`https://${p.hostname}`} target="_blank" rel="noreferrer" className="hover:underline">
@@ -351,8 +380,11 @@ function ProxyList({
 export default function ProxiesWidget() {
   const [tab, setTab] = useState<Tab>('list')
   const [proxies, setProxies] = useState<ProxyConfig[]>([])
+  const [external, setExternal] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<ProxyConfig | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -360,12 +392,36 @@ export default function ProxiesWidget() {
       const res = await fetch('/api/proxies')
       const data = await res.json()
       setProxies(data.proxies ?? [])
+      setExternal(data.externalHostnames ?? [])
     } catch {
       // ignore
     } finally {
       setLoading(false)
     }
   }, [])
+
+  async function syncDns() {
+    setSyncing(true)
+    setSyncMsg('')
+    try {
+      const res = await fetch('/api/proxies/sync', { method: 'POST' })
+      const data: SyncResult & { error?: string } = await res.json()
+      if (!res.ok) {
+        setSyncMsg(data.error || 'Sync failed')
+      } else {
+        const parts: string[] = []
+        if (data.added.length) parts.push(`${data.added.length} added`)
+        if (data.fixed.length) parts.push(`${data.fixed.length} fixed`)
+        if (data.failed.length) parts.push(`${data.failed.length} FAILED`)
+        setSyncMsg(parts.length ? `AdGuard rewrites: ${parts.join(', ')}` : 'AdGuard rewrites already in sync ✓')
+      }
+      await load()
+    } catch {
+      setSyncMsg('Sync failed — network error')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   useEffect(() => {
     load()
@@ -380,18 +436,10 @@ export default function ProxiesWidget() {
     setProxies((prev) => prev.filter((p) => p.name !== name))
   }
 
-  function handleSaved(cfg: ProxyConfig) {
-    setProxies((prev) => {
-      const idx = prev.findIndex((p) => p.name === cfg.name)
-      if (idx >= 0) {
-        const next = [...prev]
-        next[idx] = cfg
-        return next
-      }
-      return [...prev, cfg].sort((a, b) => a.name.localeCompare(b.name))
-    })
+  function handleSaved() {
     setEditTarget(null)
     setTab('list')
+    load() // server recomputes AdGuard/DNS state
   }
 
   return (
@@ -409,7 +457,15 @@ export default function ProxiesWidget() {
             Editing: {editTarget.name}
           </TabBtn>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={syncDns}
+            disabled={syncing}
+            className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
+            title="Ensure every managed proxy has an AdGuard split-DNS rewrite"
+          >
+            {syncing ? 'Syncing…' : 'Sync DNS'}
+          </button>
           <button
             onClick={load}
             className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors px-2 py-1"
@@ -425,7 +481,30 @@ export default function ProxiesWidget() {
         loading ? (
           <p className="text-xs text-zinc-600">Loading…</p>
         ) : (
-          <ProxyList proxies={proxies} onEdit={handleEdit} onDelete={handleDelete} />
+          <>
+            {syncMsg && <p className="text-xs text-zinc-400 mb-2">{syncMsg}</p>}
+            <ProxyList proxies={proxies} onEdit={handleEdit} onDelete={handleDelete} />
+            {external.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-zinc-800/60">
+                <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1.5">
+                  Also routed by Traefik — managed elsewhere (compose labels / infra files)
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {external.map((h) => (
+                    <a
+                      key={h}
+                      href={`https://${h}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800/60 text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      {h}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )
       )}
 

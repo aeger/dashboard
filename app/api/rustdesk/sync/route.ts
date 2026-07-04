@@ -1,26 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync } from 'fs'
 import { randomUUID } from 'crypto'
-import type { RustDeskRemote } from '@/app/api/rustdesk/remotes/route'
+import { readRemotes, writeRemotes } from '@/lib/rustdesk-remotes'
+import { verifyAutheliaSession } from '@/lib/authelia'
 
-const DB_PATH      = '/app/rustdesk-data/db_v2.sqlite3'
-const REMOTES_FILE = join(process.cwd(), 'data', 'rustdesk_remotes.json')
+const DB_PATH = '/app/rustdesk-data/db_v2.sqlite3'
 
 export interface PeerInfo {
   peerId: string
   lastSeen: string   // ISO timestamp
   ip: string
   inRemotes: boolean
-}
-
-function readRemotes(): RustDeskRemote[] {
-  if (!existsSync(REMOTES_FILE)) return []
-  try { return JSON.parse(readFileSync(REMOTES_FILE, 'utf-8')) } catch { return [] }
-}
-
-function writeRemotes(r: RustDeskRemote[]) {
-  writeFileSync(REMOTES_FILE, JSON.stringify(r, null, 2) + '\n')
 }
 
 function readPeers(): PeerInfo[] {
@@ -58,8 +48,7 @@ export async function GET() {
 
 // POST — trigger auto-sync: add new peers, remove stale, update last_seen metadata
 export async function POST(req: NextRequest) {
-  const cookie = req.headers.get('cookie') ?? ''
-  if (!cookie.includes('authelia_session')) {
+  if (!(await verifyAutheliaSession(req.headers.get('cookie')))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -71,7 +60,9 @@ export async function POST(req: NextRequest) {
   const ipMap = Object.fromEntries(peers.map(p => [p.peerId, p.ip]))
 
   let remotes = readRemotes()
-  let added = 0, removed = 0, unchanged = 0
+  let added = 0
+  let removed = 0
+  let unchanged = 0
 
   // Add peers in DB but not in remotes
   for (const peer of peers) {
@@ -93,7 +84,7 @@ export async function POST(req: NextRequest) {
   // Remove remotes whose peer ID is no longer in the DB
   const before = remotes.length
   remotes = remotes.filter(r => dbIds.has(r.peerId))
-  removed = before - remotes.length - added  // net removals
+  removed = before - remotes.length
 
   // Update notes with latest last_seen for auto-added entries
   for (const r of remotes) {
@@ -102,7 +93,6 @@ export async function POST(req: NextRequest) {
       const ip = ipMap[r.peerId]
       if (ls) r.note = `Auto-added from relay DB. Last seen: ${ls}${ip ? ` · IP: ${ip}` : ''}`
     }
-    unchanged++
   }
   unchanged = remotes.length - added
 

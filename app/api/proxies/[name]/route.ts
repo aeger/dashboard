@@ -9,6 +9,10 @@ import {
   type ProxyConfig,
 } from '@/lib/traefik-proxies'
 import { upsertDnsRecord, deleteDnsRecord } from '@/lib/cloudflare-dns'
+import { upsertRewrite, deleteRewrite } from '@/lib/adguard'
+import { verifyAutheliaSession } from '@/lib/authelia'
+
+const LAN_ANSWER = '192.168.1.181' // Traefik on svc-podman-01 — split-DNS target
 
 type Params = { params: Promise<{ name: string }> }
 
@@ -23,8 +27,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PUT(req: NextRequest, { params }: Params) {
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) {
+  if (!(await verifyAutheliaSession(req.headers.get('cookie')))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -59,30 +62,32 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     writeProxy(updated)
 
-    // Update DNS if hostname or IP changed
+    // Update DNS if hostname or IP changed — Cloudflare (public) + AdGuard (LAN)
     let dnsOk = false
-    if (updated.hostname !== existing.hostname || updated.staticIp !== existing.staticIp) {
-      try {
-        if (updated.hostname !== existing.hostname) {
-          await deleteDnsRecord(existing.hostname)
-        }
-        dnsOk = await upsertDnsRecord(updated.hostname, updated.staticIp)
-      } catch {
-        // Non-fatal
+    let adguardOk = false
+    try {
+      if (updated.hostname !== existing.hostname) {
+        await deleteDnsRecord(existing.hostname)
+        await deleteRewrite(existing.hostname)
       }
-    } else {
-      dnsOk = true
+      if (updated.hostname !== existing.hostname || updated.staticIp !== existing.staticIp) {
+        dnsOk = await upsertDnsRecord(updated.hostname, updated.staticIp)
+      } else {
+        dnsOk = true
+      }
+      adguardOk = await upsertRewrite(updated.hostname, LAN_ANSWER)
+    } catch {
+      // Non-fatal
     }
 
-    return NextResponse.json({ success: true, dns: dnsOk })
+    return NextResponse.json({ success: true, dns: dnsOk, adguard: adguardOk })
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
-  const cookie = req.headers.get('cookie') || ''
-  if (!cookie.includes('authelia_session')) {
+  if (!(await verifyAutheliaSession(req.headers.get('cookie')))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -105,6 +110,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (deleteDns) {
     try {
       dnsDeleted = await deleteDnsRecord(existing.hostname)
+    } catch {
+      // Non-fatal
+    }
+    try {
+      await deleteRewrite(existing.hostname)
     } catch {
       // Non-fatal
     }

@@ -288,23 +288,24 @@ const blackbox: BoardSpec = {
 
 // ── Host Overview — Node Exporter ───────────────────────────────────────────
 
-const FS = `{mountpoint="/",fstype!="tmpfs"}`
+const NI = `instance="node_exporter:9100"`  // svc-podman-01 — the tile this board expands
+const FS = `{${NI},mountpoint="/",fstype!="tmpfs"}`
 
 const host: BoardSpec = {
   title: 'Host Overview — Node Exporter',
   range: 3 * 3600,
   step: 60,
   stats: [
-    { title: 'CPU Usage', expr: `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`, unit: 'percent', tone: { warn: 70, crit: 85 } },
+    { title: 'CPU Usage', expr: `100 - (avg(rate(node_cpu_seconds_total{${NI},mode="idle"}[5m])) * 100)`, unit: 'percent', tone: { warn: 70, crit: 85 } },
     {
       title: 'RAM Usage',
-      expr: `(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100`,
+      expr: `(node_memory_MemTotal_bytes{${NI}} - node_memory_MemAvailable_bytes{${NI}}) / node_memory_MemTotal_bytes{${NI}} * 100`,
       unit: 'percent',
       tone: { warn: 70, crit: 85 },
     },
-    { title: 'RAM Used', expr: `node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes`, unit: 'bytes' },
-    { title: 'Load 1m', expr: `node_load1`, unit: 'short', decimals: 2, tone: { warn: 2, crit: 4 } },
-    { title: 'Uptime', expr: `node_time_seconds - node_boot_time_seconds`, unit: 'duration' },
+    { title: 'RAM Used', expr: `node_memory_MemTotal_bytes{${NI}} - node_memory_MemAvailable_bytes{${NI}}`, unit: 'bytes' },
+    { title: 'Load 1m', expr: `node_load1{${NI}}`, unit: 'short', decimals: 2, tone: { warn: 2, crit: 4 } },
+    { title: 'Uptime', expr: `node_time_seconds{${NI}} - node_boot_time_seconds{${NI}}`, unit: 'duration' },
     {
       title: 'Root Disk',
       expr: `(node_filesystem_size_bytes${FS} - node_filesystem_free_bytes${FS}) / node_filesystem_size_bytes${FS} * 100`,
@@ -318,16 +319,16 @@ const host: BoardSpec = {
       title: 'CPU Usage by Mode',
       unit: 'percent',
       stack: true,
-      series: [{ expr: `avg by (mode) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) * 100`, legend: '{{mode}}' }],
+      series: [{ expr: `avg by (mode) (rate(node_cpu_seconds_total{${NI},mode!="idle"}[5m])) * 100`, legend: '{{mode}}' }],
     },
     {
       kind: 'timeseries',
       title: 'Load Average',
       unit: 'short',
       series: [
-        { expr: `node_load1`, legend: '1m', color: '#8b5cf6' },
-        { expr: `node_load5`, legend: '5m', color: '#0ea5e9' },
-        { expr: `node_load15`, legend: '15m', color: '#059669' },
+        { expr: `node_load1{${NI}}`, legend: '1m', color: '#8b5cf6' },
+        { expr: `node_load5{${NI}}`, legend: '5m', color: '#0ea5e9' },
+        { expr: `node_load15{${NI}}`, legend: '15m', color: '#059669' },
       ],
     },
     {
@@ -335,10 +336,10 @@ const host: BoardSpec = {
       title: 'Memory Breakdown',
       unit: 'bytes',
       series: [
-        { expr: `node_memory_MemTotal_bytes`, legend: 'total', color: '#71717a' },
-        { expr: `node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes`, legend: 'used', color: '#d97706' },
-        { expr: `node_memory_MemAvailable_bytes`, legend: 'available', color: '#059669' },
-        { expr: `node_memory_Buffers_bytes + node_memory_Cached_bytes`, legend: 'buffers+cache', color: '#0ea5e9' },
+        { expr: `node_memory_MemTotal_bytes{${NI}}`, legend: 'total', color: '#71717a' },
+        { expr: `node_memory_MemTotal_bytes{${NI}} - node_memory_MemAvailable_bytes{${NI}}`, legend: 'used', color: '#d97706' },
+        { expr: `node_memory_MemAvailable_bytes{${NI}}`, legend: 'available', color: '#059669' },
+        { expr: `node_memory_Buffers_bytes{${NI}} + node_memory_Cached_bytes{${NI}}`, legend: 'buffers+cache', color: '#0ea5e9' },
       ],
     },
     {
@@ -346,8 +347,8 @@ const host: BoardSpec = {
       title: 'Swap Usage',
       unit: 'bytes',
       series: [
-        { expr: `node_memory_SwapTotal_bytes`, legend: 'total', color: '#71717a' },
-        { expr: `node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes`, legend: 'used', color: '#d97706' },
+        { expr: `node_memory_SwapTotal_bytes{${NI}}`, legend: 'total', color: '#71717a' },
+        { expr: `node_memory_SwapTotal_bytes{${NI}} - node_memory_SwapFree_bytes{${NI}}`, legend: 'used', color: '#d97706' },
       ],
     },
     {
@@ -355,8 +356,8 @@ const host: BoardSpec = {
       title: 'Network Traffic',
       unit: 'Bps',
       series: [
-        { expr: `rate(node_network_receive_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])`, legend: 'rx {{device}}' },
-        { expr: `rate(node_network_transmit_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])`, legend: 'tx {{device}}' },
+        { expr: `rate(node_network_receive_bytes_total{${NI},device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])`, legend: 'rx {{device}}' },
+        { expr: `rate(node_network_transmit_bytes_total{${NI},device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])`, legend: 'tx {{device}}' },
       ],
     },
     {
@@ -364,9 +365,9 @@ const host: BoardSpec = {
       title: 'Network Errors & Drops',
       unit: 'pps',
       series: [
-        { expr: `rate(node_network_receive_errs_total{device!~"lo"}[5m])`, legend: 'rx_err {{device}}' },
-        { expr: `rate(node_network_transmit_errs_total{device!~"lo"}[5m])`, legend: 'tx_err {{device}}' },
-        { expr: `rate(node_network_receive_drop_total{device!~"lo"}[5m])`, legend: 'rx_drop {{device}}' },
+        { expr: `rate(node_network_receive_errs_total{${NI},device!~"lo"}[5m])`, legend: 'rx_err {{device}}' },
+        { expr: `rate(node_network_transmit_errs_total{${NI},device!~"lo"}[5m])`, legend: 'tx_err {{device}}' },
+        { expr: `rate(node_network_receive_drop_total{${NI},device!~"lo"}[5m])`, legend: 'rx_drop {{device}}' },
       ],
     },
     {
@@ -374,15 +375,15 @@ const host: BoardSpec = {
       title: 'Disk I/O Throughput',
       unit: 'Bps',
       series: [
-        { expr: `rate(node_disk_read_bytes_total{device!~"loop.*"}[5m])`, legend: 'read {{device}}' },
-        { expr: `rate(node_disk_written_bytes_total{device!~"loop.*"}[5m])`, legend: 'write {{device}}' },
+        { expr: `rate(node_disk_read_bytes_total{${NI},device!~"loop.*"}[5m])`, legend: 'read {{device}}' },
+        { expr: `rate(node_disk_written_bytes_total{${NI},device!~"loop.*"}[5m])`, legend: 'write {{device}}' },
       ],
     },
     {
       kind: 'timeseries',
       title: 'Disk I/O Utilization',
       unit: 'percent',
-      series: [{ expr: `rate(node_disk_io_time_seconds_total{device!~"loop.*"}[5m]) * 100`, legend: '{{device}}' }],
+      series: [{ expr: `rate(node_disk_io_time_seconds_total{${NI},device!~"loop.*"}[5m]) * 100`, legend: '{{device}}' }],
     },
     {
       kind: 'table',
@@ -390,16 +391,16 @@ const host: BoardSpec = {
       joinLabels: ['mountpoint'],
       nameLegend: '{{mountpoint}}',
       columns: [
-        { title: 'Size', expr: `node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"}`, unit: 'bytes' },
+        { title: 'Size', expr: `node_filesystem_size_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"}`, unit: 'bytes' },
         {
           title: 'Used',
-          expr: `node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"} - node_filesystem_free_bytes{fstype!~"tmpfs|squashfs|overlay"}`,
+          expr: `node_filesystem_size_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"} - node_filesystem_free_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"}`,
           unit: 'bytes',
         },
-        { title: 'Avail', expr: `node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay"}`, unit: 'bytes' },
+        { title: 'Avail', expr: `node_filesystem_avail_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"}`, unit: 'bytes' },
         {
           title: 'Used %',
-          expr: `(node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"} - node_filesystem_free_bytes{fstype!~"tmpfs|squashfs|overlay"}) / node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay"} * 100`,
+          expr: `(node_filesystem_size_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"} - node_filesystem_free_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"}) / node_filesystem_size_bytes{${NI},fstype!~"tmpfs|squashfs|overlay"} * 100`,
           unit: 'percent',
           tone: { warn: 70, crit: 90 },
         },

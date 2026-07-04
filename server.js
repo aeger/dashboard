@@ -74,13 +74,31 @@ function handleTerminal(ws, req) {
               stream.setWindow(parsed.rows, parsed.cols, 0, 0)
             } else if (parsed.type === 'data') {
               stream.write(parsed.data)
+            } else if (parsed.type === 'ping') {
+              if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'pong' }))
             }
           } catch {
             stream.write(msg)
           }
         })
 
+        // Liveness: a browser tab that dies without a clean close would leak
+        // this SSH session forever. Protocol-level ping every 30s; two misses
+        // terminates the socket, whose close handler tears down the SSH conn.
+        let alive = true
+        ws.on('pong', () => { alive = true })
+        const heartbeat = setInterval(() => {
+          if (!alive) {
+            clearInterval(heartbeat)
+            ws.terminate()
+            return
+          }
+          alive = false
+          try { ws.ping() } catch { /* socket already gone */ }
+        }, 30000)
+
         ws.on('close', () => {
+          clearInterval(heartbeat)
           stream.end()
           conn.end()
         })

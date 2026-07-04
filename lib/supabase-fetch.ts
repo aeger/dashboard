@@ -30,6 +30,31 @@ function isTransientNetworkError(err: unknown): boolean {
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
 
+// ── Concurrency gate ────────────────────────────────────────────────────────
+// A 10-wide Promise.all (e.g. /api/taskqueue) opens 10 sockets at once, which
+// fires 10 simultaneous upstream DNS lookups through aardvark — reliably
+// tripping its empty-response bug and turning a 150ms route into 3-5s of
+// retry backoff. Capping in-flight Supabase calls lets the first few connect,
+// after which undici's keep-alive pool reuses sockets and later calls skip
+// DNS entirely.
+const MAX_CONCURRENT = 4
+let inFlight = 0
+const waiters: Array<() => void> = []
+
+async function acquire(): Promise<void> {
+  if (inFlight < MAX_CONCURRENT) {
+    inFlight++
+    return
+  }
+  await new Promise<void>(res => waiters.push(res))
+  inFlight++
+}
+
+function release(): void {
+  inFlight--
+  waiters.shift()?.()
+}
+
 export interface SupaFetchOptions extends RequestInit {
   // Max attempts including the first try (default 3).
   retries?: number
@@ -45,16 +70,21 @@ export async function supaFetch(
   opts: SupaFetchOptions = {},
 ): Promise<Response> {
   const { retries = 3, backoffMs = 150, ...init } = opts
-  let lastErr: unknown
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await fetch(url, init)
-    } catch (err) {
-      lastErr = err
-      if (!isTransientNetworkError(err) || attempt === retries) throw err
-      await sleep(backoffMs * 2 ** (attempt - 1))
+  await acquire()
+  try {
+    let lastErr: unknown
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        return await fetch(url, init)
+      } catch (err) {
+        lastErr = err
+        if (!isTransientNetworkError(err) || attempt === retries) throw err
+        await sleep(backoffMs * 2 ** (attempt - 1))
+      }
     }
+    // Unreachable, but satisfies the type checker.
+    throw lastErr
+  } finally {
+    release()
   }
-  // Unreachable, but satisfies the type checker.
-  throw lastErr
 }

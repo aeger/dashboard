@@ -5,7 +5,7 @@ import AgentHealthCard from '@/components/lab/AgentHealthCard'
 import ClaudeSpendWidget, { ClaudeSpendDetail } from '@/components/lab/ClaudeSpendWidget'
 import SecurityWidget, { SecurityDetail } from '@/components/lab/SecurityWidget'
 import BackupsWidget from '@/components/lab/BackupsWidget'
-import StoragePools from '@/components/lab/StoragePools'
+import StoragePools, { StorageDatasets } from '@/components/lab/StoragePools'
 import EndpointProbes from '@/components/lab/EndpointProbes'
 import GrafanaBoard from '@/components/lab/GrafanaBoard'
 
@@ -81,6 +81,8 @@ export const labWidgets: LabWidget[] = [
     component: StoragePools,
     endpoint: '/api/storage',
     span: 4,
+    detail: StorageDatasets,
+    detailLabel: 'datasets',
   },
   {
     id: 'lab-monitor',

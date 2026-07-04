@@ -35,25 +35,23 @@ export async function GET(req: Request) {
         }
       }
 
-      // Initial load — last 60 rows
+      // Initial load — last 60 rows (desc then reverse). Always send init,
+      // even when empty — the client uses it to flip to "connected".
       try {
-        const initial = await fetchSince(supabaseUrl, supabaseKey, agent, null, 60)
-        // For initial load we query desc then reverse — use a separate query
         const initEndpoint = `${supabaseUrl}/rest/v1/agent_activity?select=id,agent,session_id,task_id,activity_type,content,metadata,created_at&agent=eq.${agent}&order=created_at.desc&limit=60`
         const initRes = await fetch(initEndpoint, {
           headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
           cache: 'no-store',
         })
-        const initRows: ActivityRow[] = initRes.ok ? (await initRes.json()).reverse() : initial
-        if (initRows.length > 0) {
-          since = initRows[initRows.length - 1].created_at
-          send({ rows: initRows, type: 'init' })
-        }
+        const initRows: ActivityRow[] = initRes.ok ? (await initRes.json()).reverse() : []
+        if (initRows.length > 0) since = initRows[initRows.length - 1].created_at
+        send({ rows: initRows, type: 'init' })
       } catch {
         send({ rows: [], type: 'init' })
       }
 
-      // Poll every 1s for new rows
+      // Poll for new rows — 2.5s is plenty for an activity feed and this runs
+      // per connected client against Supabase.
       const interval = setInterval(async () => {
         try {
           const rows = await fetchSince(supabaseUrl, supabaseKey, agent, since, 20)
@@ -64,7 +62,7 @@ export async function GET(req: Request) {
         } catch {
           // ignore transient errors
         }
-      }, 1000)
+      }, 2500)
 
       // Keepalive every 15s
       const keepalive = setInterval(() => {
