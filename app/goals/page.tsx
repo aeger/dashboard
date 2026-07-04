@@ -267,9 +267,53 @@ function computeChildProgress(goal: Goal): number {
 }
 
 function calculateAggregateProgress(goal: Goal): number {
+  // Level-aware: milestones roll up from their objectives exactly like the
+  // milestone card (computeChildProgress), so the vision/strategy bars can't
+  // disagree with the cards beneath them.
+  if (goal.status === 'completed') return 100
+  if (goal.level === 'milestone') return computeChildProgress(goal)
   if (!goal.children || goal.children.length === 0) return goal.progress
   const childProgress = goal.children.map(c => calculateAggregateProgress(c))
   return Math.round(childProgress.reduce((sum, p) => sum + p, 0) / childProgress.length)
+}
+
+/** Toggle the poller's auto-queue flag right on the milestone card — the
+ *  field existed since day one but was never exposed in the UI. */
+function AutoQueueChip({ goal }: { goal: Goal }) {
+  const g = goal as Goal & { auto_queue?: boolean; implementation_prompt?: string | null }
+  const [on, setOn] = useState(Boolean(g.auto_queue))
+  const [busy, setBusy] = useState(false)
+  const hasPrompt = Boolean(g.implementation_prompt)
+  async function toggle() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/goals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: goal.id, auto_queue: !on }),
+      })
+      if (res.ok) setOn(v => !v)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      className={`text-xs px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+        on
+          ? 'border-emerald-700/60 bg-emerald-900/25 text-emerald-300'
+          : 'border-zinc-700/60 bg-zinc-800/40 text-zinc-500 hover:text-zinc-300'
+      }`}
+      title={on
+        ? `Auto-queue ON — the poller queues this milestone when active${hasPrompt ? '' : ' (needs an implementation prompt before it can run)'}`
+        : 'Auto-queue OFF — click to let the queue poller pick this milestone up automatically when active'}
+    >
+      ⚡ auto{on ? ' ✓' : ''}{on && !hasPrompt ? ' ⚠' : ''}
+    </button>
+  )
 }
 
 function TitleProgressBar({ goal }: { goal: Goal }) {
@@ -741,7 +785,7 @@ function NotesList({ goal, onSaved }: { goal: Goal; onSaved: () => void }) {
           ) : (
             <div className="flex-1 flex items-start gap-1">
               <span className="flex-1 text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">{item}</span>
-              <div className="flex gap-0.5 opacity-0 group-hover/note:opacity-100 transition-opacity flex-shrink-0">
+              <div className="flex gap-0.5 opacity-50 group-hover/note:opacity-100 transition-opacity flex-shrink-0">
                 <button onClick={() => startEdit(idx)}
                   className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-zinc-200">✎</button>
                 <button onClick={() => deleteItem(idx)} disabled={saving}
@@ -1636,6 +1680,18 @@ function GoalCard({ goal, flat = [], depth = 0, onTrigger, onFlag, triggeredTask
               Queue Tasks →
             </button>
           )}
+          {goal.level === 'milestone' && (
+            <>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('goal-quick-add', { detail: { level: 'objective', parentId: goal.id } }))}
+                className="text-xs px-2.5 py-1 rounded-md border border-zinc-600 bg-zinc-800/50 text-zinc-300 hover:text-white hover:border-emerald-500/50 hover:bg-emerald-900/20 transition-colors"
+                title="Add a task under this milestone — opens the form with type and parent pre-filled"
+              >
+                + Task
+              </button>
+              <AutoQueueChip goal={goal} />
+            </>
+          )}
           {triggeredTaskId && (
             <button
               onClick={handleFlag}
@@ -2156,7 +2212,7 @@ function NotesEditorField({ value, onChange }: { value: string; onChange: (v: st
           ) : (
             <div className="flex-1 flex items-start justify-between gap-1 group/item">
               <span className="text-xs text-zinc-400 leading-relaxed flex-1 break-words">{item || <span className="italic text-zinc-600">empty</span>}</span>
-              <div className="flex gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0">
+              <div className="flex gap-1 opacity-50 group-hover/item:opacity-100 transition-opacity flex-shrink-0">
                 <button type="button" onClick={() => startEdit(idx)} className="text-[10px] text-zinc-500 hover:text-zinc-300">✎</button>
                 <button type="button" onClick={() => deleteItem(idx)} className="text-[10px] text-zinc-600 hover:text-red-400">✕</button>
               </div>
@@ -2175,18 +2231,19 @@ interface AddGoalPanelProps {
   onClose: () => void
   onCreated: () => void
   initialLevel?: Goal['level']
+  initialParent?: string
 }
 
 const LEVEL_LABELS: Record<Goal['level'], string> = {
   vision: 'Vision', strategy: 'Goal', milestone: 'Milestone', objective: 'Task',
 }
 
-function AddGoalPanel({ flat, onClose, onCreated, initialLevel }: AddGoalPanelProps) {
+function AddGoalPanel({ flat, onClose, onCreated, initialLevel, initialParent }: AddGoalPanelProps) {
   const [form, setForm] = useState({
     title: '',
     description: '',
     level: (initialLevel ?? 'milestone') as Goal['level'],
-    parent_id: '',
+    parent_id: initialParent ?? '',
     status: 'planned' as Goal['status'],
     priority: 2,
     target_date: '',
@@ -2776,7 +2833,7 @@ function VisionHeader({
           {strategyCount > 0 && <span className="text-[10px] text-zinc-600 flex-shrink-0">{strategyCount} {strategyCount === 1 ? 'goal' : 'goals'}</span>}
           {goal.notes && !showNotes && <NotesPopover notes={goal.notes} />}
         </button>
-        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity">
           <button onClick={() => { setShowNotes(v => !v); setShowEdit(false) }}
                   className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-amber-300'}`}
                   title="Notes">
@@ -2869,7 +2926,14 @@ function StrategyHeader({
           {isDragOver && <span className="text-[10px] text-indigo-400 animate-pulse flex-shrink-0">↓ drop here</span>}
           {goal.notes && !showNotes && <NotesPopover notes={goal.notes} />}
         </button>
-        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('goal-quick-add', { detail: { level: 'milestone', parentId: goal.id } }))}
+            className="text-[10px] px-2 py-0.5 rounded border border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:text-emerald-300 hover:border-emerald-700/50 transition-colors"
+            title="Add a milestone under this goal — form opens pre-filled"
+          >
+            ＋
+          </button>
           <button onClick={() => { setShowNotes(v => !v); setShowEdit(false) }}
                   className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${showNotes ? 'border-amber-700/60 bg-amber-900/20 text-amber-300' : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-500 hover:text-amber-300'}`}
                   title="Notes">
@@ -3167,6 +3231,19 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [addPanelLevel, setAddPanelLevel] = useState<Goal['level'] | null>(null)
+  const [addPanelParent, setAddPanelParent] = useState<string | null>(null)
+
+  // Quick-add from anywhere in the tree ('+ milestone' / '+ task' buttons)
+  // without threading callbacks through the whole hierarchy.
+  useEffect(() => {
+    function onQuickAdd(e: Event) {
+      const d = (e as CustomEvent).detail as { level: Goal['level']; parentId?: string }
+      setAddPanelParent(d.parentId ?? null)
+      setAddPanelLevel(d.level)
+    }
+    window.addEventListener('goal-quick-add', onQuickAdd)
+    return () => window.removeEventListener('goal-quick-add', onQuickAdd)
+  }, [])
   const [showNewDropdown, setShowNewDropdown] = useState(false)
   const [triggeredTasks, setTriggeredTasks] = useState<Record<string, string>>({})
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
@@ -3665,8 +3742,9 @@ export default function GoalsPage() {
 
       {addPanelLevel && (
         <AddGoalPanel
+          initialParent={addPanelParent ?? undefined}
           flat={flat}
-          onClose={() => setAddPanelLevel(null)}
+          onClose={() => { setAddPanelLevel(null); setAddPanelParent(null) }}
           onCreated={handleGoalCreated}
           initialLevel={addPanelLevel}
         />
