@@ -154,7 +154,8 @@ function ProblemBanner({ task }: { task: TaskItem }) {
     ? 'border-red-800 bg-red-950/40'
     : 'border-yellow-800 bg-yellow-950/30'
   const ctx = (task.context ?? {}) as Record<string, unknown>
-  const detail = ctx.context_summary as string ?? task.error ?? task.failure_mode ?? (task.attempt_count >= 2 ? `${task.attempt_count} attempts` : null)
+  // Lead with the agent's explicit ask when present — that's what Jeff needs to see.
+  const detail = (ctx.action_required as string) ?? (ctx.context_summary as string) ?? task.error ?? task.failure_mode ?? (task.attempt_count >= 2 ? `${task.attempt_count} attempts` : null)
 
   return (
     <div className={`rounded-lg border px-3 py-2 text-xs ${banner}`}>
