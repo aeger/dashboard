@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTileMeta } from '@/components/lab/LabTile'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
 
 interface TierBreakdown {
   tier: number
@@ -187,11 +188,8 @@ export default function ClaudeSpendWidget() {
         </div>
       </div>
 
-      {/* ── Tier distribution ─────────────────────────────────────────── */}
-      <div className="flex flex-col gap-1.5">
-        <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
-          Fallback tiers · this month
-        </div>
+      {/* ── Tier distribution — mockup row format: swatch · name · note · "N calls · $X" ── */}
+      <div className="flex flex-col">
         {[0, 1, 2].map((tier) => {
           const meta = TIER_META[tier]
           const t = data.tiers.find((x) => x.tier === tier)
@@ -200,23 +198,17 @@ export default function ClaudeSpendWidget() {
           return (
             <div
               key={tier}
-              className="flex items-center gap-2.5 text-xs"
-              style={{ opacity: active ? 1 : 0.4 }}
+              className="flex items-center gap-2.5 text-xs py-1 tabular-nums"
+              style={{ opacity: active ? 1 : 0.45 }}
             >
               <span
-                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                style={{ background: meta.color, boxShadow: active ? `0 0 6px ${meta.color}` : 'none' }}
+                className="w-[9px] h-[9px] rounded-[3px] flex-shrink-0"
+                style={{ background: meta.color, boxShadow: active ? `0 0 6px ${meta.color}66` : 'none' }}
               />
               <span className="font-medium text-zinc-300 w-24 flex-shrink-0">{meta.label}</span>
-              <span className="text-[10px] text-zinc-600 flex-shrink-0 w-28 hidden sm:block">
-                {meta.note}
-              </span>
-              <span className="text-zinc-500 tabular-nums flex-1 text-right">{calls} calls</span>
-              <span
-                className="tabular-nums font-semibold w-16 text-right"
-                style={{ color: tier === 2 ? '#71717a' : meta.color }}
-              >
-                {tier === 2 ? 'free' : fmtUsd(t?.cost ?? 0)}
+              <span className="text-[10.5px] text-zinc-600 hidden sm:block truncate">{meta.note}</span>
+              <span className="text-zinc-400 ml-auto flex-shrink-0">
+                {calls} calls · {tier === 2 ? <span className="text-zinc-500">free</span> : fmtUsd(t?.cost ?? 0)}
               </span>
             </div>
           )
@@ -236,32 +228,44 @@ export default function ClaudeSpendWidget() {
         <Sparkline data={data.daily} />
       </div>
 
-      {/* ── Model breakdown ───────────────────────────────────────────── */}
-      {data.models.length > 0 && (
-        <div>
-          <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1.5">
-            By model · this month
+    </div>
+  )
+}
+
+/**
+ * In-place expand detail — per-model breakdown (mockup: "by model" lives in
+ * the tile's expand, not the collapsed view). Fetches the same endpoint on its
+ * own cadence; mounts once on first expand (LabTile keeps it mounted).
+ */
+export function ClaudeSpendDetail() {
+  const { data } = useWidgetData<Spend>('/api/claude-spend', { intervalMs: 60000 })
+
+  if (!data?.available || !data.models.length)
+    return <div className="text-xs text-zinc-600">No model breakdown yet this month.</div>
+
+  return (
+    <div>
+      <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1.5">
+        By model · this month
+      </div>
+      <div className="flex flex-col">
+        {data.models.map((m) => (
+          <div key={m.model} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-800/30 last:border-0">
+            <span className="font-mono text-[11px] text-zinc-300 truncate flex-1">
+              {fmtModel(m.model)}
+            </span>
+            <span className="text-[10px] text-zinc-600 tabular-nums flex-shrink-0">
+              {fmtTokens(m.inputTokens)}→{fmtTokens(m.outputTokens)} tok
+            </span>
+            <span className="text-zinc-500 tabular-nums w-10 text-right flex-shrink-0">
+              {m.calls}×
+            </span>
+            <span className="text-zinc-300 tabular-nums font-semibold w-16 text-right flex-shrink-0">
+              {m.cost === 0 ? <span className="text-zinc-500 font-normal">free</span> : fmtUsd(m.cost)}
+            </span>
           </div>
-          <div className="flex flex-col gap-1">
-            {data.models.slice(0, 5).map((m) => (
-              <div key={m.model} className="flex items-center gap-2 text-xs">
-                <span className="font-mono text-[11px] text-zinc-300 truncate flex-1">
-                  {fmtModel(m.model)}
-                </span>
-                <span className="text-[10px] text-zinc-600 tabular-nums flex-shrink-0">
-                  {fmtTokens(m.inputTokens)}→{fmtTokens(m.outputTokens)}
-                </span>
-                <span className="text-zinc-500 tabular-nums w-10 text-right flex-shrink-0">
-                  {m.calls}×
-                </span>
-                <span className="text-zinc-300 tabular-nums font-semibold w-16 text-right flex-shrink-0">
-                  {fmtUsd(m.cost)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   )
 }

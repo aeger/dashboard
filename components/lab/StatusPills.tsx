@@ -5,8 +5,8 @@ import Link from 'next/link'
 
 interface ContainerSummary { up: number; down: number; total: number; updates: number; majorUpdates: number }
 interface TaskSummary { pending: number; active: number; completed: number; failed: number; blocked: number; total: number }
-interface GoalsSummary { visionTitle: string | null; activeMilestones: number; completedMilestones: number; activeTasks: number; blockedCount: number }
 interface SecuritySummary { score: number; critical: number; warning: number }
+interface BackupSummary { ok: number; overdue: number; failed: number; total: number }
 
 function ContainerPill() {
   const [summary, setSummary] = useState<ContainerSummary | null>(null)
@@ -90,12 +90,13 @@ function TaskPill() {
     return () => clearInterval(id)
   }, [])
 
-  // Derive dominant color: red > blocked amber > active blue > idle zinc-400
+  // Dominant color: failed red > blocked amber > active/pending green-ok idle zinc.
+  // Mockup grammar: "queue N open" — open = active + pending.
+  const open = summary ? summary.active + summary.pending : null
   const color = !summary ? '#71717a'
     : summary.failed > 0 ? '#ef4444'
     : summary.blocked > 0 ? '#f59e0b'
-    : summary.active > 0 ? '#60a5fa'
-    : '#71717a'
+    : '#22c55e'
 
   return (
     <Link
@@ -108,17 +109,13 @@ function TaskPill() {
       }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
-      <span className="text-zinc-400 font-normal">tasks</span>
+      <span className="text-zinc-400 font-normal">queue</span>
       {summary ? (
         <span className="flex items-center gap-1.5 tabular-nums">
-          {summary.active > 0 && <span className="text-blue-400 font-semibold">{summary.active} active</span>}
-          {summary.pending > 0 && <span className="text-zinc-300 font-semibold">{summary.pending} pending</span>}
-          {summary.completed > 0 && <span className="text-green-400">{summary.completed} done</span>}
+          <span className="font-semibold" style={{ color }}>{open}</span>
+          <span className="text-zinc-400 font-normal">open</span>
           {summary.failed > 0 && <span className="text-red-400 font-semibold">{summary.failed} failed</span>}
           {summary.blocked > 0 && <span className="text-amber-400 font-semibold">{summary.blocked} blocked</span>}
-          {summary.active === 0 && summary.pending === 0 && summary.failed === 0 && summary.blocked === 0 && (
-            <span style={{ color }}>idle</span>
-          )}
         </span>
       ) : (
         <span className="text-zinc-500">—</span>
@@ -127,24 +124,20 @@ function TaskPill() {
   )
 }
 
-function GoalsPill() {
-  const [summary, setSummary] = useState<GoalsSummary | null>(null)
+function BackupsPill() {
+  const [summary, setSummary] = useState<BackupSummary | null>(null)
 
   useEffect(() => {
     const load = () =>
-      fetch('/api/goals')
+      fetch('/api/backups')
         .then(r => r.json())
         .then(d => {
-          const flat: { level: string; status: string; title: string }[] = d.flat ?? []
-          const vision = flat.find(g => g.level === 'vision' && g.status === 'active')
-          const milestones = flat.filter(g => g.level === 'milestone')
-          const tasks = flat.filter(g => g.level === 'objective' || g.level === 'task')
+          const backups: { health: string }[] = d.backups ?? []
           setSummary({
-            visionTitle: vision?.title ?? null,
-            activeMilestones: milestones.filter(g => g.status === 'active').length,
-            completedMilestones: milestones.filter(g => g.status === 'completed').length,
-            activeTasks: tasks.filter(g => g.status === 'active').length,
-            blockedCount: flat.filter(g => g.status === 'blocked').length,
+            ok: backups.filter(b => b.health === 'ok').length,
+            overdue: backups.filter(b => b.health === 'overdue').length,
+            failed: backups.filter(b => ['failed', 'never_succeeded'].includes(b.health)).length,
+            total: backups.length,
           })
         })
         .catch(() => {})
@@ -153,42 +146,37 @@ function GoalsPill() {
     return () => clearInterval(id)
   }, [])
 
-  const accent = '#a78bfa'
+  const color = !summary ? '#71717a'
+    : summary.failed > 0 ? '#ef4444'
+    : summary.overdue > 0 ? '#f59e0b'
+    : '#22c55e'
 
   return (
-    <Link
-      href="/goals"
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:brightness-125"
+    <a
+      href="#backups"
+      onClick={(e) => {
+        e.preventDefault()
+        document.getElementById('backups')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:brightness-125 cursor-pointer"
       style={{
-        background: 'rgba(167,139,250,0.08)',
-        borderColor: 'rgba(167,139,250,0.28)',
-        color: accent,
+        background: `${color}12`,
+        borderColor: `${color}30`,
+        color,
       }}
     >
-      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: accent }} />
-      <span className="text-zinc-400 font-normal">vision</span>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      <span className="text-zinc-400 font-normal">backups</span>
       {summary ? (
         <span className="flex items-center gap-1.5 tabular-nums">
-          {summary.activeMilestones > 0 && (
-            <span style={{ color: accent }} className="font-semibold">{summary.activeMilestones} milestones</span>
-          )}
-          {summary.activeTasks > 0 && (
-            <span className="text-emerald-400 font-semibold">{summary.activeTasks} tasks</span>
-          )}
-          {summary.completedMilestones > 0 && (
-            <span className="text-green-400">{summary.completedMilestones} done</span>
-          )}
-          {summary.blockedCount > 0 && (
-            <span className="text-amber-400">{summary.blockedCount} blocked</span>
-          )}
-          {summary.activeMilestones === 0 && summary.activeTasks === 0 && summary.completedMilestones === 0 && summary.blockedCount === 0 && (
-            <span style={{ color: accent }}>idle</span>
-          )}
+          <span className="font-semibold" style={{ color }}>{summary.ok} ok</span>
+          {summary.failed > 0 && <span className="text-red-400 font-semibold">{summary.failed} failed</span>}
+          {summary.overdue > 0 && <span className="text-amber-400 font-semibold">{summary.overdue} overdue</span>}
         </span>
       ) : (
         <span className="text-zinc-500">—</span>
       )}
-    </Link>
+    </a>
   )
 }
 
@@ -209,13 +197,12 @@ function SecurityPill() {
     return () => clearInterval(id)
   }, [])
 
+  // Mockup grammar: "N security findings" — color carries severity.
+  const findings = summary ? summary.critical + summary.warning : null
   const color = !summary ? '#71717a'
     : summary.critical > 0 ? '#ef4444'
-    : summary.score >= 85 ? '#22c55e'
-    : summary.score >= 65 ? '#f59e0b'
-    : '#ef4444'
-
-  const scoreLabel = summary ? `${summary.score}` : '—'
+    : summary.warning > 0 ? '#f59e0b'
+    : '#22c55e'
 
   return (
     <a
@@ -232,13 +219,16 @@ function SecurityPill() {
       }}
     >
       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
-      <span className="text-zinc-400 font-normal">security</span>
-      <span className="font-semibold tabular-nums" style={{ color }}>{scoreLabel}</span>
-      {summary && summary.critical > 0 && (
-        <span className="text-red-400 font-semibold">{summary.critical} crit</span>
-      )}
-      {summary && summary.warning > 0 && summary.critical === 0 && (
-        <span className="text-amber-400">{summary.warning} warn</span>
+      {summary ? (
+        <span className="flex items-center gap-1.5 tabular-nums">
+          <span className="font-semibold" style={{ color }}>{findings}</span>
+          <span className="text-zinc-400 font-normal">security {findings === 1 ? 'finding' : 'findings'}</span>
+        </span>
+      ) : (
+        <>
+          <span className="text-zinc-400 font-normal">security</span>
+          <span className="text-zinc-500">—</span>
+        </>
       )}
     </a>
   )
@@ -386,15 +376,16 @@ function SpendPill() {
   )
 }
 
+// Mockup strip order: containers · security findings · queue · backups · spend · claude
 export default function StatusPills() {
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <GoalsPill />
       <ContainerPill />
+      <SecurityPill />
       <TaskPill />
+      <BackupsPill />
       <SpendPill />
       <ClaudeVersionPill />
-      <SecurityPill />
     </div>
   )
 }

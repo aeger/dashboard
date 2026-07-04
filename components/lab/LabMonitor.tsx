@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
 import { useTileMeta } from '@/components/lab/LabTile'
+import GrafanaBoard from '@/components/lab/GrafanaBoard'
 import type { AdGuardStats } from '@/lib/adguard'
 import type { NetworkStats } from '@/app/api/network/route'
 import type { Monitor } from '@/lib/uptime-kuma'
@@ -173,6 +174,13 @@ function ServicesTab() {
     counts[m.status] = (counts[m.status] ?? 0) + 1
   }
 
+  // Collapsed view (mockup): problems first, then slowest — a short list that
+  // answers "anything wrong?"; the full grid lives in the tile expand.
+  const COLLAPSED_COUNT = 6
+  const shown = [...monitors]
+    .sort((a, b) => Number(a.status === 'up') - Number(b.status === 'up') || (b.ping ?? 0) - (a.ping ?? 0))
+    .slice(0, COLLAPSED_COUNT)
+
   return (
     <div className="space-y-3">
       {/* Summary bar */}
@@ -196,23 +204,14 @@ function ServicesTab() {
         <span className="text-zinc-600 ml-auto">{monitors.length} total</span>
       </div>
 
-      {/* Arc color legend */}
-      <div className="flex items-center gap-3 text-[10px] text-zinc-600 border-t border-zinc-800/50 pt-2">
-        <span>Uptime ring:</span>
-        <span><span className="text-green-400">■</span> ≥99%</span>
-        <span><span className="text-amber-400">■</span> 90–99%</span>
-        <span><span className="text-red-400">■</span> &lt;90%</span>
-      </div>
-
-      {/* Monitor grid — single-line rows: arc + name · ping + uptime chip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-        {monitors.map((m) => {
+      {/* Compact single-column rows: dot + name · ping + uptime chip */}
+      <div className="flex flex-col">
+        {shown.map((m) => {
           const statusTone: StatusTone = m.status === 'up' ? 'ok' : m.status === 'down' ? 'crit' : 'warn'
           const uptimeTone: StatusTone = m.uptime >= 99 ? 'ok' : m.uptime >= 90 ? 'warn' : 'crit'
           const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-500'
           return (
-            <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-1.5 min-w-0">
-              <UptimeArc pct={m.uptime} />
+            <div key={m.id} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/30 last:border-0 min-w-0">
               <StatusDot tone={statusTone} pulse={m.status === 'down'} />
               <span className="text-xs text-zinc-200 truncate flex-1">{m.name}</span>
               {m.ping != null && (
@@ -223,8 +222,11 @@ function ServicesTab() {
           )
         })}
       </div>
-
-      <PingBar monitors={monitors} />
+      {monitors.length > COLLAPSED_COUNT && (
+        <div className="text-[10px] text-zinc-600">
+          …{monitors.length - COLLAPSED_COUNT} more — expand for all monitors &amp; response times
+        </div>
+      )}
     </div>
   )
 }
@@ -376,6 +378,58 @@ export default function LabMonitor() {
       {tab === 'services' && <ServicesTab />}
       {tab === 'network'  && <NetworkTab />}
       {tab === 'dns'      && <DnsTab />}
+    </div>
+  )
+}
+
+// ── In-place expand detail ─────────────────────────────────────────────────
+
+/**
+ * Tile expand: full monitor grid + response-time chart, plus the MikroTik
+ * SNMP board (Grafana "MikroTik Network" parity — RB5009 + CRS309).
+ */
+export function MonitorDetail() {
+  const [tab, setTab] = useState<'monitors' | 'mikrotik'>('monitors')
+  const { data: monitors } = useWidgetData<Monitor[]>('/api/services', {
+    select: (raw) => (raw as { monitors?: Monitor[] }).monitors ?? [],
+  })
+
+  return (
+    <div>
+      <div className="inline-flex gap-0.5 bg-zinc-800/50 border border-zinc-700/40 rounded-lg p-0.5 mb-4">
+        <TabBtn active={tab === 'monitors'} onClick={() => setTab('monitors')}>All monitors</TabBtn>
+        <TabBtn active={tab === 'mikrotik'} onClick={() => setTab('mikrotik')}>MikroTik · SNMP</TabBtn>
+      </div>
+
+      {tab === 'monitors' && (
+        !monitors ? (
+          <Spinner />
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+              {monitors.map((m) => {
+                const statusTone: StatusTone = m.status === 'up' ? 'ok' : m.status === 'down' ? 'crit' : 'warn'
+                const uptimeTone: StatusTone = m.uptime >= 99 ? 'ok' : m.uptime >= 90 ? 'warn' : 'crit'
+                const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-500'
+                return (
+                  <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-1.5 min-w-0">
+                    <UptimeArc pct={m.uptime} />
+                    <StatusDot tone={statusTone} pulse={m.status === 'down'} />
+                    <span className="text-xs text-zinc-200 truncate flex-1">{m.name}</span>
+                    {m.ping != null && (
+                      <span className={`text-[11px] tabular-nums flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
+                    )}
+                    <StatusChip tone={uptimeTone}>{m.uptime}%</StatusChip>
+                  </div>
+                )
+              })}
+            </div>
+            <PingBar monitors={monitors} />
+          </div>
+        )
+      )}
+
+      {tab === 'mikrotik' && <GrafanaBoard board="mikrotik" />}
     </div>
   )
 }

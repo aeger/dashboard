@@ -31,12 +31,14 @@ export async function GET() {
   const start = end - 12 * 3600
 
   const [
-    cpuValues, ramValues,
+    cpuValues, ramValues, netValues,
     cpuUser, cpuSystem, cpuIowait, cpuSteal,
     memTotal, memFree, memBuffers, memCached, memAvailable,
   ] = await Promise.all([
     promRangeQuery(baseUrl, `100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`, start, end),
     promRangeQuery(baseUrl, `100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)`, start, end),
+    // Combined rx+tx over physical devices — feeds the Net sparkline stat cell.
+    promRangeQuery(baseUrl, `sum(rate(node_network_receive_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])) + sum(rate(node_network_transmit_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m]))`, start, end),
     // CPU by mode (%)
     promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="user"}[5m])) * 100`, start, end),
     promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="system"}[5m])) * 100`, start, end),
@@ -53,6 +55,7 @@ export async function GET() {
   return NextResponse.json({
     cpu: norm(cpuValues),
     ram: norm(ramValues),
+    net: norm(netValues),
     cpuModes: {
       user:   norm(cpuUser),
       system: norm(cpuSystem),

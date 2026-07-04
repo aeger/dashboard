@@ -1,13 +1,13 @@
 import type { ComponentType } from 'react'
 import HostMetrics from '@/components/lab/HostMetrics'
-import HostMetricsCharts from '@/components/lab/HostMetricsCharts'
-import LabMonitor from '@/components/lab/LabMonitor'
+import LabMonitor, { MonitorDetail } from '@/components/lab/LabMonitor'
 import AgentHealthCard from '@/components/lab/AgentHealthCard'
-import ClaudeSpendWidget from '@/components/lab/ClaudeSpendWidget'
-import SecurityWidget from '@/components/lab/SecurityWidget'
+import ClaudeSpendWidget, { ClaudeSpendDetail } from '@/components/lab/ClaudeSpendWidget'
+import SecurityWidget, { SecurityDetail } from '@/components/lab/SecurityWidget'
 import BackupsWidget from '@/components/lab/BackupsWidget'
 import StoragePools from '@/components/lab/StoragePools'
 import EndpointProbes from '@/components/lab/EndpointProbes'
+import GrafanaBoard from '@/components/lab/GrafanaBoard'
 
 /**
  * Lab widget registry — the single source of truth for the /lab landing page.
@@ -58,6 +58,10 @@ export interface LabWidget {
   enabled?: boolean
 }
 
+// Grafana-parity expand boards (see lib/grafana-boards.ts + docs/widgets.md).
+const HostOverviewBoard = () => <GrafanaBoard board="host" />
+const BlackboxBoard = () => <GrafanaBoard board="blackbox" />
+
 export const labWidgets: LabWidget[] = [
   {
     id: 'host-metrics',
@@ -66,14 +70,14 @@ export const labWidgets: LabWidget[] = [
     component: HostMetrics,
     endpoint: '/api/metrics',
     span: 8,
-    detail: HostMetricsCharts,
-    detailLabel: 'history',
+    detail: HostOverviewBoard,
+    detailLabel: 'host overview',
     expandHref: '/lab/monitor',
   },
   {
     id: 'storage-pools',
     section: 'Infrastructure',
-    title: 'Storage / ZFS Pools',
+    title: 'Storage · ZFS',
     component: StoragePools,
     endpoint: '/api/storage',
     span: 4,
@@ -81,10 +85,12 @@ export const labWidgets: LabWidget[] = [
   {
     id: 'lab-monitor',
     section: 'Infrastructure',
-    title: 'Lab Monitor',
+    title: 'Services',
     component: LabMonitor,
     endpoint: '/api/services (+ /api/network, /api/dns per tab)',
     span: 7,
+    detail: MonitorDetail,
+    detailLabel: 'all monitors',
     expandHref: '/lab/monitor',
   },
   {
@@ -94,6 +100,8 @@ export const labWidgets: LabWidget[] = [
     component: EndpointProbes,
     endpoint: '/api/probes',
     span: 5,
+    detail: BlackboxBoard,
+    detailLabel: 'uptime & ssl',
   },
   {
     id: 'agent-health',
@@ -111,6 +119,8 @@ export const labWidgets: LabWidget[] = [
     endpoint: '/api/claude-spend',
     accent: 'text-emerald-400/70',
     span: 7,
+    detail: ClaudeSpendDetail,
+    detailLabel: 'by model',
   },
   {
     id: 'security',
@@ -119,6 +129,8 @@ export const labWidgets: LabWidget[] = [
     component: SecurityWidget,
     endpoint: '/api/security',
     span: 7,
+    detail: SecurityDetail,
+    detailLabel: 'findings',
     expandHref: '/lab/security',
   },
   {

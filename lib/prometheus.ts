@@ -12,6 +12,7 @@ export interface HostMetrics {
   net_tx_bytes: number | null
   uptime_days: number | null
   load_1m: number | null
+  cpu_count: number | null
 }
 
 export interface StoragePool {
@@ -200,10 +201,11 @@ export async function fetchHostMetrics(hosts: { name: string; node_exporter_inst
       cpu_percent: null, ram_used_percent: null, ram_total_gb: null, ram_used_gb: null,
       disk_used_percent: null, disk_total_gb: null, disk_used_gb: null,
       net_rx_bytes: null, net_tx_bytes: null, uptime_days: null, load_1m: null,
+      cpu_count: null,
     }))
   }
 
-  const [cpuData, ramData, ramTotalData, ramUsedData, diskData, diskTotalData, diskUsedData, netRxData, netTxData, uptimeData, loadData] = await Promise.all([
+  const [cpuData, ramData, ramTotalData, ramUsedData, diskData, diskTotalData, diskUsedData, netRxData, netTxData, uptimeData, loadData, cpuCountData] = await Promise.all([
     promQuery(baseUrl, `100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`),
     promQuery(baseUrl, `100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)`),
     promQuery(baseUrl, `node_memory_MemTotal_bytes`),
@@ -211,10 +213,13 @@ export async function fetchHostMetrics(hosts: { name: string; node_exporter_inst
     promQuery(baseUrl, `100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100)`),
     promQuery(baseUrl, `node_filesystem_size_bytes{mountpoint="/"}`),
     promQuery(baseUrl, `node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"}`),
-    promQuery(baseUrl, `irate(node_network_receive_bytes_total{device!="lo"}[5m])`),
-    promQuery(baseUrl, `irate(node_network_transmit_bytes_total{device!="lo"}[5m])`),
+    // Sum over physical devices — the raw per-device vector collapsed to one
+    // arbitrary series per instance when keyed into a Record.
+    promQuery(baseUrl, `sum by (instance) (irate(node_network_receive_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m]))`),
+    promQuery(baseUrl, `sum by (instance) (irate(node_network_transmit_bytes_total{device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m]))`),
     promQuery(baseUrl, `(time() - node_boot_time_seconds) / 86400`),
     promQuery(baseUrl, `node_load1`),
+    promQuery(baseUrl, `count by (instance) (node_cpu_seconds_total{mode="idle"})`),
   ])
 
   const toGB = (v: number | undefined) => v != null ? Math.round(v / 1073741824 * 10) / 10 : null
@@ -234,5 +239,6 @@ export async function fetchHostMetrics(hosts: { name: string; node_exporter_inst
     net_tx_bytes: netTxData[h.node_exporter_instance] ?? null,
     uptime_days: round1(uptimeData[h.node_exporter_instance]),
     load_1m: round1(loadData[h.node_exporter_instance]),
+    cpu_count: cpuCountData[h.node_exporter_instance] != null ? Math.round(cpuCountData[h.node_exporter_instance]) : null,
   }))
 }

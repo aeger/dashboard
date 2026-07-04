@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
 import { useTileMeta } from '@/components/lab/LabTile'
 
 interface Finding {
@@ -32,10 +34,10 @@ interface SecurityData {
   counts: { critical: number; warning: number; info: number }
 }
 
-const SEV = {
-  critical: { dot: 'bg-red-400',    text: 'text-red-400',    bg: 'bg-red-500/15',    border: 'border-red-500/30',    label: 'Critical' },
-  warning:  { dot: 'bg-amber-400',  text: 'text-amber-400',  bg: 'bg-amber-500/15',  border: 'border-amber-500/30',  label: 'Warning'  },
-  info:     { dot: 'bg-blue-400',   text: 'text-blue-400',   bg: 'bg-blue-500/15',   border: 'border-blue-500/30',   label: 'Info'     },
+const SEV_TONE: Record<Finding['severity'], StatusTone> = {
+  critical: 'crit',
+  warning: 'warn',
+  info: 'info',
 }
 
 const CAT_LABELS: Record<string, string> = {
@@ -47,33 +49,6 @@ const CAT_LABELS: Record<string, string> = {
   game_server: 'Game Server',
 }
 
-function ScoreGauge({ score }: { score: number }) {
-  const r = 38, cx = 50, cy = 50
-  const circ = 2 * Math.PI * r
-  const filled = (score / 100) * circ
-  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
-  const label = score >= 80 ? 'Good' : score >= 60 ? 'Fair' : 'At Risk'
-  const textColor = score >= 80 ? 'text-green-400' : score >= 60 ? 'text-amber-400' : 'text-red-400'
-
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <svg width="100" height="100" viewBox="0 0 100 100">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#27272a" strokeWidth="8" />
-        <circle
-          cx={cx} cy={cy} r={r} fill="none"
-          stroke={color} strokeWidth="8"
-          strokeDasharray={`${filled} ${circ}`}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${cx} ${cy})`}
-        />
-        <text x={cx} y={cy - 3} textAnchor="middle" fontSize="24" fontWeight="700" fill="white">{score}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fontSize="9" fill="#71717a">/ 100</text>
-      </svg>
-      <div className={`text-xs font-semibold ${textColor}`}>{label}</div>
-    </div>
-  )
-}
-
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
   if (diff < 60000)    return 'just now'
@@ -82,24 +57,86 @@ function timeAgo(iso: string) {
   return `${Math.floor(diff / 86400000)}d ago`
 }
 
+/**
+ * Collapsed view — mockup layout: big mono score left, top open findings as
+ * dot+title+severity rows. Everything richer (quick stats, ports, full
+ * accordion, rescan) lives in SecurityDetail, revealed by the tile expand.
+ */
 export default function SecurityWidget() {
+  const { data, loading, error } = useWidgetData<SecurityData | null>('/api/security', {
+    intervalMs: 5 * 60 * 1000,
+    select: (raw) => ((raw as { error?: unknown })?.error ? null : (raw as SecurityData)),
+  })
+  useTileMeta(data ? `last scan ${timeAgo(data.scanned_at)}` : undefined)
+
+  if (error && data == null)
+    return <div className="text-xs text-red-400/80 text-center py-6">Security data unavailable</div>
+  if (loading && data == null) return (
+    <div className="flex items-center justify-center h-24">
+      <div className="w-5 h-5 border-2 border-zinc-600 border-t-amber-400 rounded-full animate-spin" />
+    </div>
+  )
+  if (!data) return <div className="text-xs text-zinc-600 text-center py-6">No scan data yet — expand to run one</div>
+
+  const scoreColor = data.score >= 80 ? '#34d399' : data.score >= 60 ? '#fbbf24' : '#f87171'
+  // Most severe first; the collapsed tile shows the top few open findings.
+  const order = { critical: 0, warning: 1, info: 2 }
+  const top = [...data.findings].sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 4)
+
+  return (
+    <div className="flex items-center gap-5">
+      <div className="flex-none text-center pl-1">
+        <div className="font-mono text-3xl font-semibold leading-none tabular-nums" style={{ color: scoreColor }}>
+          {data.score}
+        </div>
+        <div className="text-[9.5px] uppercase tracking-widest text-zinc-600 mt-1.5">score</div>
+      </div>
+
+      <div className="flex-1 min-w-0">
+        {top.length === 0 ? (
+          <div className="text-xs text-emerald-400/90 py-2">✓ No open findings — everything looks clean</div>
+        ) : (
+          <div className="flex flex-col">
+            {top.map((f) => (
+              <div key={f.id} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/30 last:border-0 min-w-0">
+                <StatusDot tone={SEV_TONE[f.severity]} pulse={f.severity === 'critical'} />
+                <span className="text-xs text-zinc-300 truncate flex-1" title={f.detail}>{f.title}</span>
+                <StatusChip tone={SEV_TONE[f.severity]}>{f.severity === 'warning' ? 'medium' : f.severity}</StatusChip>
+              </div>
+            ))}
+            {data.findings.length > top.length && (
+              <div className="text-[10px] text-zinc-600 pt-1.5">
+                …{data.findings.length - top.length} more — expand for all findings
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * In-place expand detail — quick stats, game ports, category rollup, the full
+ * findings accordion with recommendations, and the rescan control.
+ */
+export function SecurityDetail() {
   const [data, setData] = useState<SecurityData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [noData, setNoData] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
-  useTileMeta(data ? `last scan ${timeAgo(data.scanned_at)}` : undefined)
 
   const load = () =>
     fetch('/api/security')
-      .then((r) => {
-        if (r.status === 404) { setNoData(true); return null }
-        return r.json()
-      })
-      .then((d) => { if (d && !d.error) { setData(d); setNoData(false) } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !d.error) setData(d) })
       .catch(() => {})
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 5 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   async function triggerScan() {
     setScanning(true)
@@ -118,99 +155,44 @@ export default function SecurityWidget() {
     }
   }
 
-  useEffect(() => {
-    load().finally(() => setLoading(false))
-    const id = setInterval(load, 5 * 60 * 1000)
-    return () => clearInterval(id)
-  }, [])
+  if (!data) return <div className="text-xs text-zinc-600">Loading…</div>
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-24">
-      <div className="w-5 h-5 border-2 border-zinc-600 border-t-amber-400 rounded-full animate-spin" />
-    </div>
-  )
-
-  if (noData || !data) return (
-    <div className="text-center py-6 space-y-3">
-      <div className="text-zinc-500 text-sm">No scan data yet</div>
-      <button
-        onClick={triggerScan}
-        disabled={scanning}
-        className="px-4 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-md transition-colors"
-      >
-        {scanning ? 'Scanning…' : 'Run First Scan'}
-      </button>
-    </div>
-  )
-
-  const filtered = filter === 'all' ? data.findings : data.findings.filter((f) => f.severity === filter)
-
-  // Category breakdown counts
-  const byCat: Record<string, { critical: number; warning: number; info: number }> = {}
-  for (const f of data.findings) {
-    if (!byCat[f.category]) byCat[f.category] = { critical: 0, warning: 0, info: 0 }
-    byCat[f.category][f.severity]++
+  const SEV = {
+    critical: { text: 'text-red-400',   bg: 'bg-red-500/15'   },
+    warning:  { text: 'text-amber-400', bg: 'bg-amber-500/15' },
+    info:     { text: 'text-blue-400',  bg: 'bg-blue-500/15'  },
   }
+
+  const byCat: Record<string, number> = {}
+  for (const f of data.findings) byCat[f.category] = (byCat[f.category] ?? 0) + 1
 
   return (
     <div className="space-y-4">
-      {/* Score + severity counts */}
-      <div className="flex items-center gap-4">
-        <ScoreGauge score={data.score} />
-        <div className="flex-1" />
-
-        <div className="flex-1 space-y-1.5">
-          {(['critical', 'warning', 'info'] as const).map((sev) => {
-            const s = SEV[sev]
-            const count = data.counts[sev]
-            const active = filter === sev
-            return (
-              <button
-                key={sev}
-                onClick={() => setFilter(active ? 'all' : sev)}
-                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
-                  active ? `${s.bg} ${s.border}` : 'border-transparent hover:bg-zinc-800/40'
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.dot} ${!count ? 'opacity-30' : ''}`} />
-                <span className={`font-semibold ${count ? s.text : 'text-zinc-600'}`}>{count}</span>
-                <span className={count ? 'text-zinc-400' : 'text-zinc-700'}>{s.label}</span>
-                {active && <span className="ml-auto text-zinc-600 text-[9px]">✕ clear</span>}
-              </button>
-            )
-          })}
-          <div className="flex items-center gap-2 pl-1 pt-0.5">
-            <span className="text-[10px] text-zinc-700">Scanned {timeAgo(data.scanned_at)}</span>
-            <button
-              onClick={triggerScan}
-              disabled={scanning}
-              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 disabled:opacity-50 transition-colors"
-            >
-              {scanning ? '⟳ scanning…' : '⟳ rescan'}
-            </button>
-          </div>
-          {scanError && (
-            <div className="text-[10px] text-red-400 pl-1">{scanError}</div>
-          )}
+      {/* Quick stats + rescan */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="grid grid-cols-3 gap-2 flex-1 min-w-[240px]">
+          {[
+            { val: data.stats.ssh_failures_24h.toLocaleString(), label: 'SSH fails/24h',
+              color: data.stats.ssh_failures_24h > 200 ? 'text-red-400' : data.stats.ssh_failures_24h > 50 ? 'text-amber-400' : 'text-zinc-200' },
+            { val: `${data.stats.disk_percent}%`, label: 'Disk used',
+              color: data.stats.disk_percent >= 85 ? 'text-amber-400' : 'text-zinc-200' },
+            { val: data.stats.game_open_ports.length, label: 'Game ports open', color: 'text-zinc-200' },
+          ].map(({ val, label, color }) => (
+            <div key={label} className="bg-zinc-800/40 rounded-lg p-2 text-center">
+              <div className={`text-sm font-semibold ${color}`}>{val}</div>
+              <div className="text-[10px] text-zinc-600 leading-tight mt-0.5">{label}</div>
+            </div>
+          ))}
         </div>
+        <button
+          onClick={triggerScan}
+          disabled={scanning}
+          className="text-[10px] px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors flex-shrink-0"
+        >
+          {scanning ? '⟳ scanning…' : '⟳ rescan'}
+        </button>
       </div>
-
-      {/* Quick stats */}
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { val: data.stats.ssh_failures_24h.toLocaleString(), label: 'SSH fails/24h',
-            color: data.stats.ssh_failures_24h > 200 ? 'text-red-400' : data.stats.ssh_failures_24h > 50 ? 'text-amber-400' : 'text-zinc-200' },
-          { val: `${data.stats.disk_percent}%`, label: 'Disk used',
-            color: data.stats.disk_percent >= 85 ? 'text-amber-400' : 'text-zinc-200' },
-          { val: data.stats.game_open_ports.length, label: 'Game ports open',
-            color: 'text-zinc-200' },
-        ].map(({ val, label, color }) => (
-          <div key={label} className="bg-zinc-800/40 rounded-lg p-2 text-center">
-            <div className={`text-sm font-semibold ${color}`}>{val}</div>
-            <div className="text-[10px] text-zinc-600 leading-tight mt-0.5">{label}</div>
-          </div>
-        ))}
-      </div>
+      {scanError && <div className="text-[10px] text-red-400">{scanError}</div>}
 
       {/* Game server open ports */}
       {data.stats.game_open_ports.length > 0 && (
@@ -237,30 +219,23 @@ export default function SecurityWidget() {
         </div>
       )}
 
-      {/* Category breakdown */}
+      {/* Category rollup */}
       {Object.keys(byCat).length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {Object.entries(byCat).map(([cat, counts]) => {
-            const total = counts.critical + counts.warning + counts.info
-            const dotColor = counts.critical > 0 ? 'bg-red-400' : counts.warning > 0 ? 'bg-amber-400' : 'bg-blue-400'
-            return (
-              <span key={cat} className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-zinc-800/60 text-zinc-400">
-                <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-                {CAT_LABELS[cat] ?? cat}
-                <span className="text-zinc-300 font-medium">{total}</span>
-              </span>
-            )
-          })}
+          {Object.entries(byCat).map(([cat, n]) => (
+            <span key={cat} className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-zinc-800/60 text-zinc-400">
+              {CAT_LABELS[cat] ?? cat}
+              <span className="text-zinc-300 font-medium">{n}</span>
+            </span>
+          ))}
         </div>
       )}
 
-      {/* Findings list */}
-      {filtered.length > 0 ? (
+      {/* Full findings accordion */}
+      {data.findings.length > 0 ? (
         <div className="space-y-0.5">
-          <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">
-            {filter === 'all' ? 'All Findings' : `${SEV[filter].label} Findings`}
-          </div>
-          {filtered.map((f) => {
+          <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">All Findings</div>
+          {data.findings.map((f) => {
             const s = SEV[f.severity]
             const isExpanded = expanded === f.id
             return (
@@ -271,7 +246,7 @@ export default function SecurityWidget() {
                   }`}
                   onClick={() => setExpanded(isExpanded ? null : f.id)}
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${s.dot}`} />
+                  <StatusDot tone={SEV_TONE[f.severity]} />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs text-zinc-200 leading-tight">{f.title}</div>
                     <div className="text-[10px] text-zinc-500 truncate mt-0.5">{f.detail}</div>
@@ -295,13 +270,8 @@ export default function SecurityWidget() {
             )
           })}
         </div>
-      ) : data.findings.length === 0 ? (
-        <div className="text-center py-4 space-y-1">
-          <div className="text-green-400 text-sm font-medium">✓ No findings</div>
-          <div className="text-zinc-600 text-xs">Everything looks clean</div>
-        </div>
       ) : (
-        <div className="text-center py-4 text-zinc-500 text-xs">No {filter} findings</div>
+        <div className="text-center py-3 text-emerald-400/90 text-xs">✓ No findings — everything looks clean</div>
       )}
     </div>
   )

@@ -4,50 +4,6 @@ import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { useTileMeta } from '@/components/lab/LabTile'
 import type { HostMetrics as HostMetricsType } from '@/lib/prometheus'
 
-/** Compact CPU-over-last-hour sparkline in a stat cell (12 × 5-min samples). */
-function CpuSparkCell() {
-  const { data: points } = useWidgetData<{ t: number; v: number }[]>('/api/metrics/history', {
-    intervalMs: 60000,
-    select: (raw) => ((raw as { cpu?: { t: number; v: number }[] }).cpu ?? []).slice(-12),
-  })
-  const last = points?.length ? points[points.length - 1].v : null
-
-  let svg: React.ReactNode = null
-  if (points && points.length > 1) {
-    const W = 100
-    const H = 26
-    const max = Math.max(...points.map((p) => p.v), 1) * 1.15
-    const pts = points.map((p, i) => [
-      (i / (points.length - 1)) * W,
-      H - 2 - (p.v / max) * (H - 5),
-    ])
-    const line = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
-    const area = `M0,${H} L${line.split(' ').join(' L')} L${W},${H} Z`
-    svg = (
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-7 mt-1">
-        <path d={area} fill="rgba(139,92,246,0.12)" />
-        <polyline points={line} fill="none" stroke="#8b5cf6" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-        <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.2" fill="#a78bfa" />
-      </svg>
-    )
-  }
-
-  return (
-    <div
-      className="flex flex-col justify-between rounded-lg p-3 min-w-0 bg-zinc-800/40 border border-zinc-700/30"
-      style={{ minHeight: '88px' }}
-    >
-      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider truncate">CPU · 1h</div>
-      <div>
-        <span className="text-sm font-semibold text-zinc-300 tabular-nums">
-          {last != null ? `${last.toFixed(1)}%` : '—'}
-        </span>
-        {svg}
-      </div>
-    </div>
-  )
-}
-
 type Tone = 'ok' | 'warn' | 'crit' | 'none'
 
 // Status lives in the FIGURE and a 3px micro-bar on a neutral cell — not a
@@ -73,6 +29,20 @@ const TONE_BAR: Record<Tone, string> = {
   none: '#3f3f46',
 }
 
+const CELL = 'flex flex-col justify-between rounded-lg p-3 min-w-0 bg-zinc-800/40 border border-zinc-700/30'
+
+function fmtRate(bps: number | null): string {
+  if (bps == null) return '—'
+  if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`
+  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`
+  return `${Math.round(bps)} B/s`
+}
+
+function fmtGiB(gb: number | null): string {
+  if (gb == null) return '?'
+  return gb >= 1024 ? `${(gb / 1024).toFixed(1)}T` : gb >= 100 ? `${Math.round(gb)}` : `${gb.toFixed(1)}`
+}
+
 function StatTile({
   label,
   value,
@@ -89,17 +59,13 @@ function StatTile({
   barPct?: number | null
 }) {
   return (
-    <div
-      className="flex flex-col justify-between rounded-lg p-3 min-w-0 bg-zinc-800/40 border border-zinc-700/30"
-      style={{ minHeight: '88px' }}
-    >
+    <div className={CELL} style={{ minHeight: '88px' }}>
       <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider truncate">{label}</div>
       <div>
         <div className="flex items-baseline gap-1">
           <span className={`text-2xl font-bold leading-none tabular-nums ${TONE_TEXT[tone]}`}>{value}</span>
           {unit && <span className="text-sm font-medium text-zinc-400">{unit}</span>}
         </div>
-        {sub && <div className="text-[10px] text-zinc-500 mt-0.5 tabular-nums">{sub}</div>}
         {barPct != null && (
           <div className="h-[3px] rounded-full bg-zinc-700/60 overflow-hidden mt-2">
             <div
@@ -108,15 +74,71 @@ function StatTile({
             />
           </div>
         )}
+        {sub && <div className="text-[10px] text-zinc-500 mt-1.5 tabular-nums truncate">{sub}</div>}
       </div>
     </div>
   )
 }
 
+/** Sparkline stat cell — violet line + soft area + endpoint dot (mockup style). */
+function SparkCell({
+  label,
+  value,
+  sub,
+  points,
+}: {
+  label: string
+  value: string
+  sub?: string
+  points: { t: number; v: number }[] | null
+}) {
+  let svg: React.ReactNode = null
+  if (points && points.length > 1) {
+    const W = 100
+    const H = 26
+    const max = Math.max(...points.map((p) => p.v), 0.001) * 1.15
+    const pts = points.map((p, i) => [
+      (i / (points.length - 1)) * W,
+      H - 2 - (p.v / max) * (H - 5),
+    ])
+    const line = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+    const area = `M0,${H} L${line.split(' ').join(' L')} L${W},${H} Z`
+    svg = (
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-6 mt-1">
+        <path d={area} fill="rgba(139,92,246,0.12)" />
+        <polyline points={line} fill="none" stroke="#8b5cf6" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.2" fill="#a78bfa" />
+      </svg>
+    )
+  }
+
+  return (
+    <div className={CELL} style={{ minHeight: '88px' }}>
+      <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider truncate">{label}</div>
+      <div>
+        <span className="text-sm font-semibold text-zinc-300 tabular-nums">{value}</span>
+        {sub && <span className="text-[10px] text-zinc-500 tabular-nums ml-1.5">{sub}</span>}
+        {svg}
+      </div>
+    </div>
+  )
+}
+
+interface HistoryPoint { t: number; v: number }
+interface History { cpu: HistoryPoint[]; net: HistoryPoint[] }
+
 export default function HostMetrics() {
   // Reference implementation of the shared widget data-source contract.
   const { data: metrics, loading, error } = useWidgetData<HostMetricsType[]>('/api/metrics', {
     select: (raw) => (raw as { metrics?: HostMetricsType[] }).metrics ?? [],
+  })
+  // 1h sparklines for the first host (12 × 5-min samples from the 12h history).
+  const { data: history } = useWidgetData<History>('/api/metrics/history', {
+    intervalMs: 60000,
+    select: (raw) => {
+      const r = raw as { cpu?: HistoryPoint[]; net?: HistoryPoint[] }
+      return { cpu: (r.cpu ?? []).slice(-12), net: (r.net ?? []).slice(-12) }
+    },
   })
 
   // Surface host + uptime as the tile-header context line (mockup pattern).
@@ -146,14 +168,9 @@ export default function HostMetrics() {
   return (
     <div className="space-y-4">
       {metrics.map((host, hostIdx) => {
-        const uptimeDays = host.uptime_days != null
-          ? `${host.uptime_days.toFixed(2)} days`
-          : '—'
-        const ramUsed = host.ram_used_gb != null ? `${host.ram_used_gb} GiB` : '—'
-        const ramPct = host.ram_used_percent != null ? host.ram_used_percent.toFixed(1) : '—'
-        const cpuPct = host.cpu_percent != null ? host.cpu_percent.toFixed(2) : '—'
-        const diskPct = host.disk_used_percent != null ? host.disk_used_percent.toFixed(1) : '—'
-        const load1m = host.load_1m != null ? host.load_1m.toFixed(2) : '—'
+        const netTotal = host.net_rx_bytes != null || host.net_tx_bytes != null
+          ? (host.net_rx_bytes ?? 0) + (host.net_tx_bytes ?? 0)
+          : null
 
         return (
           <div key={host.instance}>
@@ -163,42 +180,68 @@ export default function HostMetrics() {
                 <span className="text-xs font-semibold text-zinc-400">{host.name}</span>
               </div>
             )}
+            {/* Mockup cell set: CPU · RAM · Load 1m · Root disk · Net ↓/↑ · CPU 1h */}
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
               <StatTile
-                label="CPU Usage"
-                value={cpuPct}
+                label="CPU"
+                value={host.cpu_percent != null ? host.cpu_percent.toFixed(1) : '—'}
                 unit="%"
                 tone={toneFor(host.cpu_percent, 'pct')}
                 barPct={host.cpu_percent}
               />
               <StatTile
-                label="RAM Usage"
-                value={ramPct}
+                label="RAM"
+                value={host.ram_used_percent != null ? host.ram_used_percent.toFixed(1) : '—'}
                 unit="%"
                 tone={toneFor(host.ram_used_percent, 'pct')}
                 barPct={host.ram_used_percent}
+                sub={host.ram_used_gb != null && host.ram_total_gb != null
+                  ? `${fmtGiB(host.ram_used_gb)} / ${fmtGiB(host.ram_total_gb)} GiB`
+                  : undefined}
               />
               <StatTile
-                label="RAM Used"
-                value={ramUsed}
-                tone={toneFor(host.ram_used_percent, 'pct')}
-              />
-              <StatTile
-                label="Load Avg (1m)"
-                value={load1m}
+                label="Load 1m"
+                value={host.load_1m != null ? host.load_1m.toFixed(2) : '—'}
                 tone={toneFor(host.load_1m, 'load')}
-                barPct={host.load_1m != null ? (host.load_1m / 4) * 100 : null}
+                barPct={host.load_1m != null && host.cpu_count != null
+                  ? (host.load_1m / host.cpu_count) * 100
+                  : host.load_1m != null ? (host.load_1m / 4) * 100 : null}
+                sub={host.cpu_count != null ? `${host.cpu_count} vCPU` : undefined}
               />
-              {/* First host: uptime lives in the header meta; the cell becomes a
-                  CPU-over-1h sparkline. Extra hosts keep the plain uptime cell. */}
-              {hostIdx === 0 ? <CpuSparkCell /> : <StatTile label="Uptime" value={uptimeDays} />}
               <StatTile
-                label="Root Disk Usage"
-                value={diskPct}
+                label="Root disk"
+                value={host.disk_used_percent != null ? host.disk_used_percent.toFixed(1) : '—'}
                 unit="%"
                 tone={toneFor(host.disk_used_percent, 'pct')}
                 barPct={host.disk_used_percent}
+                sub={host.disk_used_gb != null && host.disk_total_gb != null
+                  ? `${Math.round(host.disk_used_gb)} / ${Math.round(host.disk_total_gb)} GB`
+                  : undefined}
               />
+              {hostIdx === 0 ? (
+                <>
+                  <SparkCell
+                    label="Net ↓/↑"
+                    value={fmtRate(netTotal)}
+                    sub={`↓${fmtRate(host.net_rx_bytes)} ↑${fmtRate(host.net_tx_bytes)}`}
+                    points={history?.net ?? null}
+                  />
+                  <SparkCell
+                    label="CPU · 1h"
+                    value={history?.cpu?.length ? `${history.cpu[history.cpu.length - 1].v.toFixed(1)}%` : '—'}
+                    points={history?.cpu ?? null}
+                  />
+                </>
+              ) : (
+                <>
+                  <StatTile
+                    label="Net ↓/↑"
+                    value={fmtRate(netTotal)}
+                    sub={`↓${fmtRate(host.net_rx_bytes)} ↑${fmtRate(host.net_tx_bytes)}`}
+                  />
+                  <StatTile label="Uptime" value={host.uptime_days != null ? `${host.uptime_days.toFixed(1)}d` : '—'} />
+                </>
+              )}
             </div>
           </div>
         )
