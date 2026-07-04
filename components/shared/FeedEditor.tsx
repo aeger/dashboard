@@ -124,6 +124,8 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
   const [urlDirty, setUrlDirty] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [candidates, setCandidates] = useState<{ url: string; title: string; itemCount: number; latest: string | null }[] | null>(null)
 
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -203,6 +205,39 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
     if (!err && addUrl.trim() && !addName.trim()) {
       setAddName(autoName(addUrl.trim()))
     }
+  }
+
+  // Paste ANY url (homepage, article, feed) → autodiscover the actual feed
+  // and autofill both fields. Kills the hunt-for-the-RSS-link ritual.
+  async function handleDiscover() {
+    const raw = addUrl.trim()
+    if (!raw) return
+    setDiscovering(true)
+    setCandidates(null)
+    setTestResult(null)
+    setUrlError('')
+    try {
+      const res = await fetch(`/api/feeds/discover?url=${encodeURIComponent(raw)}`)
+      const data = await res.json()
+      const found = (data.candidates ?? []) as { url: string; title: string; itemCount: number; latest: string | null }[]
+      if (!found.length) {
+        setTestResult({ ok: false, error: data.error ?? 'No feed found at that address' })
+        return
+      }
+      applyCandidate(found[0])
+      if (found.length > 1) setCandidates(found)
+    } catch {
+      setTestResult({ ok: false, error: 'Discovery failed — network error' })
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  function applyCandidate(c: { url: string; title: string; itemCount: number; latest: string | null }) {
+    setAddUrl(c.url)
+    setUrlError(validateUrl(c.url, feeds))
+    setAddName(c.title.slice(0, 60))
+    setTestResult({ ok: true, itemCount: c.itemCount, preview: c.latest ? [{ title: c.latest, pubDate: '' }] : [] })
   }
 
   async function handleTestFeed() {
@@ -590,12 +625,21 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                         onChange={(e) => handleUrlChange(e.target.value)}
                         onBlur={handleUrlBlur}
                         onKeyDown={handleAddKeyDown}
-                        placeholder="https://example.com/feed.rss"
+                        placeholder="Paste any site, article, or feed URL — Find feed does the rest"
                         autoComplete="off"
                         className={`flex-1 px-3 py-2 rounded-lg bg-zinc-800 border text-sm text-white placeholder-zinc-500 focus:outline-none transition-colors ${
                           urlError ? 'border-red-500/60 focus:border-red-500' : 'border-zinc-700 focus:border-zinc-500'
                         }`}
                       />
+                      <button
+                        type="button"
+                        onClick={handleDiscover}
+                        disabled={discovering || !addUrl.trim()}
+                        className="px-3 py-2 rounded-lg bg-indigo-900/50 border border-indigo-700/50 hover:border-indigo-500 text-indigo-300 hover:text-indigo-200 text-xs font-medium transition-colors disabled:opacity-40 flex-shrink-0"
+                        title="Paste any site or article URL — finds the feed and fills the fields"
+                      >
+                        {discovering ? '…' : '🔍 Find feed'}
+                      </button>
                       <button
                         type="button"
                         onClick={handleTestFeed}
@@ -606,6 +650,22 @@ export default function FeedEditor({ type, onClose, onSaved }: FeedEditorProps) 
                         {testing ? '…' : 'Test'}
                       </button>
                     </div>
+                    {candidates && candidates.length > 1 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <span className="text-[10px] text-zinc-500 self-center">also found:</span>
+                        {candidates.slice(1).map((c) => (
+                          <button
+                            key={c.url}
+                            type="button"
+                            onClick={() => applyCandidate(c)}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+                            title={c.url}
+                          >
+                            {c.title} · {c.itemCount}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {urlError && (
                       <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
                         <span aria-hidden>⚠</span> {urlError}

@@ -15,6 +15,7 @@ interface NewsItem {
   source:   string
   summary?: string
   imageUrl?: string
+  contentHtml?: string
   feedType?: 'lab' | 'family'
   intel?:   ArticleIntel | null
 }
@@ -448,10 +449,11 @@ export default function NewsReader() {
         source={readerItem?.source}
         pubDate={readerItem?.pubDate}
         intel={readerItem?.intel ?? undefined}
+        fallbackHtml={readerItem?.contentHtml}
         onClose={() => { setReaderUrl(null); setReaderItem(null) }}
       />
 
-      <div className="min-h-screen p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
