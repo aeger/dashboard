@@ -59,39 +59,42 @@ function UptimeArc({ pct }: { pct: number }) {
   )
 }
 
-// ── Ping bar chart (SVG) ───────────────────────────────────────────────────
-function PingBar({ monitors }: { monitors: Monitor[] }) {
-  const withPing = monitors.filter((m) => m.ping != null && m.ping > 0).slice(0, 8)
+// ── Response-time bars ─────────────────────────────────────────────────────
+// Horizontal bar list, ALL monitors with a ping, sorted slowest-first — the
+// old vertical chart showed an arbitrary first-8 subset with unreadable 8px
+// colliding labels. Horizontal rows give names full width and the sort order
+// itself answers "who is slow?".
+function ResponseTimeBars({ monitors }: { monitors: Monitor[] }) {
+  const withPing = monitors
+    .filter((m) => m.ping != null && m.ping > 0)
+    .sort((a, b) => b.ping! - a.ping!)
   if (!withPing.length) return null
   const maxPing = Math.max(...withPing.map((m) => m.ping!), 1)
-  const barW = 24
-  const gap = 4
-  const chartW = withPing.length * (barW + gap) - gap
-  const chartH = 48
 
   return (
-    <div className="mt-3">
-      <div className="text-xs text-zinc-600 uppercase tracking-wider mb-2">Response Times (ms)</div>
-      <div className="overflow-x-auto">
-        <svg width={chartW} height={chartH + 20} viewBox={`0 0 ${chartW} ${chartH + 20}`}>
-          {withPing.map((m, i) => {
-            const h = Math.max(3, Math.round((m.ping! / maxPing) * chartH))
-            const x = i * (barW + gap)
-            const y = chartH - h
-            const color = m.ping! > 300 ? '#ef4444' : m.ping! > 150 ? '#f59e0b' : '#22c55e'
-            return (
-              <g key={m.id}>
-                <rect x={x} y={y} width={barW} height={h} rx="3" fill={color} opacity={0.8} />
-                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize="8" fill="#71717a">
-                  {m.name.length > 7 ? m.name.slice(0, 6) + '…' : m.name}
-                </text>
-                <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize="8" fill="#a1a1aa">
-                  {m.ping}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Response times</div>
+        <span className="text-[10px] text-zinc-600">{withPing.length} monitors · slowest first</span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-1">
+        {withPing.map((m) => {
+          // Same thresholds as the row ping colors: <150 ok, 150–300 warn, >300 crit
+          const bar = m.ping! > 300 ? '#dc2626' : m.ping! > 150 ? '#d97706' : '#059669'
+          const text = m.ping! > 300 ? 'text-red-300' : m.ping! > 150 ? 'text-amber-300' : 'text-zinc-500'
+          return (
+            <div key={m.id} className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] text-zinc-400 truncate w-36 flex-shrink-0" title={m.name}>{m.name}</span>
+              <div className="flex-1 h-[5px] rounded-full bg-zinc-800/80 overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${Math.max(2, (m.ping! / maxPing) * 100)}%`, background: `${bar}cc` }}
+                />
+              </div>
+              <span className={`text-[11px] tabular-nums w-14 text-right flex-shrink-0 ${text}`}>{m.ping}ms</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -424,7 +427,7 @@ export function MonitorDetail() {
                 )
               })}
             </div>
-            <PingBar monitors={monitors} />
+            <ResponseTimeBars monitors={monitors} />
           </div>
         )
       )}
