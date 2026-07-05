@@ -15,6 +15,7 @@ interface NewsItem {
   source:   string
   summary?: string
   imageUrl?: string
+  contentHtml?: string
   feedType?: 'lab' | 'family'
   intel?:   ArticleIntel | null
 }
@@ -78,7 +79,7 @@ function KeyboardHelpModal({ onClose }: { onClose: () => void }) {
   ]
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70"
+      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
@@ -448,10 +449,11 @@ export default function NewsReader() {
         source={readerItem?.source}
         pubDate={readerItem?.pubDate}
         intel={readerItem?.intel ?? undefined}
+        fallbackHtml={readerItem?.contentHtml}
         onClose={() => { setReaderUrl(null); setReaderItem(null) }}
       />
 
-      <div className="min-h-screen p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-5 flex-wrap gap-2">

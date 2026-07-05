@@ -1,32 +1,13 @@
-import Link from 'next/link'
-import HostMetrics from '@/components/lab/HostMetrics'
-import LabMonitor from '@/components/lab/LabMonitor'
 import AuthIndicator from '@/components/shared/AuthIndicator'
 import RefreshButton from '@/components/lab/RefreshButton'
-import SecurityWidget from '@/components/lab/SecurityWidget'
-import BackupsWidget from '@/components/lab/BackupsWidget'
 import AgentHealthBanner from '@/components/shared/AgentHealthBanner'
 import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
-import AgentHealthCard from '@/components/lab/AgentHealthCard'
-import HostMetricsCharts from '@/components/lab/HostMetricsCharts'
 import ToolPills from '@/components/lab/ToolPills'
 import StatusPills from '@/components/lab/StatusPills'
+import LabTile from '@/components/lab/LabTile'
+import { labWidgets, labSectionOrder } from '@/lib/lab-widgets'
 
 export const dynamic = 'force-dynamic'
-
-const card = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
-
-function ExpandLink({ href, label = '↗ expand' }: { href: string; label?: string }) {
-  return (
-    <Link
-      href={href}
-      className="text-[10px] font-semibold text-zinc-600 hover:text-zinc-300 uppercase tracking-widest transition-colors"
-    >
-      {label}
-    </Link>
-  )
-}
-
 
 export default function LabPage() {
   return (
@@ -34,58 +15,65 @@ export default function LabPage() {
       <AgentHealthBanner />
       <GmailReauthBanner />
 
-      {/* Page action bar */}
-      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
-        {/* Tool shortcuts — wraps to second row when crowded */}
+      {/* Page action bar — two tidy rows: tools + auth, then status pills.
+          (Single-row justify-between wrapped awkwardly once both grew.) */}
+      <div className="flex flex-col gap-3 mb-5">
         <div className="flex items-center gap-2 flex-wrap">
           <ToolPills />
+          <div className="flex items-center gap-2 ml-auto">
+            <AuthIndicator />
+            <RefreshButton />
+          </div>
         </div>
-        {/* Status pills + auth — grouped right, always justified right */}
-        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap ml-auto">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusPills />
-          <AuthIndicator />
-          <RefreshButton />
         </div>
       </div>
 
-      {/* Host Metrics + Charts */}
-      <div className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Host Metrics</h2>
-          <ExpandLink href="/lab/monitor" />
-        </div>
-        <HostMetrics />
-        <HostMetricsCharts />
-      </div>
-
-      {/* Lab Monitor */}
-      <div className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Lab Monitor</h2>
-          <ExpandLink href="/lab/monitor" />
-        </div>
-        <LabMonitor />
-      </div>
-
-      {/* Agent Health */}
-      <div className={`${card} overflow-hidden mb-4`}>
-        <AgentHealthCard />
-      </div>
-
-      {/* Security */}
-      <div id="security" className={`${card} mb-4`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Security</h2>
-          <ExpandLink href="/lab/security" />
-        </div>
-        <SecurityWidget />
-      </div>
-
-      {/* Backups */}
-      <div id="backups" className={`${card} mb-4`}>
-        <BackupsWidget />
-      </div>
-
+      {/* Tiles are driven entirely by the registry, grouped into sections —
+          add a tile in lib/lab-widgets.tsx, not here. See docs/widgets.md. */}
+      {labSectionOrder.map((section) => {
+        const widgets = labWidgets.filter((w) => w.enabled !== false && w.section === section)
+        if (widgets.length === 0) return null
+        return (
+          <section key={section} className="mb-6">
+            <div className="flex items-center gap-3 mb-3 px-1">
+              <h2 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
+                {section}
+              </h2>
+              <hr className="flex-1 border-0 border-t border-zinc-800/50" />
+            </div>
+            {/* 12-col grid at lg+; tiles declare their span in the registry and
+                stack full-width below lg. Default stretch alignment equalizes
+                card heights per row — short-next-to-tall reads intentional
+                instead of leaving ragged holes. An expanded tile grows to the
+                full row. */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+              {widgets.map((w) => {
+                const Widget = w.component
+                const Detail = w.detail
+                return (
+                  <LabTile
+                    key={w.id}
+                    id={w.id}
+                    title={w.title}
+                    accent={w.accent}
+                    span={w.span}
+                    // Pass a rendered node, not the component fn — this page is a
+                    // server component and LabTile is a client component.
+                    detail={Detail ? <Detail /> : undefined}
+                    detailLabel={w.detailLabel}
+                    expandHref={w.expandHref}
+                    bare={w.bare}
+                  >
+                    <Widget />
+                  </LabTile>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }

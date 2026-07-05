@@ -47,6 +47,7 @@ async function apiGet(path: string, params?: Record<string, string>) {
   }
   const res = await fetch(url.toString(), {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(4000),
   })
   if (!res.ok) throw new Error(`Calendar API ${res.status}: ${await res.text()}`)
   return res.json()

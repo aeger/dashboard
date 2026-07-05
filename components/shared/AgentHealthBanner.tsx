@@ -44,6 +44,12 @@ const STATUS_CONFIG: Record<string, { bg: string; border: string; text: string; 
   },
 }
 
+// Banner is an ALERT surface: only statuses that need attention get a banner.
+// Healthy-family statuses (healthy/connected/active) and neutral ones
+// (unknown/no_data) must NOT banner — the old `status !== 'healthy'` filter
+// stacked a full-width banner for every agent reporting 'active'.
+const ALERT_STATUSES = new Set(['critical', 'down', 'degraded', 'restarting'])
+
 function formatAge(isoDate: string | null): string {
   if (!isoDate) return 'never'
   const seconds = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000)
@@ -84,7 +90,7 @@ export default function AgentHealthBanner() {
         if (mounted) {
           setUnhealthy(
             (data.agents || []).filter(
-              (a: AgentHealth) => a.status !== 'healthy' && a.status !== 'unknown'
+              (a: AgentHealth) => ALERT_STATUSES.has(a.status) || a.breaker_tripped
             )
           )
         }

@@ -15,6 +15,12 @@ services:
       dockerfile: Dockerfile
     container_name: az-dashboard
     restart: unless-stopped
+    # Run as the container's userns-root, which (rootless podman uid_map 0→1000)
+    # maps to host `almty1` — the identity the web terminal / container-update
+    # feature SSHes as. Without this the app runs as uid 1001 and cannot read the
+    # 0640 almty1-owned terminal SSH key mounted at /run/secrets/terminal_ssh_key
+    # ("Cannot read SSH key"). Keeps the key at 0640 (not world-readable).
+    user: "0:0"
     # Upstream resolvers for aardvark-dns. Without these the container rode the
     # full aardvark → systemd-resolved → AdGuard chain, whose occasional blips
     # surfaced as intermittent EAI_AGAIN on external API calls (calendar/weather,
@@ -58,12 +64,15 @@ services:
       - TERMINAL_SSH_KEY=/run/secrets/terminal_ssh_key
       - TERMINAL_SSH_HOST=192.168.1.181
       - TERMINAL_SSH_USER=almty1
+      # Phase 2: Claude programmatic-spend log (written by ~/claude/lib/claude_call.py)
+      - CLAUDE_SPEND_LOG=/app/spend/usage.jsonl
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
       - /home/almty1/.dashboard-terminal-key:/run/secrets/terminal_ssh_key:ro
       - /home/almty1/azlab/infrastructure/traefik/dynamic:/traefik-dynamic:rw
       - /home/almty1/azlab/services/rustdesk/data:/app/rustdesk-data:ro
+      - /home/almty1/.local/state/claude-spend:/app/spend:ro
     networks:
       - proxy
     labels:

@@ -78,3 +78,90 @@ export async function fetchAdGuardStats(configUrl?: string): Promise<AdGuardStat
     return null
   }
 }
+
+// ── DNS rewrites (split-DNS for *.az-lab.dev is PER-HOST rewrites) ──────────
+// Used by /api/proxies to keep AdGuard in sync with Traefik dynamic routes:
+// without a rewrite, LAN clients resolve a new hostname via Cloudflare to the
+// public IP and hairpin instead of hitting Traefik directly.
+
+export interface DnsRewrite {
+  domain: string
+  answer: string
+  enabled?: boolean
+}
+
+function adguardAuth(): { baseUrl: string; headers: Record<string, string> } | null {
+  const baseUrl = process.env.ADGUARD_URL
+  const username = process.env.ADGUARD_USERNAME
+  const password = process.env.ADGUARD_PASSWORD
+  if (!baseUrl || !username || !password) return null
+  return {
+    baseUrl,
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64'),
+      'Content-Type': 'application/json',
+    },
+  }
+}
+
+export async function listRewrites(): Promise<DnsRewrite[]> {
+  const cfg = adguardAuth()
+  if (!cfg) return []
+  try {
+    const res = await fetch(`${cfg.baseUrl}/control/rewrite/list`, {
+      headers: cfg.headers,
+      signal: AbortSignal.timeout(4000),
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    return (await res.json()) as DnsRewrite[]
+  } catch {
+    return []
+  }
+}
+
+/** Idempotent: replaces any existing rewrite for the domain with `answer`. */
+export async function upsertRewrite(domain: string, answer: string): Promise<boolean> {
+  const cfg = adguardAuth()
+  if (!cfg) return false
+  try {
+    const existing = (await listRewrites()).filter((r) => r.domain === domain)
+    for (const r of existing) {
+      if (r.answer === answer) return true
+      await fetch(`${cfg.baseUrl}/control/rewrite/delete`, {
+        method: 'POST',
+        headers: cfg.headers,
+        body: JSON.stringify({ domain: r.domain, answer: r.answer }),
+        signal: AbortSignal.timeout(4000),
+      })
+    }
+    const res = await fetch(`${cfg.baseUrl}/control/rewrite/add`, {
+      method: 'POST',
+      headers: cfg.headers,
+      body: JSON.stringify({ domain, answer }),
+      signal: AbortSignal.timeout(4000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function deleteRewrite(domain: string): Promise<boolean> {
+  const cfg = adguardAuth()
+  if (!cfg) return false
+  try {
+    const existing = (await listRewrites()).filter((r) => r.domain === domain)
+    for (const r of existing) {
+      await fetch(`${cfg.baseUrl}/control/rewrite/delete`, {
+        method: 'POST',
+        headers: cfg.headers,
+        body: JSON.stringify({ domain: r.domain, answer: r.answer }),
+        signal: AbortSignal.timeout(4000),
+      })
+    }
+    return true
+  } catch {
+    return false
+  }
+}

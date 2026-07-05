@@ -25,6 +25,11 @@ export default function HADashboardEditor({ onClose, onSaved }: HADashboardEdito
   const [addTitle, setAddTitle] = useState('')
   const [pathError, setPathError] = useState('')
 
+  // Live discovery from HA — pick what exists instead of typing exact paths.
+  const [discovered, setDiscovered] = useState<{ title: string; url_path: string; views: { title: string; path: string }[] }[] | null>(null)
+  const [discoverErr, setDiscoverErr] = useState('')
+  const [discoverLoading, setDiscoverLoading] = useState(true)
+
   const pathInputRef = useRef<HTMLInputElement>(null)
   const editTitleRef = useRef<HTMLInputElement>(null)
 
@@ -35,6 +40,23 @@ export default function HADashboardEditor({ onClose, onSaved }: HADashboardEdito
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetch('/api/homeassistant/discover')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) setDiscoverErr(data.error)
+        else setDiscovered(data.dashboards ?? [])
+      })
+      .catch(() => setDiscoverErr('Could not reach Home Assistant'))
+      .finally(() => setDiscoverLoading(false))
+  }, [])
+
+  function addDiscovered(title: string, path: string) {
+    if (dashboards.some((d) => d.path === path) || dashboards.length >= 20) return
+    setDashboards((prev) => [...prev, { title, path }])
+    setSaveError('')
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { if (editingIndex !== null) { setEditingIndex(null) } else { onClose() } } }
@@ -120,7 +142,7 @@ export default function HADashboardEditor({ onClose, onSaved }: HADashboardEdito
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       aria-modal="true"
       role="dialog"
       aria-label="Manage HA Dashboards"
@@ -237,9 +259,73 @@ export default function HADashboardEditor({ onClose, onSaved }: HADashboardEdito
                 )}
               </div>
 
-              {/* Add dashboard */}
+              {/* Browse live HA — click to add, no path hunting */}
               <div className="border-t border-zinc-800 pt-5">
-                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Add a dashboard</div>
+                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                  Browse Home Assistant <span className="text-zinc-600 normal-case font-normal">— click to add</span>
+                </div>
+                {discoverLoading ? (
+                  <div className="text-xs text-zinc-600 py-2">Asking Home Assistant…</div>
+                ) : discoverErr ? (
+                  <div className="text-xs text-amber-400/80 py-1">{discoverErr}</div>
+                ) : discovered && discovered.length > 0 ? (
+                  <div className="space-y-2">
+                    {discovered.map((d) => {
+                      const rootPath = `/${d.url_path}/0`
+                      const rootAdded = dashboards.some((x) => x.path === rootPath || x.path === `/${d.url_path}`)
+                      return (
+                        <div key={d.url_path} className="rounded-lg bg-zinc-800/30 border border-zinc-800 px-3 py-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => addDiscovered(d.title, rootPath)}
+                              disabled={rootAdded}
+                              className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
+                                rootAdded
+                                  ? 'text-zinc-600 cursor-default'
+                                  : 'text-blue-300 bg-blue-900/30 hover:bg-blue-800/50'
+                              }`}
+                              title={rootAdded ? 'Already in your list' : `Add ${d.title} (${rootPath})`}
+                            >
+                              {rootAdded ? '✓ ' : '+ '}{d.title}
+                            </button>
+                            <span className="text-[10px] text-zinc-600 font-mono">/{d.url_path}</span>
+                          </div>
+                          {d.views.length > 1 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {d.views.map((v) => {
+                                const added = dashboards.some((x) => x.path === v.path)
+                                return (
+                                  <button
+                                    key={v.path}
+                                    type="button"
+                                    onClick={() => addDiscovered(`${d.title} · ${v.title}`, v.path)}
+                                    disabled={added}
+                                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                                      added
+                                        ? 'border-zinc-800 text-zinc-600 cursor-default'
+                                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                                    }`}
+                                    title={v.path}
+                                  >
+                                    {added ? '✓ ' : ''}{v.title}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-xs text-zinc-600 py-1">No dashboards reported by HA</div>
+                )}
+              </div>
+
+              {/* Add dashboard manually */}
+              <div className="border-t border-zinc-800 pt-5">
+                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Add by path (manual)</div>
                 <div className="space-y-2">
                   <div>
                     <input

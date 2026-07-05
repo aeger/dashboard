@@ -20,6 +20,8 @@ interface Props {
   source?: string
   pubDate?: string
   intel?: ArticleIntel
+  /** Full item HTML from the feed — used when site scraping fails/thin. */
+  fallbackHtml?: string
   onClose: () => void
 }
 
@@ -39,7 +41,7 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s{2,}/g, ' ').trim()
 }
 
-export default function ArticleReaderPane({ url, title, source, pubDate, intel, onClose }: Props) {
+export default function ArticleReaderPane({ url, title, source, pubDate, intel, fallbackHtml, onClose }: Props) {
   const [article, setArticle] = useState<ArticleData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -69,7 +71,11 @@ export default function ArticleReaderPane({ url, title, source, pubDate, intel, 
       setSpeaking(false)
     }
 
-    fetch(`/api/article?url=${encodeURIComponent(url)}`)
+    fetch('/api/article', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, title, fallbackHtml }),
+    })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
@@ -183,7 +189,7 @@ export default function ArticleReaderPane({ url, title, source, pubDate, intel, 
     <>
       {/* Mobile backdrop */}
       <div
-        className={`fixed inset-0 bg-black/60 z-40 md:hidden transition-opacity duration-200 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 bg-black/60 z-[110] md:hidden transition-opacity duration-200 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={handleBackdropClick}
       />
 
@@ -191,7 +197,7 @@ export default function ArticleReaderPane({ url, title, source, pubDate, intel, 
       <div
         ref={paneRef}
         className={`
-          fixed top-0 right-0 h-full z-50 bg-zinc-900 border-l border-zinc-700/60
+          fixed top-0 right-0 h-full z-[120] bg-zinc-900 border-l border-zinc-700/60
           flex flex-col overflow-hidden
           transition-transform duration-300 ease-in-out
           w-full md:w-[58%] lg:w-[52%]

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
 
+// Live 12h range from Prometheus — must never be cached/prerendered, or the
+// charts freeze at the build-time/first (empty) result. See /api/metrics.
+export const dynamic = 'force-dynamic'
+
+const NI = 'instance="node_exporter:9100"' // svc-podman-01 — these charts back its tile
 const STEP = 300 // 5-min intervals → 144 points over 12h
 
 async function promRangeQuery(baseUrl: string, query: string, start: number, end: number): Promise<[number, string][]> {
@@ -8,6 +13,7 @@ async function promRangeQuery(baseUrl: string, query: string, start: number, end
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ query, start: String(start), end: String(end), step: String(STEP) }),
+      signal: AbortSignal.timeout(4000),
       next: { revalidate: 60 },
     })
     if (!res.ok) return []
@@ -26,28 +32,31 @@ export async function GET() {
   const start = end - 12 * 3600
 
   const [
-    cpuValues, ramValues,
+    cpuValues, ramValues, netValues,
     cpuUser, cpuSystem, cpuIowait, cpuSteal,
     memTotal, memFree, memBuffers, memCached, memAvailable,
   ] = await Promise.all([
-    promRangeQuery(baseUrl, `100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`, start, end),
-    promRangeQuery(baseUrl, `100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)`, start, end),
+    promRangeQuery(baseUrl, `100 - (avg(irate(node_cpu_seconds_total{${NI},mode="idle"}[5m])) * 100)`, start, end),
+    promRangeQuery(baseUrl, `100 - (node_memory_MemAvailable_bytes{${NI}} / node_memory_MemTotal_bytes{${NI}} * 100)`, start, end),
+    // Combined rx+tx over physical devices — feeds the Net sparkline stat cell.
+    promRangeQuery(baseUrl, `sum(rate(node_network_receive_bytes_total{${NI},device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m])) + sum(rate(node_network_transmit_bytes_total{${NI},device!~"lo|veth.*|br.*|docker.*|virbr.*|podman.*"}[5m]))`, start, end),
     // CPU by mode (%)
-    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="user"}[5m])) * 100`, start, end),
-    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="system"}[5m])) * 100`, start, end),
-    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="iowait"}[5m])) * 100`, start, end),
-    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{mode="steal"}[5m])) * 100`, start, end),
+    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{${NI},mode="user"}[5m])) * 100`, start, end),
+    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{${NI},mode="system"}[5m])) * 100`, start, end),
+    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{${NI},mode="iowait"}[5m])) * 100`, start, end),
+    promRangeQuery(baseUrl, `avg(irate(node_cpu_seconds_total{${NI},mode="steal"}[5m])) * 100`, start, end),
     // Memory breakdown (bytes)
-    promRangeQuery(baseUrl, `node_memory_MemTotal_bytes`, start, end),
-    promRangeQuery(baseUrl, `node_memory_MemFree_bytes`, start, end),
-    promRangeQuery(baseUrl, `node_memory_Buffers_bytes`, start, end),
-    promRangeQuery(baseUrl, `node_memory_Cached_bytes`, start, end),
-    promRangeQuery(baseUrl, `node_memory_MemAvailable_bytes`, start, end),
+    promRangeQuery(baseUrl, `node_memory_MemTotal_bytes{${NI}}`, start, end),
+    promRangeQuery(baseUrl, `node_memory_MemFree_bytes{${NI}}`, start, end),
+    promRangeQuery(baseUrl, `node_memory_Buffers_bytes{${NI}}`, start, end),
+    promRangeQuery(baseUrl, `node_memory_Cached_bytes{${NI}}`, start, end),
+    promRangeQuery(baseUrl, `node_memory_MemAvailable_bytes{${NI}}`, start, end),
   ])
 
   return NextResponse.json({
     cpu: norm(cpuValues),
     ram: norm(ramValues),
+    net: norm(netValues),
     cpuModes: {
       user:   norm(cpuUser),
       system: norm(cpuSystem),

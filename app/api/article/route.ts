@@ -69,11 +69,41 @@ function proxyImages(html: string, baseUrl: string): string {
   )
 }
 
+function buildFromFallback(url: string, fallbackHtml: string, title: string | null): ArticleCache {
+  const text = fallbackHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  return {
+    url,
+    title: title ?? '',
+    byline: null,
+    content: proxyImages(fallbackHtml, url),
+    textContent: text,
+    readingTime: estimateReadingTime(text),
+    excerpt: text.slice(0, 200) || null,
+    siteName: 'from feed',
+    cachedAt: new Date().toISOString(),
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+    return extract(body.url, body.fallbackHtml ?? null, body.title ?? null)
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+}
+
 export async function GET(req: NextRequest) {
-  const url = req.nextUrl.searchParams.get('url')
+  return extract(req.nextUrl.searchParams.get('url'), null, null)
+}
+
+async function extract(url: string | null, fallbackHtml: string | null, fallbackTitle: string | null) {
   if (!url) {
     return NextResponse.json({ error: 'Missing url parameter' }, { status: 400 })
   }
+  // Full-text feeds make scraping unnecessary — but prefer the scraped page
+  // when it works (canonical formatting); the feed HTML is the safety net.
+  const fallbackUsable = !!fallbackHtml && fallbackHtml.replace(/<[^>]*>/g, ' ').trim().length > 300
 
   let parsedUrl: URL
   try {
@@ -95,25 +125,34 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AZLabDashboard/1.0)',
+        // Real-browser UA — many sites 403 obvious bot strings.
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
       signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) {
+      if (fallbackUsable) {
+        const result = buildFromFallback(url, fallbackHtml!, fallbackTitle)
+        writeCache(hash, result)
+        return NextResponse.json(result)
+      }
       return NextResponse.json(
         { error: `Fetch failed: ${res.status} ${res.statusText}` },
         { status: 502 }
       )
     }
-    // Limit to 500KB to keep jsdom memory reasonable
+    // Cap to keep jsdom memory reasonable — 500KB truncated many modern pages
+    // mid-DOM and broke extraction; 2MB covers nearly everything.
+    const CAP = 2 * 1024 * 1024
     const buffer = await res.arrayBuffer()
-    if (buffer.byteLength > 500 * 1024) {
-      html = new TextDecoder().decode(buffer.slice(0, 500 * 1024))
-    } else {
-      html = new TextDecoder().decode(buffer)
-    }
+    html = new TextDecoder().decode(buffer.byteLength > CAP ? buffer.slice(0, CAP) : buffer)
   } catch (err) {
+    if (fallbackUsable) {
+      const result = buildFromFallback(url, fallbackHtml!, fallbackTitle)
+      writeCache(hash, result)
+      return NextResponse.json(result)
+    }
     return NextResponse.json(
       { error: `Failed to fetch article: ${String(err)}` },
       { status: 502 }
@@ -127,12 +166,23 @@ export async function GET(req: NextRequest) {
     const reader = new Readability(dom.window.document)
     article = reader.parse()
   } catch (err) {
+    if (fallbackUsable) {
+      const result = buildFromFallback(url, fallbackHtml!, fallbackTitle)
+      writeCache(hash, result)
+      return NextResponse.json(result)
+    }
     return NextResponse.json(
       { error: `Extraction failed: ${String(err)}` },
       { status: 500 }
     )
   }
 
+  const thin = !article || (article.textContent ?? '').trim().length < 400
+  if (thin && fallbackUsable) {
+    const result = buildFromFallback(url, fallbackHtml!, fallbackTitle)
+    writeCache(hash, result)
+    return NextResponse.json(result)
+  }
   if (!article) {
     return NextResponse.json(
       { error: 'Could not extract article content (paywall or unsupported format)' },

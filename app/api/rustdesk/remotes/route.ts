@@ -1,38 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
-import { join } from 'path'
 import { randomUUID } from 'crypto'
+import { readRemotes, writeRemotes, toPublic, type RustDeskRemote } from '@/lib/rustdesk-remotes'
+import { verifyAutheliaSession } from '@/lib/authelia'
 
-const DATA_FILE = join(process.cwd(), 'data', 'rustdesk_remotes.json')
+export type { RustDeskRemote, RustDeskRemotePublic } from '@/lib/rustdesk-remotes'
 
-export interface RustDeskRemote {
-  id: string        // internal UUID
-  peerId: string    // RustDesk peer ID (numeric string)
-  name: string      // friendly name
-  password?: string // optional saved password
-  group?: string    // tag / category
-  note?: string
-}
-
-function readRemotes(): RustDeskRemote[] {
-  if (!existsSync(DATA_FILE)) return []
-  try { return JSON.parse(readFileSync(DATA_FILE, 'utf-8')) } catch { return [] }
-}
-
-function writeRemotes(remotes: RustDeskRemote[]) {
-  writeFileSync(DATA_FILE, JSON.stringify(remotes, null, 2) + '\n')
-}
-
-function authOk(req: NextRequest) {
-  return req.headers.get('cookie')?.includes('authelia_session')
-}
-
+// The list is not sensitive; the passwords are. Strip them so an
+// unauthenticated LAN curl can't harvest saved RustDesk passwords.
 export async function GET() {
-  return NextResponse.json(readRemotes())
+  return NextResponse.json(readRemotes().map(toPublic))
 }
 
 export async function POST(req: NextRequest) {
-  if (!authOk(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await verifyAutheliaSession(req.headers.get('cookie')))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   try {
     const body = await req.json()
@@ -60,7 +42,7 @@ export async function POST(req: NextRequest) {
     }
     remotes.push(remote)
     writeRemotes(remotes)
-    return NextResponse.json(remote, { status: 201 })
+    return NextResponse.json(toPublic(remote), { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }

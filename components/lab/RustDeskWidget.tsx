@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import type { RustDeskRemote } from '@/app/api/rustdesk/remotes/route'
+import type { RustDeskRemotePublic } from '@/lib/rustdesk-remotes'
 import type { PeerInfo } from '@/app/api/rustdesk/sync/route'
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -68,15 +68,19 @@ function Field({
 function RemoteForm({
   initial,
   isEdit,
+  hasPassword = false,
   onSave,
   onCancel,
 }: {
   initial: typeof EMPTY_FORM & { id?: string }
   isEdit: boolean
-  onSave: (r: RustDeskRemote) => void
+  /** Edit mode: a password is saved server-side (it never reaches the client). */
+  hasPassword?: boolean
+  onSave: (r: RustDeskRemotePublic) => void
   onCancel: () => void
 }) {
   const [form, setForm] = useState(initial)
+  const [clearPassword, setClearPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -93,7 +97,7 @@ function RemoteForm({
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, ...(clearPassword ? { clearPassword: true, password: '' } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Save failed'); return }
@@ -110,7 +114,21 @@ function RemoteForm({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Peer ID (numeric)" value={form.peerId} onChange={(v) => set('peerId', v)} placeholder="123456789" />
         <Field label="Name" value={form.name} onChange={(v) => set('name', v)} placeholder="My Desktop" />
-        <Field label="Password (optional)" value={form.password} onChange={(v) => set('password', v)} type="password" placeholder="saved password" />
+        <div>
+          <Field
+            label="Password (optional)"
+            value={form.password}
+            onChange={(v) => set('password', v)}
+            type="password"
+            placeholder={isEdit && hasPassword ? 'leave blank to keep saved password' : 'saved password'}
+          />
+          {isEdit && hasPassword && (
+            <label className="flex items-center gap-1.5 mt-1 text-[10px] text-zinc-500 cursor-pointer">
+              <input type="checkbox" checked={clearPassword} onChange={(e) => setClearPassword(e.target.checked)} className="accent-red-500" />
+              remove saved password
+            </label>
+          )}
+        </div>
         <Field label="Group / Tag (optional)" value={form.group} onChange={(v) => set('group', v)} placeholder="home, work…" />
         <div className="sm:col-span-2">
           <Field label="Note (optional)" value={form.note} onChange={(v) => set('note', v)} placeholder="short description" />
@@ -144,9 +162,9 @@ function RemoteList({
   onDelete,
   onConnect,
 }: {
-  remotes: RustDeskRemote[]
+  remotes: RustDeskRemotePublic[]
   peers: PeerInfo[]
-  onEdit: (r: RustDeskRemote) => void
+  onEdit: (r: RustDeskRemotePublic) => void
   onDelete: (id: string) => void
   onConnect: (peerId: string) => void
 }) {
@@ -193,13 +211,13 @@ function RemoteList({
               {r.group && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-400">{r.group}</span>
               )}
-              {r.password && (
+              {r.hasPassword && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-900/40 text-indigo-300 border border-indigo-800/50">
                   pw saved
                 </span>
               )}
               {peer && (
-                <span className="text-[10px] text-zinc-600 ml-auto" title="First registered with relay">reg. {relativeTime(peer.lastSeen)}</span>
+                <span className="text-[10px] text-zinc-600 ml-auto" title="First registered with relay — not live presence">first seen {relativeTime(peer.lastSeen)}</span>
               )}
             </div>
             <button
@@ -264,15 +282,16 @@ function RemoteList({
 
 export default function RustDeskWidget() {
   const [tab, setTab] = useState<Tab>('list')
-  const [remotes, setRemotes] = useState<RustDeskRemote[]>([])
+  const [remotes, setRemotes] = useState<RustDeskRemotePublic[]>([])
   const [peers, setPeers] = useState<PeerInfo[]>([])
   const [status, setStatus] = useState<RustDeskStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [editTarget, setEditTarget] = useState<RustDeskRemote | null>(null)
+  const [editTarget, setEditTarget] = useState<RustDeskRemotePublic | null>(null)
   const [quickId, setQuickId] = useState('')
   const [showQuick, setShowQuick] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [connectHint, setConnectHint] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -318,10 +337,22 @@ export default function RustDeskWidget() {
   }, [load])
 
   function handleConnect(peerId: string) {
-    window.open(`rustdesk://connection/new/${peerId}`, '_self')
+    const id = peerId.trim()
+    if (!/^\d+$/.test(id)) {
+      setConnectHint('Peer ID must be numeric')
+      setTimeout(() => setConnectHint(''), 4000)
+      return
+    }
+    // Anchor click instead of window.open(_self): an unhandled rustdesk://
+    // protocol must not blank the dashboard tab.
+    const a = document.createElement('a')
+    a.href = `rustdesk://connection/new/${id}`
+    a.click()
+    setConnectHint('Opening RustDesk… nothing happening? Install the RustDesk client.')
+    setTimeout(() => setConnectHint(''), 6000)
   }
 
-  function handleEdit(r: RustDeskRemote) {
+  function handleEdit(r: RustDeskRemotePublic) {
     setEditTarget(r)
     setTab('edit')
   }
@@ -330,7 +361,7 @@ export default function RustDeskWidget() {
     setRemotes((prev) => prev.filter((r) => r.id !== id))
   }
 
-  function handleSaved(r: RustDeskRemote) {
+  function handleSaved(r: RustDeskRemotePublic) {
     setRemotes((prev) => {
       const idx = prev.findIndex((x) => x.id === r.id)
       if (idx >= 0) { const next = [...prev]; next[idx] = r; return next }
@@ -379,6 +410,8 @@ export default function RustDeskWidget() {
           </div>
         </div>
       )}
+
+      {connectHint && <p className="text-[11px] text-zinc-400 mb-2">{connectHint}</p>}
 
       {/* Quick connect input */}
       {showQuick && (
@@ -452,8 +485,9 @@ export default function RustDeskWidget() {
 
       {tab === 'edit' && editTarget && (
         <RemoteForm
-          initial={{ ...EMPTY_FORM, ...editTarget, password: editTarget.password ?? '', group: editTarget.group ?? '', note: editTarget.note ?? '' }}
+          initial={{ ...EMPTY_FORM, ...editTarget, password: '', group: editTarget.group ?? '', note: editTarget.note ?? '' }}
           isEdit={true}
+          hasPassword={editTarget.hasPassword}
           onSave={handleSaved}
           onCancel={() => { setTab('list'); setEditTarget(null) }}
         />

@@ -324,6 +324,8 @@ function AgentTerminalTab({ agent = 'wren' }: { agent?: string }) {
     setConnected(false)
   }, [])
 
+  const retriesRef = useRef(0)
+
   const connect = useCallback(() => {
     setError(null)
     setRows([])
@@ -335,6 +337,7 @@ function AgentTerminalTab({ agent = 'wren' }: { agent?: string }) {
       try {
         const { rows: newRows, type } = JSON.parse(e.data)
         if (!Array.isArray(newRows)) return
+        retriesRef.current = 0 // stream is healthy — reset the backoff budget
         if (type === 'init') { setRows(newRows); setConnected(true) }
         else { setRows((prev) => [...prev, ...newRows].slice(-500)) }
       } catch {}
@@ -343,8 +346,15 @@ function AgentTerminalTab({ agent = 'wren' }: { agent?: string }) {
     es.onerror = () => {
       if (es.readyState === EventSource.CLOSED) {
         setConnected(false)
-        setError('Stream disconnected — reconnecting...')
         esRef.current = null
+        // A 503 (Supabase unconfigured/down) closes the stream every time —
+        // don't spin on it forever, tell the user after a few attempts.
+        if (retriesRef.current >= 5) {
+          setError('Stream unavailable — activity backend is down or unconfigured. Reconnect to retry.')
+          return
+        }
+        retriesRef.current += 1
+        setError('Stream disconnected — reconnecting...')
         setTimeout(() => { if (!esRef.current) connect() }, 3000)
       }
     }

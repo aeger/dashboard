@@ -8,6 +8,7 @@ export interface RssItem {
   source: string
   summary?: string      // Plain text description/snippet
   imageUrl?: string     // Thumbnail or enclosure image URL
+  contentHtml?: string  // Full item HTML (content:encoded) when the feed ships it
   feedType?: 'lab' | 'family'
 }
 
@@ -22,6 +23,7 @@ const parser = new Parser<Record<string, never>, {
       ['media:content', 'media:content'],
       ['media:thumbnail', 'media:thumbnail'],
       ['media:group', 'media:group'],
+      ['content:encoded', 'contentEncoded'],
     ],
   },
   headers: {
@@ -53,6 +55,17 @@ function extractImage(item: Parser.Item & {
   if (mgThumb) return mgThumb
 
   return undefined
+}
+
+// Full-text feeds ship the whole article in content:encoded — keep it so the
+// reader pane can render in-feed without scraping (and as a scrape fallback).
+// Only worth carrying when it's substantially more than the snippet.
+function extractContentHtml(item: Parser.Item & { contentEncoded?: string }): string | undefined {
+  const html = item.contentEncoded ?? item.content ?? ''
+  if (!html) return undefined
+  const textLen = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().length
+  if (textLen < 600) return undefined
+  return html.length > 80_000 ? html.slice(0, 80_000) : html
 }
 
 function extractSummary(item: Parser.Item): string | undefined {
@@ -153,6 +166,7 @@ async function fetchOneFeed(
         source: feed.name,
         summary: extractSummary(item),
         imageUrl: extractImage(item),
+        contentHtml: extractContentHtml(item),
         feedType,
       }))
     }

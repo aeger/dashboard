@@ -19,6 +19,7 @@ async function promInstantQuery(baseUrl: string, query: string): Promise<Array<{
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ query }),
+      signal: AbortSignal.timeout(2500),
       next: { revalidate: 30 },
     })
     if (!res.ok) return []

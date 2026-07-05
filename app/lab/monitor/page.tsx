@@ -5,6 +5,7 @@ import NetworkStats from '@/components/lab/NetworkStats'
 import ContainerMetrics from '@/components/lab/ContainerMetrics'
 import AnomalyWidget from '@/components/lab/AnomalyWidget'
 import StoragePools from '@/components/lab/StoragePools'
+import ClaudeSpendWidget from '@/components/lab/ClaudeSpendWidget'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +24,11 @@ export default function MonitorPage() {
       <div className={`${card} mb-4`}>
         <h2 className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-3">Storage / ZFS Pools</h2>
         <StoragePools />
+      </div>
+
+      <div className={`${card} mb-4`}>
+        <h2 className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-3">Claude Programmatic Spend</h2>
+        <ClaudeSpendWidget />
       </div>
 
       <div className={`${card} mb-4`}>

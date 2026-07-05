@@ -67,8 +67,8 @@ export default function ContainerMetrics() {
     <div className="text-zinc-500 text-sm text-center py-6">Prometheus / Podman exporter not available</div>
   )
 
-  const running = containers.filter(c => c.state === 4)
-  const stopped = containers.filter(c => c.state !== 4)
+  const running = containers.filter(c => c.running)
+  const stopped = containers.filter(c => !c.running)
   const visible = showAll ? containers : running
 
   return (
@@ -98,7 +98,7 @@ export default function ContainerMetrics() {
 
       <div className="space-y-1">
         {visible.map(c => {
-          const isRunning = c.state === 4
+          const isRunning = c.running
           return (
             <div
               key={c.id}

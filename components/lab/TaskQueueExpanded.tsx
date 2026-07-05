@@ -58,6 +58,74 @@ const SECTIONS = [
 // a task back to the agent must clear target=jeff in the same operation.
 type ActionSpec = { label: string; status?: string; target?: string; special?: string; cls?: string }
 
+// Plain-English effect for every action label — rendered under the button so
+// the choice is self-explanatory (the old bare-label stack read like a legend
+// with no hint of which option applied).
+const ACTION_DESC: Record<string, string> = {
+  "I'll Handle It":             'you take it over — moves to Jeff Working',
+  "I'll Handle It (Jeff)":      'you take it over — moves to Jeff Working',
+  'Return to Agent Queue':      "not yours — put it back for the agent",
+  'Mark Complete':              'close it — nothing more to do',
+  '⏸ Pause':                    'park it — nobody works it until resumed',
+  'Cancel':                     'drop it (kept under Cancelled, restorable)',
+  'Approve & Complete':         'the result is good — accept and close',
+  "I'll Fix It (take over)":    "result isn't right — you'll fix it yourself",
+  "I'll Fix It (Jeff)":         "you'll fix it yourself",
+  'Send Back to Agent':         'needs rework — re-queues with your Jeff Notes as feedback',
+  'Hand Back to Agent Queue':   'let the agent continue from here',
+  'Flag for Review':            'queue the outcome for your review',
+  'Review Needed':              'queue the outcome for your review',
+  'Needs My Input':             'stop — it needs your decision before continuing',
+  'Needs My Input First':       'hold it until you weigh in',
+  'Needs My Action':            'stop — it needs your decision before continuing',
+  'Block':                      'mark stuck on an external dependency',
+  '▶ Run Now':                  'trigger the agent to run this immediately',
+  'Queue for Agent':            'make it claimable by the agent',
+  'Unblock → Back to Queue':    'dependency cleared — agent can retry',
+  'Reopen':                     'back into the queue as ready',
+  'Archive':                    'hide from the board (kept in the Archived drawer)',
+  '▶ Resume → Agent Queue':     'unpause — agent picks it up',
+  "Resume → I'll Handle":       'unpause — you take it',
+  'Retry (Agent)':              'run it again from the top',
+  'Retry → Ready':              'put back for the agent to retry',
+  'Restore to Ready':           'revive — agent can claim it',
+  "I'll Take Over":             'pull it from the agent — you drive',
+  'Move to Ready':              'make claimable by the agent',
+  'Split into Subtasks':        'break it into smaller tasks',
+}
+
+// Humanize raw schedule strings (systemd OnCalendar / 5-field cron / every:)
+// into Arizona time — Jeff reads AZ, the raw expression stays in the tooltip.
+const CRON_DOW: Record<string, string> = { '0': 'Sun', '1': 'Mon', '2': 'Tue', '3': 'Wed', '4': 'Thu', '5': 'Fri', '6': 'Sat', '7': 'Sun' }
+function azTime(hUtc: number, m: number): string {
+  const az = (hUtc - 7 + 24) % 24 // MST, no DST
+  const h12 = az % 12 === 0 ? 12 : az % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${az >= 12 ? 'PM' : 'AM'} AZ`
+}
+function humanizeSchedule(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const sch = raw.trim()
+  const every = sch.match(/^every:\s*(.+)$/i)
+  if (every) return `every ${every[1]}`
+  const expr = (sch.match(/^oncalendar:\s*(.+)$/i)?.[1] ?? sch).trim()
+  // systemd: "[Dow] *-*-* HH:MM[:SS] [UTC]"
+  const sysd = expr.match(/^(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+)?\*-\*-\*\s+(\d{1,2}):(\d{2})(?::\d{2})?(?:\s*UTC)?$/i)
+  if (sysd) {
+    const t = azTime(parseInt(sysd[2], 10), parseInt(sysd[3], 10))
+    return sysd[1] ? `${sysd[1]} ${t}` : `daily ${t}`
+  }
+  // cron: "M H * * D"
+  const c = expr.split(/\s+/)
+  if (c.length === 5) {
+    if (/^\d{1,2}$/.test(c[0]) && /^\d{1,2}$/.test(c[1])) {
+      const t = azTime(parseInt(c[1], 10), parseInt(c[0], 10))
+      return c[4] !== '*' ? `${CRON_DOW[c[4]] ?? `dow ${c[4]}`} ${t}` : `daily ${t}`
+    }
+    if (c[0].startsWith('*/') && c.slice(1).every(x => x === '*')) return `every ${c[0].slice(2)} min`
+  }
+  return raw
+}
+
 // Convenience: target for "agent takes over" buttons. claude-code is the canonical
 // poll_queue agent identity — it covers Wren on this host. Cowork-bound tasks already
 // have target='cowork' from upstream and shouldn't be rewritten here.
@@ -564,7 +632,7 @@ function SplitModal({ task, onClose, onDone }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className="w-full max-w-xl mx-4 rounded-2xl border border-indigo-900/60 shadow-2xl overflow-hidden"
            style={{ background: 'rgba(12,12,16,0.98)' }}>
         {/* Header */}
@@ -850,6 +918,37 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
 
+        {/* Why-you're-here banner — answers "what am I reviewing and why?"
+            Agents set context.action_required; fall back to a status-derived
+            explanation so the ask is NEVER blank. */}
+        {isJeffUrgent(task) && !isEditMode && (
+          <div className="rounded-xl border border-rose-800/50 bg-rose-950/20 p-3">
+            <div className="text-[10px] text-rose-400 uppercase tracking-widest mb-1">
+              {task.status === 'review_needed' ? 'Review requested' : 'Waiting on you'}
+              {task.source && <span className="text-rose-500/60 normal-case tracking-normal"> · from {task.source}</span>}
+            </div>
+            <p className="text-xs text-rose-100/90 leading-relaxed">
+              {(task.context?.action_required as string) ??
+                (task.status === 'review_needed'
+                  ? (task.result
+                      ? 'The agent finished and wants your sign-off on the result below — approve it, take it over, or send it back with notes.'
+                      : 'The agent flagged this for your review — see the description below, then pick an action.')
+                  : 'This needs your decision or input before anyone continues — see the description below, then pick an action.')}
+            </p>
+          </div>
+        )}
+
+        {/* For review tasks the RESULT is the thing being judged — show it
+            directly under the ask instead of burying it below the notes. */}
+        {isJeffUrgent(task) && !isEditMode && task.result && (
+          <div>
+            <div className="text-[10px] text-emerald-600/80 uppercase tracking-widest mb-1">Result — what the agent did</div>
+            <div className="bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30 prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.result}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+
         {/* Context summary (Jeff-editable) */}
         <div>
           <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Context Summary</div>
@@ -976,8 +1075,8 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           />
         </div>
 
-        {/* Result */}
-        {task.result && (
+        {/* Result (already shown up top for needs-Jeff tasks) */}
+        {task.result && !isJeffUrgent(task) && (
           <div>
             <div className="text-[10px] text-emerald-600/80 uppercase tracking-widest mb-1">Result</div>
             <div className="bg-emerald-950/20 rounded-lg p-2 border border-emerald-900/30 prose prose-invert prose-xs max-w-none text-zinc-300 text-xs leading-relaxed">
@@ -1054,22 +1153,23 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions — first option is the primary path; every button says what it does */}
       {actions.length > 0 && (
         <div className="flex-shrink-0 p-3 border-t border-zinc-800/60 space-y-1.5">
-          {actionError && (
-            <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded-lg px-3 py-2">
-              {actionError}
-            </div>
-          )}
-          {actions.map(action => (
+          <div className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1.5">What happens next — pick one</div>
+          {actions.map((action, ai) => (
             <button
               key={action.label}
               onClick={() => doAction(action)}
               disabled={actionBusy !== null}
-              className={`w-full py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${action.cls ?? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400'}`}
+              className={`w-full py-1.5 px-3 rounded-lg text-left transition-colors disabled:opacity-50 ${action.cls ?? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'} ${ai === 0 ? 'ring-1 ring-white/15' : ''}`}
             >
-              {actionBusy === action.label ? '…' : action.label}
+              <span className="block text-xs font-semibold">
+                {actionBusy === action.label ? '…' : action.label}
+              </span>
+              {ACTION_DESC[action.label] && (
+                <span className="block text-[10px] opacity-60 font-normal mt-0.5">{ACTION_DESC[action.label]}</span>
+              )}
             </button>
           ))}
         </div>
@@ -1203,9 +1303,13 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
           )}
         </div>
         <p className="text-sm text-zinc-200 leading-snug group-hover:text-white transition-colors">{task.title}</p>
-        {task.description && (
+        {urgent && (task.context?.action_required as string | undefined) ? (
+          <p className="text-[11px] text-rose-300/90 mt-0.5 line-clamp-2 leading-relaxed">
+            ⚡ {task.context?.action_required as string}
+          </p>
+        ) : task.description ? (
           <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">{task.description}</p>
-        )}
+        ) : null}
         {/* Context summary if available */}
         {task.context?.context_summary ? (
           <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-1 italic">
@@ -1817,8 +1921,11 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
                     )}
                   </div>
                   <div className="ml-3.5 flex items-center gap-3 text-[11px] text-zinc-500 flex-wrap">
-                    <span className="px-2 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/40 text-cyan-300 font-mono text-[10px]">
-                      ⏱ {row.schedule}
+                    <span
+                      className="px-2 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/40 text-cyan-300 text-[10px]"
+                      title={row.schedule}
+                    >
+                      ⏱ {humanizeSchedule(row.schedule)}
                     </span>
                     {row.last_run_at && (
                       <span title={row.last_run_at}>

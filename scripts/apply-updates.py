@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -57,6 +58,34 @@ def discord(msg: str) -> None:
          '-d', json.dumps({'content': msg})],
         capture_output=True,
     )
+
+
+def liveness_ok(container: str) -> bool:
+    """Best-effort check that a container reported 'running' is ACTUALLY alive,
+    not phantom-running. Podman can report a recreated container as running while
+    the OCI runtime never truly brought it up — it serves nothing (ECONNREFUSED)
+    and `podman exec` fails with a runtime "not running" error (observed
+    2026-07-01 when a prometheus image update wedged the container).
+
+    We `exec true`: rc 0 = alive. A runtime "not running"/"does not exist" error
+    or a hang = wedged. "executable not found" = a minimal image without /true we
+    can't probe this way — treat as OK so we never false-flag a healthy update.
+    """
+    try:
+        r = subprocess.run(['podman', 'exec', container, 'true'],
+                           capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return False
+    if r.returncode == 0:
+        return True
+    err = (r.stderr or '').lower()
+    # Check wedge / gone signatures FIRST (before the broad missing-binary match).
+    if ('not running' in err or 'does not exist' in err or 'cannot exec' in err
+            or 'no container' in err or 'no such container' in err):
+        return False  # phantom-running wedge, or the container vanished
+    if 'executable file not found' in err or 'no such file' in err:
+        return True   # minimal image lacks /true — unprobeable, don't false-flag
+    return True       # unknown exec error — don't false-flag a healthy update
 
 
 def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str | None]:
@@ -113,6 +142,24 @@ def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str
     status = r.stdout.strip() if r.returncode == 0 else 'unknown'
     if status != 'running':
         return False, old_digest, new_digest, f'Container not running after update (status: {status})'
+
+    # Wedge guard: podman may report the recreated container as "running" while it
+    # is phantom-running — serving nothing and un-exec-able. One clean
+    # force-recreate usually clears it. Re-verify after the retry.
+    time.sleep(2)
+    if not liveness_ok(container):
+        subprocess.run(['podman', 'rm', '-f', '--depend', container],
+                       capture_output=True, text=True, timeout=120)
+        subprocess.run(['podman-compose', 'up', '-d'],
+                       capture_output=True, text=True, timeout=600, cwd=working_dir)
+        time.sleep(4)
+        r = subprocess.run(['podman', 'inspect', container, '--format', '{{.State.Status}}'],
+                           capture_output=True, text=True)
+        status = r.stdout.strip() if r.returncode == 0 else 'unknown'
+        if status != 'running' or not liveness_ok(container):
+            return False, old_digest, new_digest, (
+                'Container wedged (running but not serving) after update — '
+                'force-recreate did not clear it')
 
     if new_digest and new_digest == old_digest:
         return False, old_digest, new_digest, 'Image digest unchanged after recreate — pull may have hit cached tag'

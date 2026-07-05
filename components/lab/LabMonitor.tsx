@@ -1,6 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useWidgetData } from '@/lib/hooks/useWidgetData'
+import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
+import { useTileMeta } from '@/components/lab/LabTile'
+import GrafanaBoard from '@/components/lab/GrafanaBoard'
 import type { AdGuardStats } from '@/lib/adguard'
 import type { NetworkStats } from '@/app/api/network/route'
 import type { Monitor } from '@/lib/uptime-kuma'
@@ -55,39 +59,42 @@ function UptimeArc({ pct }: { pct: number }) {
   )
 }
 
-// ── Ping bar chart (SVG) ───────────────────────────────────────────────────
-function PingBar({ monitors }: { monitors: Monitor[] }) {
-  const withPing = monitors.filter((m) => m.ping != null && m.ping > 0).slice(0, 8)
+// ── Response-time bars ─────────────────────────────────────────────────────
+// Horizontal bar list, ALL monitors with a ping, sorted slowest-first — the
+// old vertical chart showed an arbitrary first-8 subset with unreadable 8px
+// colliding labels. Horizontal rows give names full width and the sort order
+// itself answers "who is slow?".
+function ResponseTimeBars({ monitors }: { monitors: Monitor[] }) {
+  const withPing = monitors
+    .filter((m) => m.ping != null && m.ping > 0)
+    .sort((a, b) => b.ping! - a.ping!)
   if (!withPing.length) return null
   const maxPing = Math.max(...withPing.map((m) => m.ping!), 1)
-  const barW = 24
-  const gap = 4
-  const chartW = withPing.length * (barW + gap) - gap
-  const chartH = 48
 
   return (
-    <div className="mt-3">
-      <div className="text-xs text-zinc-600 uppercase tracking-wider mb-2">Response Times (ms)</div>
-      <div className="overflow-x-auto">
-        <svg width={chartW} height={chartH + 20} viewBox={`0 0 ${chartW} ${chartH + 20}`}>
-          {withPing.map((m, i) => {
-            const h = Math.max(3, Math.round((m.ping! / maxPing) * chartH))
-            const x = i * (barW + gap)
-            const y = chartH - h
-            const color = m.ping! > 300 ? '#ef4444' : m.ping! > 150 ? '#f59e0b' : '#22c55e'
-            return (
-              <g key={m.id}>
-                <rect x={x} y={y} width={barW} height={h} rx="3" fill={color} opacity={0.8} />
-                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fontSize="8" fill="#71717a">
-                  {m.name.length > 7 ? m.name.slice(0, 6) + '…' : m.name}
-                </text>
-                <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize="8" fill="#a1a1aa">
-                  {m.ping}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
+    <div className="mt-4">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Response times</div>
+        <span className="text-[10px] text-zinc-600">{withPing.length} monitors · slowest first</span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-1">
+        {withPing.map((m) => {
+          // Same thresholds as the row ping colors: <150 ok, 150–300 warn, >300 crit
+          const bar = m.ping! > 300 ? '#dc2626' : m.ping! > 150 ? '#d97706' : '#059669'
+          const text = m.ping! > 300 ? 'text-red-300' : m.ping! > 150 ? 'text-amber-300' : 'text-zinc-500'
+          return (
+            <div key={m.id} className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] text-zinc-400 truncate w-36 flex-shrink-0" title={m.name}>{m.name}</span>
+              <div className="flex-1 h-[5px] rounded-full bg-zinc-800/80 overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${Math.max(2, (m.ping! / maxPing) * 100)}%`, background: `${bar}cc` }}
+                />
+              </div>
+              <span className={`text-[11px] tabular-nums w-14 text-right flex-shrink-0 ${text}`}>{m.ping}ms</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -122,13 +129,13 @@ function BlockedDonut({ total, blocked }: { total: number; blocked: number }) {
   )
 }
 
-// ── Tab button ─────────────────────────────────────────────────────────────
+// ── Tab button (segmented control) ─────────────────────────────────────────
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={`text-xs px-3 py-1.5 rounded-t transition-colors ${
-        active ? 'text-white bg-zinc-800 border border-zinc-700 border-b-zinc-800' : 'text-zinc-500 hover:text-zinc-300'
+      className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
+        active ? 'bg-zinc-700/70 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
       }`}
     >
       {children}
@@ -147,15 +154,15 @@ function Spinner() {
 
 // ── Services Tab ───────────────────────────────────────────────────────────
 function ServicesTab() {
-  const [monitors, setMonitors] = useState<Monitor[] | null>(null)
+  // Shared hook: 30s poll + error state (tabs previously fetched once and went
+  // stale on a long-open page; a failed fetch spun forever).
+  const { data: monitors, error } = useWidgetData<Monitor[]>('/api/services', {
+    select: (raw) => (raw as { monitors?: Monitor[] }).monitors ?? [],
+  })
+  useTileMeta(monitors?.length ? `uptime-kuma · ${monitors.length} monitors` : undefined)
 
-  useEffect(() => {
-    fetch('/api/services')
-      .then((r) => r.json())
-      .then((d) => setMonitors(d.monitors ?? null))
-      .catch(() => setMonitors([]))
-  }, [])
-
+  if (error && monitors == null)
+    return <div className="text-xs text-red-400/80 text-center py-6">Service monitors unavailable</div>
   if (!monitors) return <Spinner />
   if (!monitors.length) return <div className="text-zinc-500 text-sm text-center py-6">No monitors configured</div>
 
@@ -169,6 +176,13 @@ function ServicesTab() {
   for (const m of monitors) {
     counts[m.status] = (counts[m.status] ?? 0) + 1
   }
+
+  // Collapsed view (mockup): problems first, then slowest — a short list that
+  // answers "anything wrong?"; the full grid lives in the tile expand.
+  const COLLAPSED_COUNT = 6
+  const shown = [...monitors]
+    .sort((a, b) => Number(a.status === 'up') - Number(b.status === 'up') || (b.ping ?? 0) - (a.ping ?? 0))
+    .slice(0, COLLAPSED_COUNT)
 
   return (
     <div className="space-y-3">
@@ -193,53 +207,39 @@ function ServicesTab() {
         <span className="text-zinc-600 ml-auto">{monitors.length} total</span>
       </div>
 
-      {/* Arc color legend */}
-      <div className="flex items-center gap-3 text-[10px] text-zinc-600 border-t border-zinc-800/50 pt-2">
-        <span>Uptime ring:</span>
-        <span><span className="text-green-400">■</span> ≥99%</span>
-        <span><span className="text-amber-400">■</span> 90–99%</span>
-        <span><span className="text-red-400">■</span> &lt;90%</span>
-      </div>
-
-      {/* Monitor grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-        {monitors.map((m) => {
-          const statusColor = m.status === 'up' ? 'bg-green-400' : m.status === 'down' ? 'bg-red-400' : 'bg-amber-400'
-          const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-400'
+      {/* Compact single-column rows: dot + name · ping + uptime chip */}
+      <div className="flex flex-col">
+        {shown.map((m) => {
+          const statusTone: StatusTone = m.status === 'up' ? 'ok' : m.status === 'down' ? 'crit' : 'warn'
+          const uptimeTone: StatusTone = m.uptime >= 99 ? 'ok' : m.uptime >= 90 ? 'warn' : 'crit'
+          const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-500'
           return (
-            <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-2">
-              <UptimeArc pct={m.uptime} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusColor}`} />
-                  <span className="text-xs text-zinc-200 truncate">{m.name}</span>
-                </div>
-                <div className="text-[10px] text-zinc-600 mt-0.5">{m.uptime}% uptime</div>
-              </div>
+            <div key={m.id} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/30 last:border-0 min-w-0">
+              <StatusDot tone={statusTone} pulse={m.status === 'down'} />
+              <span className="text-xs text-zinc-200 truncate flex-1">{m.name}</span>
               {m.ping != null && (
-                <span className={`text-xs flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
+                <span className={`text-[11px] tabular-nums flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
               )}
+              <StatusChip tone={uptimeTone}>{m.uptime}%</StatusChip>
             </div>
           )
         })}
       </div>
-
-      <PingBar monitors={monitors} />
+      {monitors.length > COLLAPSED_COUNT && (
+        <div className="text-[10px] text-zinc-600">
+          …{monitors.length - COLLAPSED_COUNT} more — expand for all monitors &amp; response times
+        </div>
+      )}
     </div>
   )
 }
 
 // ── Network Tab ────────────────────────────────────────────────────────────
 function NetworkTab() {
-  const [stats, setStats] = useState<NetworkStats | null>(null)
+  const { data: stats, error } = useWidgetData<NetworkStats>('/api/network')
 
-  useEffect(() => {
-    fetch('/api/network')
-      .then((r) => r.json())
-      .then((d) => setStats(d))
-      .catch(() => {})
-  }, [])
-
+  if (error && stats == null)
+    return <div className="text-xs text-red-400/80 text-center py-6">Network stats unavailable</div>
   if (!stats) return <Spinner />
 
   const maxBw = Math.max(...(stats.interfaces.flatMap((i) => [i.rx_bytes_per_sec, i.tx_bytes_per_sec])), 1)
@@ -297,20 +297,20 @@ function NetworkTab() {
 
 // ── DNS Tab ────────────────────────────────────────────────────────────────
 function DnsTab() {
-  const [dns, setDns] = useState<AdGuardStats | null>(null)
-  const [loaded, setLoaded] = useState(false)
   const [subTab, setSubTab] = useState<'queried' | 'blocked' | 'clients'>('queried')
+  // select maps an AdGuard error payload to null → "not configured" below.
+  const { data: dns, loading, error } = useWidgetData<AdGuardStats | null>('/api/dns', {
+    intervalMs: 60000,
+    select: (raw) => ((raw as { error?: unknown })?.error ? null : (raw as AdGuardStats)),
+  })
 
-  useEffect(() => {
-    fetch('/api/dns')
-      .then((r) => r.json())
-      .then((d) => setDns(d.error ? null : d))
-      .catch(() => {})
-      .finally(() => setLoaded(true))
-  }, [])
-
-  if (!loaded) return <Spinner />
-  if (!dns) return <div className="text-zinc-500 text-sm text-center py-6">AdGuard not configured</div>
+  if (loading) return <Spinner />
+  if (!dns)
+    return (
+      <div className="text-zinc-500 text-sm text-center py-6">
+        {error ? 'DNS stats unavailable' : 'AdGuard not configured'}
+      </div>
+    )
 
   const maxDomain = Math.max(
     ...(subTab === 'queried' ? dns.top_queried_domains : subTab === 'blocked' ? dns.top_blocked_domains : dns.top_clients)
@@ -371,8 +371,8 @@ export default function LabMonitor() {
 
   return (
     <div className="space-y-0">
-      {/* Tab bar */}
-      <div className="flex gap-0.5 border-b border-zinc-800 mb-4">
+      {/* Tab bar — segmented control */}
+      <div className="inline-flex gap-0.5 bg-zinc-800/50 border border-zinc-700/40 rounded-lg p-0.5 mb-4">
         <TabBtn active={tab === 'services'} onClick={() => setTab('services')}>Services</TabBtn>
         <TabBtn active={tab === 'network'} onClick={() => setTab('network')}>WAN & Network</TabBtn>
         <TabBtn active={tab === 'dns'} onClick={() => setTab('dns')}>DNS / AdGuard</TabBtn>
@@ -381,6 +381,58 @@ export default function LabMonitor() {
       {tab === 'services' && <ServicesTab />}
       {tab === 'network'  && <NetworkTab />}
       {tab === 'dns'      && <DnsTab />}
+    </div>
+  )
+}
+
+// ── In-place expand detail ─────────────────────────────────────────────────
+
+/**
+ * Tile expand: full monitor grid + response-time chart, plus the MikroTik
+ * SNMP board (Grafana "MikroTik Network" parity — RB5009 + CRS309).
+ */
+export function MonitorDetail() {
+  const [tab, setTab] = useState<'monitors' | 'mikrotik'>('monitors')
+  const { data: monitors } = useWidgetData<Monitor[]>('/api/services', {
+    select: (raw) => (raw as { monitors?: Monitor[] }).monitors ?? [],
+  })
+
+  return (
+    <div>
+      <div className="inline-flex gap-0.5 bg-zinc-800/50 border border-zinc-700/40 rounded-lg p-0.5 mb-4">
+        <TabBtn active={tab === 'monitors'} onClick={() => setTab('monitors')}>All monitors</TabBtn>
+        <TabBtn active={tab === 'mikrotik'} onClick={() => setTab('mikrotik')}>MikroTik · SNMP</TabBtn>
+      </div>
+
+      {tab === 'monitors' && (
+        !monitors ? (
+          <Spinner />
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+              {monitors.map((m) => {
+                const statusTone: StatusTone = m.status === 'up' ? 'ok' : m.status === 'down' ? 'crit' : 'warn'
+                const uptimeTone: StatusTone = m.uptime >= 99 ? 'ok' : m.uptime >= 90 ? 'warn' : 'crit'
+                const pingColor = m.ping == null ? '' : m.ping > 300 ? 'text-red-400' : m.ping > 150 ? 'text-amber-400' : 'text-zinc-500'
+                return (
+                  <div key={m.id} className="flex items-center gap-2 bg-zinc-800/40 rounded-lg px-2.5 py-1.5 min-w-0">
+                    <UptimeArc pct={m.uptime} />
+                    <StatusDot tone={statusTone} pulse={m.status === 'down'} />
+                    <span className="text-xs text-zinc-200 truncate flex-1">{m.name}</span>
+                    {m.ping != null && (
+                      <span className={`text-[11px] tabular-nums flex-shrink-0 ${pingColor}`}>{m.ping}ms</span>
+                    )}
+                    <StatusChip tone={uptimeTone}>{m.uptime}%</StatusChip>
+                  </div>
+                )
+              })}
+            </div>
+            <ResponseTimeBars monitors={monitors} />
+          </div>
+        )
+      )}
+
+      {tab === 'mikrotik' && <GrafanaBoard board="mikrotik" />}
     </div>
   )
 }

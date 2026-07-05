@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { StatusChip, StatusDot, type StatusTone } from '@/components/lab/Status'
 
 interface AgentHeartbeat {
   agent: string
@@ -13,16 +14,17 @@ interface AgentHeartbeat {
   updated_at: string
 }
 
-const STATUS_STYLE: Record<string, { badge: string; dot: string; label: string; accentColor: string }> = {
-  healthy:     { badge: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50', dot: 'bg-emerald-400',             label: 'Running',    accentColor: '#34d399' },
-  connected:   { badge: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50', dot: 'bg-emerald-400',             label: 'Connected',  accentColor: '#34d399' },
-  active:      { badge: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50', dot: 'bg-emerald-400',             label: 'Active',     accentColor: '#34d399' },
-  degraded:    { badge: 'bg-amber-900/40 text-amber-300 border-amber-700/40',       dot: 'bg-amber-400 animate-pulse', label: 'Degraded',   accentColor: '#f59e0b' },
-  restarting:  { badge: 'bg-blue-900/40 text-blue-300 border-blue-700/40',          dot: 'bg-blue-400 animate-pulse',  label: 'Restarting', accentColor: '#60a5fa' },
-  critical:    { badge: 'bg-red-900/50 text-red-300 border-red-700/50',             dot: 'bg-red-400 animate-pulse',   label: 'Critical',   accentColor: '#ef4444' },
-  down:        { badge: 'bg-red-900/50 text-red-300 border-red-700/50',             dot: 'bg-red-400 animate-pulse',   label: 'Down',       accentColor: '#ef4444' },
-  no_data:     { badge: 'bg-zinc-800/60 text-zinc-600 border-zinc-700/50',          dot: 'bg-zinc-700',                label: 'No data',    accentColor: '#52525b' },
-  unknown:     { badge: 'bg-zinc-800/60 text-zinc-500 border-zinc-700/50',          dot: 'bg-zinc-600',                label: 'Unknown',    accentColor: '#71717a' },
+// Shared chip/dot vocabulary (components/lab/Status.tsx) + per-status label/pulse.
+const STATUS_STYLE: Record<string, { tone: StatusTone; pulse: boolean; label: string }> = {
+  healthy:     { tone: 'ok',   pulse: false, label: 'Running' },
+  connected:   { tone: 'ok',   pulse: false, label: 'Connected' },
+  active:      { tone: 'ok',   pulse: false, label: 'Active' },
+  degraded:    { tone: 'warn', pulse: true,  label: 'Degraded' },
+  restarting:  { tone: 'info', pulse: true,  label: 'Restarting' },
+  critical:    { tone: 'crit', pulse: true,  label: 'Critical' },
+  down:        { tone: 'crit', pulse: true,  label: 'Down' },
+  no_data:     { tone: 'dim',  pulse: false, label: 'No data' },
+  unknown:     { tone: 'dim',  pulse: false, label: 'Unknown' },
 }
 
 // Override badge label per-agent when healthy
@@ -57,11 +59,7 @@ function getStatusStyle(agent: AgentHeartbeat) {
   // Special-case auth_expired from metadata
   const meta = agent.metadata as Record<string, unknown>
   if (meta?.auth_expired || meta?.gmail_auth_expired) {
-    return {
-      badge: 'bg-amber-900/40 text-amber-300 border-amber-700/40',
-      dot: 'bg-amber-400',
-      label: 'Auth Expired',
-    }
+    return { tone: 'warn' as StatusTone, pulse: false, label: 'Auth Expired' }
   }
   const base = STATUS_STYLE[agent.status] ?? STATUS_STYLE.no_data
   const override = AGENT_STATUS_LABEL[agent.agent]?.[agent.status]
@@ -107,7 +105,10 @@ export default function AgentHealthCard() {
       {/* Header accent — color-coded by worst agent status */}
       <div className="w-1 absolute left-0 top-4 bottom-4 rounded-full" style={{ left: '0', marginLeft: '-1px', background: `${accentColor}99` }} />
 
-      <h2 className="text-[10px] font-semibold text-green-400/70 uppercase tracking-widest mb-3">Agent Health</h2>
+      <div className="flex items-baseline gap-2.5 mb-3">
+        <h2 className="text-[10px] font-semibold text-green-400/70 uppercase tracking-widest">Agent Health</h2>
+        <span className="text-[10px] text-zinc-600">heartbeats · 30s</span>
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center h-20">
@@ -123,7 +124,7 @@ export default function AgentHealthCard() {
             return (
               <div key={agent.agent} className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+                  <StatusDot tone={style.tone} pulse={style.pulse} />
                   <span className="text-xs text-zinc-300 truncate">{displayName}</span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -131,11 +132,9 @@ export default function AgentHealthCard() {
                     <span className="text-[10px] text-zinc-600">{agent.restart_count_hour}↺/hr</span>
                   )}
                   {agent.last_heartbeat && (
-                    <span className="text-[10px] text-zinc-700 hidden sm:block">{formatAge(agent.last_heartbeat)}</span>
+                    <span className="text-[10px] text-zinc-700 hidden sm:block tabular-nums">{formatAge(agent.last_heartbeat)}</span>
                   )}
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wide ${style.badge}`}>
-                    {style.label}
-                  </span>
+                  <StatusChip tone={style.tone}>{style.label}</StatusChip>
                 </div>
               </div>
             )

@@ -1,15 +1,5 @@
 import { NextResponse } from 'next/server'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
 import net from 'net'
-
-const DEVICES_FILE = join(process.cwd(), 'data', 'rustdesk-devices.json')
-
-interface RustDeskDevice {
-  id: string
-  name: string
-  icon?: string
-}
 
 async function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -22,18 +12,10 @@ async function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<b
   })
 }
 
-function loadDevices(): RustDeskDevice[] {
-  if (!existsSync(DEVICES_FILE)) return []
-  try {
-    return JSON.parse(readFileSync(DEVICES_FILE, 'utf-8'))
-  } catch {
-    return []
-  }
-}
-
+// Status only. The relay key is deliberately NOT returned — the widget never
+// used it and this route is reachable by any LAN client.
 export async function GET() {
   const host = process.env.RUSTDESK_HOST
-  const key = process.env.RUSTDESK_KEY ?? ''
 
   if (!host) {
     return NextResponse.json({ configured: false })
@@ -44,7 +26,5 @@ export async function GET() {
     tcpProbe(host, 21117),
   ])
 
-  const devices = loadDevices()
-
-  return NextResponse.json({ configured: true, hbbs, hbbr, host, key, devices })
+  return NextResponse.json({ configured: true, hbbs, hbbr, host })
 }
