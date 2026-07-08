@@ -1,17 +1,22 @@
 @import "tailwindcss";
+@import "./colorThemes.css";
 
+/* App tokens now derive from the active color theme (see lib/colorThemes.ts +
+   colorThemes.css). The theme is selected via [data-color-theme] on <html>
+   (default "graphite"); the accessible themes own light/dark, so the old
+   prefers-color-scheme override is gone. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: var(--t-bg);
+  --foreground: var(--t-tx);
 
-  /* Purple accent — used for highlights without taking over */
-  --accent-purple: #a78bfa;
-  --accent-purple-dim: rgba(167,139,250,0.12);
-  --accent-purple-border: rgba(167,139,250,0.2);
+  /* Purple accent name kept for compatibility; now the theme's accent. */
+  --accent-purple: var(--t-acc);
+  --accent-purple-dim: var(--t-accsoft);
+  --accent-purple-border: var(--t-accline);
 
-  /* Card lift effect */
-  --card-shadow-idle: 0 1px 3px rgba(0,0,0,0.4);
-  --card-shadow-hover: 0 8px 28px rgba(0,0,0,0.5), 0 0 0 1px rgba(167,139,250,0.15);
+  /* Card lift effect — theme shadows */
+  --card-shadow-idle: var(--t-shadow);
+  --card-shadow-hover: var(--t-shadowh);
 }
 
 @theme inline {
@@ -19,31 +24,43 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-mono), 'Courier New', monospace;
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #ededed;
-  }
+  /* Map Tailwind's zinc neutral ramp onto the theme surfaces/text so existing
+     zinc-* utility classes recolor automatically. Dark themes (graphite/
+     universal) keep a dark ramp; daylight inverts (surfaces light, text dark). */
+  --color-zinc-950: var(--t-bg);
+  --color-zinc-900: var(--t-surf);
+  --color-zinc-800: var(--t-surf2);
+  --color-zinc-700: var(--t-surf3);
+  --color-zinc-600: var(--t-bord2);
+  --color-zinc-500: var(--t-txf);
+  --color-zinc-400: var(--t-txd);
+  --color-zinc-300: var(--t-txd);
+  --color-zinc-200: var(--t-tx);
+  --color-zinc-100: var(--t-tx);
+  --color-zinc-50: var(--t-tx);
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
 body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background-color: var(--t-bg);
+  min-height: 100vh;
+}
 
-  /* Server rack image bg + dark overlay + purple warmth */
-  background-color: #09090b;
+/* Dark themes keep the server-rack image bg + accent-tinted overlay.
+   Daylight (light) uses a plain theme surface — no dark overlay. */
+:root[data-color-theme="graphite"] body,
+:root[data-color-theme="universal"] body {
   background-image:
-    radial-gradient(ellipse 80% 50% at 20% 20%, rgba(109,40,217,0.18) 0%, transparent 55%),
-    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(109,40,217,0.14) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 50% at 20% 20%, var(--t-accsoft) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, var(--t-accsoft) 0%, transparent 50%),
     linear-gradient(rgba(9,9,11,0.82), rgba(9,9,11,0.82)),
     url('/bg-rack.png');
   background-size: auto, auto, auto, cover;
   background-position: center, center, center, center;
   background-attachment: fixed;
-  min-height: 100vh;
 }
 
 /* ── Card lift + glass hover ───────────────────────────────────────── */
