@@ -1,13 +1,23 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { IBM_Plex_Sans, IBM_Plex_Mono } from 'next/font/google'
 import ThemeProvider from '@/components/shared/ThemeProvider'
 import SiteHeader from '@/components/shared/SiteHeader'
 import ScrollToTop from '@/components/shared/ScrollToTop'
 import ColorThemeSwitcher from '@/components/shared/ColorThemeSwitcher'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
-const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' })
+// Match the Claude prototype's typography: IBM Plex Sans/Mono. The CSS var names
+// are kept (--font-inter / --font-mono) so globals.css font mapping is unchanged.
+const inter = IBM_Plex_Sans({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-inter',
+})
+const jetbrainsMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600'],
+  variable: '--font-mono',
+})
 
 export const metadata: Metadata = {
   title: 'AZ-Lab Home',

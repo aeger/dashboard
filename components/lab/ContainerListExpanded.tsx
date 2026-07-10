@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import StatusBadge from '@/components/shared/StatusBadge'
+import Bar from '@/components/ui/Bar'
 import type { Container } from '@/lib/portainer'
 
 interface UpdateInfo {
@@ -84,12 +85,10 @@ function MiniBar({ pct, color }: { pct: number; color: string }) {
 
 function HealthBar({ running, total }: { running: number; total: number }) {
   const pct = total > 0 ? (running / total) * 100 : 0
-  const color = pct === 100 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500'
+  const tone = pct === 100 ? 'ok' : pct >= 50 ? 'warn' : 'crit'
   return (
     <div className="flex items-center gap-2">
-      <div className="w-20 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
-      </div>
+      <Bar pct={pct} tone={tone} className="w-20" />
       <span className="text-[10px] text-zinc-500 tabular-nums">{running}/{total}</span>
     </div>
   )

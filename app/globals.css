@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./colorThemes.css";
+@import "./skin.css";
 
 /* App tokens now derive from the active color theme (see lib/colorThemes.ts +
    colorThemes.css). The theme is selected via [data-color-theme] on <html>
@@ -26,19 +27,39 @@
   --font-mono: var(--font-mono), 'Courier New', monospace;
 
   /* Map Tailwind's zinc neutral ramp onto the theme surfaces/text so existing
-     zinc-* utility classes recolor automatically. Dark themes (graphite/
-     universal) keep a dark ramp; daylight inverts (surfaces light, text dark). */
-  --color-zinc-950: var(--t-bg);
-  --color-zinc-900: var(--t-surf);
-  --color-zinc-800: var(--t-surf2);
-  --color-zinc-700: var(--t-surf3);
-  --color-zinc-600: var(--t-bord2);
-  --color-zinc-500: var(--t-txf);
-  --color-zinc-400: var(--t-txd);
-  --color-zinc-300: var(--t-txd);
+     zinc-* utility classes recolor automatically.
+
+     The app is dark-first and uses the mid-grey stops (400/500/600) almost
+     entirely as TEXT (261/327/324 uses) and only rarely as borders/fills.
+     So those MUST resolve to text tokens — routing them to border/surface
+     colors (as an earlier pass did) painted ~650 labels light-grey-on-white
+     in daylight, and dark-grey-on-dark in graphite → "barely visible text".
+     High stops (700→bord, 800/900→card, 950→page) carry structure. */
+  --color-zinc-950: var(--t-bg);   /* page */
+  --color-zinc-900: var(--t-surf); /* card */
+  --color-zinc-800: var(--t-surf2); /* inner tile / nested surface — recessed from card so elements read distinct from the frame */
+  --color-zinc-700: var(--t-bord); /* border (204 uses) — visible edge */
+  --color-zinc-600: var(--t-txd);  /* muted text (324) — NOT a border */
+  --color-zinc-500: var(--t-txd);  /* muted text (327) — NOT a border */
+  --color-zinc-400: var(--t-txd);  /* secondary text (261) */
+  --color-zinc-300: var(--t-tx);   /* primary body text (222) */
   --color-zinc-200: var(--t-tx);
   --color-zinc-100: var(--t-tx);
   --color-zinc-50: var(--t-tx);
+
+  /* Semantic status colors → theme status tokens, so widget data reads legibly
+     in every theme (dark-on-white in daylight; Okabe-Ito under universal)
+     instead of dark-tuned light shades washing out. */
+  --color-red-300: var(--t-crittx);  --color-red-400: var(--t-crit);  --color-red-500: var(--t-crit);
+  --color-rose-300: var(--t-crittx); --color-rose-400: var(--t-crit);
+  --color-green-300: var(--t-oktx);  --color-green-400: var(--t-ok);  --color-green-500: var(--t-ok);
+  --color-emerald-300: var(--t-oktx);--color-emerald-400: var(--t-ok);--color-emerald-500: var(--t-ok);
+  --color-amber-300: var(--t-warntx);--color-amber-400: var(--t-warn);--color-amber-500: var(--t-warn);
+  --color-yellow-300: var(--t-warntx);--color-yellow-400: var(--t-warn);
+  --color-blue-300: var(--t-infotx); --color-blue-400: var(--t-info); --color-blue-500: var(--t-info);
+  --color-sky-300: var(--t-infotx);  --color-sky-400: var(--t-info);
+  --color-violet-300: var(--t-acc);  --color-violet-400: var(--t-acc);
+  --color-purple-300: var(--t-acc);  --color-purple-400: var(--t-acc);
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
@@ -75,13 +96,9 @@ body {
 }
 
 .card-lift:hover {
-  transform: translateY(-4px);
-  box-shadow:
-    0 12px 36px rgba(0,0,0,0.6),
-    0 0 0 1px rgba(167,139,250,0.45),
-    0 0 24px rgba(109,40,217,0.12);
-  border-color: rgba(167,139,250,0.45) !important;
-  background-color: rgba(30,22,45,0.65) !important;
+  transform: translateY(-3px);
+  box-shadow: var(--t-shadowh);
+  border-color: var(--t-accline) !important;
 }
 
 /* Glass sheen — top-left highlight, stronger on hover */

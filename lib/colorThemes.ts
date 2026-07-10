@@ -58,9 +58,9 @@ const daylight: Theme = {
   base: "light",
   colorSafe: false,
   vars: {
-    "--t-bg": "#eceef1", "--t-bg2": "#f5f7f9", "--t-surf": "#ffffff",
-    "--t-surf2": "#f3f5f8", "--t-surf3": "#e9edf1",
-    "--t-bord": "#dde2e8", "--t-bord2": "#e7ebf0",
+    "--t-bg": "#dfe3e9", "--t-bg2": "#e9edf2", "--t-surf": "#ffffff",
+    "--t-surf2": "#eef1f5", "--t-surf3": "#e4e8ee",
+    "--t-bord": "#c4ccd6", "--t-bord2": "#d3dae2",
     "--t-tx": "#161b22", "--t-txd": "#54606f", "--t-txf": "#8a94a2",
     "--t-acc": "#0d9488", "--t-acc2": "#0891b2",
     "--t-accsoft": "rgba(13,148,136,.10)", "--t-accline": "rgba(13,148,136,.34)",
