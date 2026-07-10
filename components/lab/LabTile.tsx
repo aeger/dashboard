@@ -18,8 +18,9 @@ export function useTileMeta(meta: string | null | undefined) {
   }, [meta, setMeta])
 }
 
-/** Shared card chrome for every lab tile. Kept in sync with the family cards. */
-const CARD = 'relative card-lift bg-zinc-900/50 border border-zinc-800/70 rounded-xl p-4'
+/** Shared card chrome for every lab tile → the skin primitive (11px, theme-token
+ *  surface/border, corner ticks, lift hover). Kept in sync with the family cards. */
+const CARD = 'az-card az-lift az-ticks'
 
 /**
  * Tailwind needs static class names — map the registry `span` to literal classes.
@@ -137,7 +138,7 @@ export default function LabTile({
             style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
           >
             <div className="overflow-hidden min-w-0">
-              <div className="pt-4 mt-4 border-t border-dashed border-zinc-800/60">{detail}</div>
+              <div className="pt-4 mt-4 border-t border-dashed" style={{ borderColor: 'var(--t-bord)' }}>{detail}</div>
             </div>
           </div>
         )}

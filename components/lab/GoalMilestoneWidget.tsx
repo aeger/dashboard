@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Bar from '@/components/ui/Bar'
 import type { Goal } from '@/app/api/goals/route'
 
 const STATUS_DOT: Record<string, string> = {
@@ -13,15 +14,11 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 function ProgressBar({ value, status }: { value: number; status: string }) {
-  const color = status === 'completed' ? 'bg-green-500' :
-                status === 'blocked'   ? 'bg-amber-500' :
-                status === 'paused'    ? 'bg-yellow-500' :
-                'progress-purple'
-  return (
-    <div className="h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
-      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${value}%` }} />
-    </div>
-  )
+  const tone = status === 'completed' ? 'ok' :
+               status === 'blocked'   ? 'crit' :
+               status === 'paused'    ? 'warn' :
+               'acc'
+  return <Bar pct={value} tone={tone} thin />
 }
 
 function MilestoneRow({ goal }: { goal: Goal }) {

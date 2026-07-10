@@ -78,40 +78,73 @@ export default function SecurityWidget() {
   )
   if (!data) return <div className="text-xs text-zinc-600 text-center py-6">No scan data yet — expand to run one</div>
 
-  const scoreColor = data.score >= 80 ? '#34d399' : data.score >= 60 ? '#fbbf24' : '#f87171'
+  // Score tone drives the gauge arc color (neutral number, colored ring —
+  // matches the prototype). Arc length = fraction of the r=42 circumference.
+  const scoreTone = data.score >= 80 ? 'ok' : data.score >= 60 ? 'warn' : 'crit'
+  const CIRC = 2 * Math.PI * 42
+  const arc = (Math.max(0, Math.min(100, data.score)) / 100) * CIRC
   // Most severe first; the collapsed tile shows the top few open findings.
   const order = { critical: 0, warning: 1, info: 2 }
-  const top = [...data.findings].sort((a, b) => order[a.severity] - order[b.severity]).slice(0, 4)
+  const sorted = [...data.findings].sort((a, b) => order[a.severity] - order[b.severity])
+  const top = sorted.slice(0, 4)
+  const topCrit = sorted.find((f) => f.severity === 'critical')
 
   return (
-    <div className="flex items-center gap-5">
-      <div className="flex-none text-center pl-1">
-        <div className="font-mono text-3xl font-semibold leading-none tabular-nums" style={{ color: scoreColor }}>
-          {data.score}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-start gap-4">
+        {/* Radial score gauge — track ring + score arc, thin mono numeral. */}
+        <div className="relative flex-none" style={{ width: 90, height: 90 }}>
+          <svg viewBox="0 0 100 100" style={{ width: 90, height: 90, transform: 'rotate(-90deg)' }}>
+            <circle cx="50" cy="50" r="42" fill="none" stroke="var(--t-track)" strokeWidth="9" />
+            <circle
+              cx="50" cy="50" r="42" fill="none"
+              stroke={`var(--t-${scoreTone})`} strokeWidth="9" strokeLinecap="round"
+              strokeDasharray={`${arc.toFixed(1)} ${CIRC.toFixed(1)}`}
+              style={{ transition: 'stroke-dasharray .6s cubic-bezier(.4,0,.2,1)' }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="az-metric" style={{ fontSize: 27, lineHeight: 1 }}>{data.score}</span>
+            <span className="az-label mt-1" style={{ fontSize: 8 }}>score</span>
+          </div>
         </div>
-        <div className="text-[9.5px] uppercase tracking-widest text-zinc-600 mt-1.5">score</div>
+
+        {/* Top open findings */}
+        <div className="flex-1 min-w-0">
+          {top.length === 0 ? (
+            <div className="text-xs text-emerald-400/90 py-2">✓ No open findings — everything looks clean</div>
+          ) : (
+            <div className="flex flex-col">
+              {top.map((f) => (
+                <div key={f.id} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/30 last:border-0 min-w-0">
+                  <StatusDot tone={SEV_TONE[f.severity]} pulse={f.severity === 'critical'} />
+                  <span className="text-xs text-zinc-300 truncate flex-1" title={f.detail}>{f.title}</span>
+                  <StatusChip tone={SEV_TONE[f.severity]}>{f.severity === 'warning' ? 'medium' : f.severity}</StatusChip>
+                </div>
+              ))}
+              {data.findings.length > top.length && (
+                <div className="text-[10px] text-zinc-600 pt-1.5">
+                  …{data.findings.length - top.length} more — expand for all findings
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 min-w-0">
-        {top.length === 0 ? (
-          <div className="text-xs text-emerald-400/90 py-2">✓ No open findings — everything looks clean</div>
-        ) : (
-          <div className="flex flex-col">
-            {top.map((f) => (
-              <div key={f.id} className="flex items-center gap-2.5 py-1.5 border-b border-zinc-800/30 last:border-0 min-w-0">
-                <StatusDot tone={SEV_TONE[f.severity]} pulse={f.severity === 'critical'} />
-                <span className="text-xs text-zinc-300 truncate flex-1" title={f.detail}>{f.title}</span>
-                <StatusChip tone={SEV_TONE[f.severity]}>{f.severity === 'warning' ? 'medium' : f.severity}</StatusChip>
-              </div>
-            ))}
-            {data.findings.length > top.length && (
-              <div className="text-[10px] text-zinc-600 pt-1.5">
-                …{data.findings.length - top.length} more — expand for all findings
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Live alert strip — surfaces the top CRITICAL finding (real scan data,
+          not the mockup's hardcoded cert line). Once the scanner emits a cert-
+          expiry finding it flows straight into here. Hidden when nothing is critical. */}
+      {topCrit && (
+        <div
+          className="flex items-center gap-2.5 rounded-lg px-3 py-2 min-w-0"
+          style={{ background: 'var(--t-critsoft)', border: '1px solid var(--t-critsoft)' }}
+        >
+          <span className="w-2 h-2 rounded-full flex-none animate-pulse" style={{ background: 'var(--t-crit)' }} />
+          <span className="text-[8px] font-semibold uppercase tracking-[0.14em] flex-none" style={{ color: 'var(--t-crittx)' }}>Alert</span>
+          <span className="text-[11px] truncate" style={{ color: 'var(--t-tx)' }} title={topCrit.detail}>{topCrit.title}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -178,7 +211,7 @@ export function SecurityDetail() {
               color: data.stats.disk_percent >= 85 ? 'text-amber-400' : 'text-zinc-200' },
             { val: data.stats.game_open_ports.length, label: 'Game ports open', color: 'text-zinc-200' },
           ].map(({ val, label, color }) => (
-            <div key={label} className="bg-zinc-800/40 rounded-lg p-2 text-center">
+            <div key={label} className="az-tile text-center">
               <div className={`text-sm font-semibold ${color}`}>{val}</div>
               <div className="text-[10px] text-zinc-600 leading-tight mt-0.5">{label}</div>
             </div>
@@ -196,7 +229,7 @@ export function SecurityDetail() {
 
       {/* Game server open ports */}
       {data.stats.game_open_ports.length > 0 && (
-        <div className="bg-zinc-800/30 rounded-lg px-3 py-2">
+        <div className="az-tile">
           <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1.5">
             {data.stats.game_server_ip} — Open Ports
           </div>

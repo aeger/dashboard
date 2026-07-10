@@ -2,6 +2,7 @@
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { useTileMeta } from '@/components/lab/LabTile'
+import Bar from '@/components/ui/Bar'
 import type { HostMetrics as HostMetricsType } from '@/lib/prometheus'
 
 type Tone = 'ok' | 'warn' | 'crit' | 'none'
@@ -21,15 +22,10 @@ const TONE_TEXT: Record<Tone, string> = {
   crit: 'text-red-300',
   none: 'text-zinc-100',
 }
-// Mark steps validated against the zinc-900 surface (CVD + contrast).
-const TONE_BAR: Record<Tone, string> = {
-  ok: '#059669',
-  warn: '#d97706',
-  crit: '#dc2626',
-  none: '#3f3f46',
-}
 
-const CELL = 'flex flex-col justify-between rounded-lg p-3 min-w-0 bg-zinc-800/40 border border-zinc-700/30'
+// Inner metric cell = the .az-tile primitive (recessed surf2 surface, bord2
+// edge) so each stat reads distinct from the card frame in every theme.
+const CELL = 'az-tile flex flex-col justify-between min-w-0'
 
 function fmtRate(bps: number | null): string {
   if (bps == null) return '—'
@@ -67,12 +63,12 @@ function StatTile({
           {unit && <span className="text-sm font-medium text-zinc-400">{unit}</span>}
         </div>
         {barPct != null && (
-          <div className="h-[3px] rounded-full bg-zinc-700/60 overflow-hidden mt-2">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(100, Math.max(0, barPct))}%`, background: TONE_BAR[tone] }}
-            />
-          </div>
+          <Bar
+            pct={barPct}
+            tone={tone === 'warn' ? 'warn' : tone === 'crit' ? 'crit' : 'acc'}
+            thin
+            className="mt-2"
+          />
         )}
         {sub && <div className="text-[10px] text-zinc-500 mt-1.5 tabular-nums truncate">{sub}</div>}
       </div>
