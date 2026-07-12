@@ -97,9 +97,15 @@ export interface EndpointProbe {
 // probe_success therefore flickered endpoints red when nothing was down. We take
 // max_over_time(probe_success[5m]) so a probe that succeeded even once in the
 // window reads UP, while a genuinely-down endpoint (fails every scrape for 5m)
-// still reads DOWN. status_code uses max (ignores the 0 a timeout records, keeps
-// the real 200/302/401); duration uses min (the fastest = real healthy latency,
-// not the 5s timeout); cert uses max (last-known expiry).
+// still reads DOWN.
+//
+// status_code/duration report the value from the most recent SUCCESSFUL scrape —
+// last_over_time((metric and probe_success == 1)[5m]) — falling back to the
+// latest scrape (`or last_over_time(metric[5m])`) only when the endpoint was down
+// the whole window. This keeps a debounced-UP row from displaying the 0/5s a
+// transient timeout records, and (per PR #1 review) avoids max_over_time picking
+// a numerically-larger transient failure code — e.g. a lone 500 — over the real
+// 200 while the row still reads UP. cert uses max (last-known expiry).
 export async function fetchEndpointProbes(): Promise<EndpointProbe[]> {
   const baseUrl = process.env.PROMETHEUS_URL
   if (!baseUrl) return []
@@ -123,8 +129,8 @@ export async function fetchEndpointProbes(): Promise<EndpointProbe[]> {
 
   const [success, status, duration, cert] = await Promise.all([
     raw('max_over_time(probe_success[5m])'),
-    raw('max_over_time(probe_http_status_code[5m])'),
-    raw('min_over_time(probe_duration_seconds[5m])'),
+    raw('last_over_time((probe_http_status_code and probe_success == 1)[5m:15s]) or last_over_time(probe_http_status_code[5m:15s])'),
+    raw('last_over_time((probe_duration_seconds and probe_success == 1)[5m:15s]) or last_over_time(probe_duration_seconds[5m:15s])'),
     raw('max_over_time(probe_ssl_earliest_cert_expiry[5m])'),
   ])
 
