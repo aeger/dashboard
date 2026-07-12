@@ -27,6 +27,10 @@ interface Spend {
   apiSpend: number
   freeCalls: number
   bucketPct: number
+  realSpend: number
+  realCalls: number
+  realInputTokens: number
+  realOutputTokens: number
   mtdCalls: number
   totalCalls: number
   tiers: TierBreakdown[]
@@ -42,10 +46,13 @@ const STALE_H = 36
 
 // Tier identity — matches the 3-tier fallback chain in ~/claude/lib/claude_call.py
 const TIER_META: Record<number, { label: string; note: string; color: string }> = {
-  0: { label: 'Max bucket', note: 'oauth · subscription', color: '#10b981' },
+  3: { label: 'Claude Code', note: 'interactive · Max', color: '#38bdf8' },
+  0: { label: 'Max bucket', note: 'oauth · programmatic', color: '#10b981' },
   1: { label: 'API credits', note: 'pay-as-you-go', color: '#f59e0b' },
   2: { label: 'NemoClaw', note: 'local · free', color: '#a78bfa' },
 }
+// Display / render order — Claude Code (the real driver) first.
+const TIER_ORDER = [3, 0, 1, 2]
 
 function fmtUsd(n: number): string {
   if (n === 0) return '$0.00'
@@ -107,7 +114,7 @@ export default function ClaudeSpendWidget() {
   const stale = data?.staleHours != null && data.staleHours >= STALE_H
   useTileMeta(
     data?.available
-      ? `${data.monthLabel} · ${data.mtdCalls} calls MTD${stale ? ' · stale' : ''}`
+      ? `${data.monthLabel} · ${fmtUsd(data.realSpend)} real${stale ? ' · stale' : ''}`
       : undefined,
   )
 
@@ -136,7 +143,7 @@ export default function ClaudeSpendWidget() {
   if (err) return <div className="text-xs text-red-400/80">Spend metrics unavailable</div>
   if (!data) return <div className="text-xs text-zinc-600">Loading…</div>
   if (!data.available)
-    return <div className="text-xs text-zinc-600">No programmatic calls logged yet this session.</div>
+    return <div className="text-xs text-zinc-600">No Claude usage logged yet this month.</div>
 
   const exhausted = data.bucketSpend >= data.bucketLimit
   const gaugeColor = exhausted ? '#f59e0b' : data.bucketPct >= 85 ? '#eab308' : '#10b981'
@@ -144,26 +151,45 @@ export default function ClaudeSpendWidget() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Bucket gauge hero ─────────────────────────────────────────── */}
+      {/* ── Real-usage hero ───────────────────────────────────────────── */}
       <div>
-        <div className="flex items-baseline justify-between gap-2 mb-2">
+        <div className="flex items-baseline justify-between gap-2 mb-1">
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-2xl font-semibold tabular-nums text-zinc-100 leading-none">
-              {fmtUsd(data.bucketSpend)}
+              {fmtUsd(data.realSpend)}
             </span>
-            <span className="text-xs text-zinc-500 tabular-nums">
-              / ${data.bucketLimit} bucket
-            </span>
+            <span className="text-xs text-zinc-500">real usage · {data.monthLabel}</span>
           </div>
-          <span
-            className="text-[11px] font-semibold tabular-nums px-2 py-0.5 rounded-full"
-            style={{ color: gaugeColor, background: `${gaugeColor}18` }}
-          >
-            {data.bucketPct < 0.1 ? '<0.1' : data.bucketPct.toFixed(1)}%
+          <span className="text-zinc-600 tabular-nums text-[11px]">
+            {data.realCalls.toLocaleString()} calls
+            {data.lastTs && (
+              <span className={stale ? 'text-amber-500/80' : 'text-zinc-700'}>
+                {' '}· {relTime(data.lastTs)}
+                {stale && (
+                  <span title="No Claude usage logged recently — data source may be idle or stalled.">
+                    {' '}⚠
+                  </span>
+                )}
+              </span>
+            )}
           </span>
         </div>
+        <div className="text-[11px] text-zinc-600 tabular-nums">
+          {fmtTokens(data.realInputTokens)} in → {fmtTokens(data.realOutputTokens)} out · notional at API rates
+        </div>
+      </div>
 
-        <div className="h-2.5 rounded-full bg-zinc-800/80 overflow-hidden relative">
+      {/* ── Programmatic $100 bucket — the Max plan's oauth/API bucket ──── */}
+      <div>
+        <div className="flex items-baseline justify-between gap-2 mb-1">
+          <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
+            programmatic bucket
+          </span>
+          <span className="text-[11px] tabular-nums text-zinc-500">
+            {fmtUsd(data.bucketSpend)} <span className="text-zinc-600">/ ${data.bucketLimit}</span>
+          </span>
+        </div>
+        <div className="h-2 rounded-full bg-zinc-800/80 overflow-hidden relative">
           <div
             className="h-full rounded-full transition-all duration-700"
             style={{
@@ -173,37 +199,23 @@ export default function ClaudeSpendWidget() {
             }}
           />
         </div>
-
-        <div className="flex items-center justify-between mt-1.5 text-[11px]">
-          <span className="text-zinc-500">
-            {exhausted ? (
-              <span className="text-amber-400 font-medium">
-                Bucket exhausted — overflow on API credits
-              </span>
-            ) : (
-              <>
-                <span className="text-emerald-400/90 font-medium tabular-nums">
-                  {fmtUsd(headroom)}
-                </span>{' '}
-                headroom · {data.monthLabel}
-              </>
-            )}
-          </span>
-          <span className="text-zinc-600 tabular-nums">
-            {data.mtdCalls} calls MTD
-            {data.lastTs && (
-              <span className={stale ? 'text-amber-500/80' : 'text-zinc-700'}>
-                {' '}· {relTime(data.lastTs)}
-                {stale && <span title="No programmatic calls logged recently — data source may be idle or stalled."> ⚠</span>}
-              </span>
-            )}
-          </span>
+        <div className="mt-1 text-[11px]">
+          {exhausted ? (
+            <span className="text-amber-400 font-medium">
+              Bucket exhausted — overflow on API credits
+            </span>
+          ) : (
+            <span className="text-zinc-500">
+              <span className="text-emerald-400/90 font-medium tabular-nums">{fmtUsd(headroom)}</span>{' '}
+              headroom
+            </span>
+          )}
         </div>
       </div>
 
-      {/* ── Tier distribution — mockup row format: swatch · name · note · "N calls · $X" ── */}
+      {/* ── Tier distribution — swatch · name · note · "N calls · $X" ──── */}
       <div className="flex flex-col">
-        {[0, 1, 2].map((tier) => {
+        {TIER_ORDER.map((tier) => {
           const meta = TIER_META[tier]
           const t = data.tiers.find((x) => x.tier === tier)
           const calls = t?.calls ?? 0

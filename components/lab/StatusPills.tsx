@@ -306,7 +306,7 @@ function ClaudeVersionPill() {
 }
 
 function SpendPill() {
-  const [data, setData] = useState<{ bucketSpend: number; bucketLimit: number; bucketPct: number; apiSpend: number; available: boolean } | null>(null)
+  const [data, setData] = useState<{ bucketSpend: number; bucketLimit: number; bucketPct: number; apiSpend: number; realSpend: number; available: boolean } | null>(null)
 
   useEffect(() => {
     const load = () =>
@@ -337,9 +337,8 @@ function SpendPill() {
       <PillBody tone={tone} label="spend">
         {data && data.available ? (
           <>
-            ${data.bucketSpend < 0.01 ? data.bucketSpend.toFixed(3) : data.bucketSpend.toFixed(2)}
-            <span className="text-zinc-600">/{data.bucketLimit}</span>
-            {data.apiSpend > 0 && <span className="text-amber-400 font-semibold ml-1.5">+${data.apiSpend.toFixed(2)}</span>}
+            ${(data.realSpend ?? 0) < 0.01 ? (data.realSpend ?? 0).toFixed(3) : (data.realSpend ?? 0).toFixed(2)}
+            {data.apiSpend > 0 && <span className="text-amber-400 font-semibold ml-1.5">+${data.apiSpend.toFixed(2)} api</span>}
           </>
         ) : '—'}
       </PillBody>

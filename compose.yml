@@ -66,6 +66,8 @@ services:
       - TERMINAL_SSH_USER=almty1
       # Phase 2: Claude programmatic-spend log (written by ~/claude/lib/claude_call.py)
       - CLAUDE_SPEND_LOG=/app/spend/usage.jsonl
+      # Claude Code native transcripts — the real interactive/agent usage
+      - CLAUDE_TRANSCRIPTS_DIR=/app/transcripts
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
@@ -73,6 +75,7 @@ services:
       - /home/almty1/azlab/infrastructure/traefik/dynamic:/traefik-dynamic:rw
       - /home/almty1/azlab/services/rustdesk/data:/app/rustdesk-data:ro
       - /home/almty1/.local/state/claude-spend:/app/spend:ro
+      - /home/almty1/.claude/projects:/app/transcripts:ro
     networks:
       - proxy
     labels:
