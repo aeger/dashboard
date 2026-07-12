@@ -33,7 +33,12 @@ interface Spend {
   models: ModelBreakdown[]
   daily: { date: string; cost: number }[]
   lastTs: string | null
+  staleHours: number | null
 }
+
+// A log that hasn't grown in this many hours is flagged stale — distinguishes
+// "no recent programmatic calls" from a genuinely wedged data source.
+const STALE_H = 36
 
 // Tier identity — matches the 3-tier fallback chain in ~/claude/lib/claude_call.py
 const TIER_META: Record<number, { label: string; note: string; color: string }> = {
@@ -99,8 +104,11 @@ function Sparkline({ data }: { data: { date: string; cost: number }[] }) {
 export default function ClaudeSpendWidget() {
   const [data, setData] = useState<Spend | null>(null)
   const [err, setErr] = useState(false)
+  const stale = data?.staleHours != null && data.staleHours >= STALE_H
   useTileMeta(
-    data?.available ? `${data.monthLabel} · ${data.mtdCalls} calls MTD` : undefined,
+    data?.available
+      ? `${data.monthLabel} · ${data.mtdCalls} calls MTD${stale ? ' · stale' : ''}`
+      : undefined,
   )
 
   useEffect(() => {
@@ -183,7 +191,12 @@ export default function ClaudeSpendWidget() {
           </span>
           <span className="text-zinc-600 tabular-nums">
             {data.mtdCalls} calls MTD
-            {data.lastTs && <span className="text-zinc-700"> · {relTime(data.lastTs)}</span>}
+            {data.lastTs && (
+              <span className={stale ? 'text-amber-500/80' : 'text-zinc-700'}>
+                {' '}· {relTime(data.lastTs)}
+                {stale && <span title="No programmatic calls logged recently — data source may be idle or stalled."> ⚠</span>}
+              </span>
+            )}
           </span>
         </div>
       </div>

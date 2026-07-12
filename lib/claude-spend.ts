@@ -79,6 +79,9 @@ export interface ClaudeSpend {
   models: ModelBreakdown[]
   daily: { date: string; cost: number }[] // last 14 calendar days, bucket+api
   lastTs: string | null
+  // Hours since the newest logged call (server-computed so the "stale" badge
+  // does not depend on the browser clock). null when nothing is logged yet.
+  staleHours: number | null
 }
 
 const TIER_NAMES: Record<number, string> = {
@@ -196,5 +199,6 @@ export function getClaudeSpend(): ClaudeSpend {
     models: [...models.values()].sort((a, b) => b.cost - a.cost || b.calls - a.calls),
     daily: [...daily.entries()].map(([date, cost]) => ({ date, cost })),
     lastTs,
+    staleHours: lastTs ? Math.max(0, (now.getTime() - new Date(lastTs).getTime()) / 3_600_000) : null,
   }
 }
