@@ -21,6 +21,12 @@ const TRANSCRIPTS_DIR = process.env.CLAUDE_TRANSCRIPTS_DIR || '/app/transcripts'
 // corpus grows. Comfortably covers MTD + the 14-day sparkline window.
 const WINDOW_DAYS = 45
 export const BUCKET_LIMIT_USD = 100 // Max 5x monthly programmatic bucket
+// The real flat subscription — what Jeff actually pays each month. The notional
+// `realSpend` figure below is what the same token usage WOULD cost at metered
+// API rates; it is NOT billed. Actual out-of-pocket = this flat fee + any tier-1
+// pay-as-you-go overflow once the programmatic bucket is exhausted.
+const PLAN_MONTHLY = Number(process.env.CLAUDE_PLAN_MONTHLY || 100)
+const PLAN_LABEL = process.env.CLAUDE_PLAN_LABEL || 'Max 5x'
 
 // Per-million-token rates (USD). Keyed by model-id prefix, longest match wins.
 // Sourced from the Claude API model catalog (2026-07). NemoClaw is local → free.
@@ -117,10 +123,15 @@ export interface ClaudeSpend {
   bucketPct: number
   // Real usage this month — notional $ across every priced tier (broker + the
   // Claude Code interactive/agent transcripts). This is the headline number.
-  realSpend: number
+  realSpend: number // notional $ at metered API rates — NOT what Jeff is billed
   realCalls: number
   realInputTokens: number
   realOutputTokens: number
+  // What Jeff actually pays: flat subscription + any pay-as-you-go overflow.
+  planLabel: string // e.g. "Max 5x"
+  planMonthly: number // flat monthly subscription fee (USD)
+  actualSpend: number // planMonthly + apiSpend (tier-1 overflow) — real bill MTD
+  subsidy: number // realSpend - actualSpend — value covered by the flat plan
   mtdCalls: number
   totalCalls: number
   tiers: TierBreakdown[]
@@ -363,6 +374,12 @@ export function getClaudeSpend(): ClaudeSpend {
     realCalls: mtdCalls - freeCalls,
     realInputTokens,
     realOutputTokens,
+    planLabel: PLAN_LABEL,
+    planMonthly: PLAN_MONTHLY,
+    // Flat subscription + tier-1 pay-as-you-go overflow (the only metered charge).
+    // The programmatic bucket is an included allowance, so it is not added here.
+    actualSpend: PLAN_MONTHLY + apiSpend,
+    subsidy: Math.max(0, realSpend - (PLAN_MONTHLY + apiSpend)),
     mtdCalls,
     totalCalls: rows.length,
     tiers: [...tiers.values()].sort((a, b) => a.tier - b.tier),

@@ -68,6 +68,10 @@ services:
       - CLAUDE_SPEND_LOG=/app/spend/usage.jsonl
       # Claude Code native transcripts — the real interactive/agent usage
       - CLAUDE_TRANSCRIPTS_DIR=/app/transcripts
+      # Real flat subscription — drives the "you actually pay" figure. The spend
+      # widget's headline is notional (API-equivalent); this is what Jeff is billed.
+      - CLAUDE_PLAN_MONTHLY=100
+      - CLAUDE_PLAN_LABEL=Max 5x
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw

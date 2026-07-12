@@ -31,6 +31,10 @@ interface Spend {
   realCalls: number
   realInputTokens: number
   realOutputTokens: number
+  planLabel: string
+  planMonthly: number
+  actualSpend: number
+  subsidy: number
   mtdCalls: number
   totalCalls: number
   tiers: TierBreakdown[]
@@ -114,7 +118,7 @@ export default function ClaudeSpendWidget() {
   const stale = data?.staleHours != null && data.staleHours >= STALE_H
   useTileMeta(
     data?.available
-      ? `${data.monthLabel} · ${fmtUsd(data.realSpend)} real${stale ? ' · stale' : ''}`
+      ? `${data.monthLabel} · ${fmtUsd(data.actualSpend)} billed · ${fmtUsd(data.realSpend)} notional${stale ? ' · stale' : ''}`
       : undefined,
   )
 
@@ -148,17 +152,24 @@ export default function ClaudeSpendWidget() {
   const exhausted = data.bucketSpend >= data.bucketLimit
   const gaugeColor = exhausted ? '#f59e0b' : data.bucketPct >= 85 ? '#eab308' : '#10b981'
   const headroom = Math.max(0, data.bucketLimit - data.bucketSpend)
+  // Pay-as-you-go overflow beyond the flat plan — the only metered charge.
+  const overflow = Math.max(0, data.actualSpend - data.planMonthly)
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Real-usage hero ───────────────────────────────────────────── */}
+      {/* ── Hero: notional API-equivalent cost (NOT the bill) ───────────── */}
       <div>
         <div className="flex items-baseline justify-between gap-2 mb-1">
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-2xl font-semibold tabular-nums text-zinc-100 leading-none">
               {fmtUsd(data.realSpend)}
             </span>
-            <span className="text-xs text-zinc-500">real usage · {data.monthLabel}</span>
+            <span
+              className="text-xs text-zinc-500 border-b border-dotted border-zinc-600 cursor-help"
+              title="Notional: what this month's token usage WOULD cost at pay-as-you-go API list prices. This is NOT your bill — your Claude plan is a flat monthly subscription. See 'You actually pay' below."
+            >
+              API-equivalent · {data.monthLabel}
+            </span>
           </div>
           <span className="text-zinc-600 tabular-nums text-[11px]">
             {data.realCalls.toLocaleString()} calls
@@ -175,8 +186,41 @@ export default function ClaudeSpendWidget() {
           </span>
         </div>
         <div className="text-[11px] text-zinc-600 tabular-nums">
-          {fmtTokens(data.realInputTokens)} in → {fmtTokens(data.realOutputTokens)} out · notional at API rates
+          {fmtTokens(data.realInputTokens)} in → {fmtTokens(data.realOutputTokens)} out · notional, not billed
         </div>
+      </div>
+
+      {/* ── What you actually pay — the real bill ───────────────────────── */}
+      <div className="rounded-lg bg-zinc-800/30 border border-zinc-700/40 px-3 py-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">
+            you actually pay
+          </span>
+          <span className="text-[10px] text-zinc-600">{data.planLabel} · flat plan</span>
+        </div>
+        <div className="flex items-baseline justify-between gap-2 mt-0.5">
+          <span className="text-lg font-semibold tabular-nums text-emerald-300 leading-none">
+            {fmtUsd(data.actualSpend)}
+            <span className="text-[11px] font-normal text-zinc-500">{' '}this month</span>
+          </span>
+          <span className="text-[11px] text-zinc-500 tabular-nums">
+            {overflow > 0 ? (
+              <>
+                {fmtUsd(data.planMonthly)} plan +{' '}
+                <span className="text-amber-400/90">{fmtUsd(overflow)} API overflow</span>
+              </>
+            ) : (
+              <>{fmtUsd(data.planMonthly)}/mo flat subscription</>
+            )}
+          </span>
+        </div>
+        {data.subsidy > 0 && (
+          <div className="mt-1 text-[11px] text-zinc-500">
+            Flat plan covers{' '}
+            <span className="text-emerald-400/90 font-medium tabular-nums">{fmtUsd(data.subsidy)}</span>{' '}
+            of API-equivalent usage this month
+          </div>
+        )}
       </div>
 
       {/* ── Programmatic $100 bucket — the Max plan's oauth/API bucket ──── */}

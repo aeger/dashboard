@@ -306,7 +306,7 @@ function ClaudeVersionPill() {
 }
 
 function SpendPill() {
-  const [data, setData] = useState<{ bucketSpend: number; bucketLimit: number; bucketPct: number; apiSpend: number; realSpend: number; available: boolean } | null>(null)
+  const [data, setData] = useState<{ bucketSpend: number; bucketLimit: number; bucketPct: number; apiSpend: number; realSpend: number; actualSpend: number; planLabel: string; available: boolean } | null>(null)
 
   useEffect(() => {
     const load = () =>
@@ -336,10 +336,12 @@ function SpendPill() {
     >
       <PillBody tone={tone} label="spend">
         {data && data.available ? (
-          <>
-            ${(data.realSpend ?? 0) < 0.01 ? (data.realSpend ?? 0).toFixed(3) : (data.realSpend ?? 0).toFixed(2)}
+          <span
+            title={`You actually pay $${(data.actualSpend ?? 0).toFixed(2)} this month (${data.planLabel ?? 'flat plan'}${data.apiSpend > 0 ? ` + $${data.apiSpend.toFixed(2)} API overflow` : ' flat'}). Notional API-equivalent usage: $${(data.realSpend ?? 0).toFixed(2)}.`}
+          >
+            ${(data.actualSpend ?? 0).toFixed(2)}
             {data.apiSpend > 0 && <span className="text-amber-400 font-semibold ml-1.5">+${data.apiSpend.toFixed(2)} api</span>}
-          </>
+          </span>
         ) : '—'}
       </PillBody>
     </a>
