@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { statusGlyph, type Tone } from '@/lib/colorThemes'
 
 interface ContainerSummary { up: number; down: number; total: number; updates: number; majorUpdates: number }
-interface TaskSummary { pending: number; active: number; completed: number; failed: number; blocked: number; total: number }
+interface TaskSummary { pending: number; active: number; completed: number; failed: number; blocked: number; needsJeff: number; withAgent: number; total: number }
 interface SecuritySummary { score: number; critical: number; warning: number }
 interface BackupSummary { ok: number; overdue: number; failed: number; total: number }
 
@@ -82,13 +82,25 @@ function TaskPill() {
           const waiting: { status: string }[] = d.waiting ?? []
           const active: { status: string }[] = d.active ?? []
           const recent: { status: string }[] = d.recent ?? []
+          const jeffUrgent: { status: string; target: string | null }[] = d.jeff_urgent ?? []
           const summary24h: Record<string, number> = d.summary24h ?? {}
+          // JeffLoop split (mirrors TaskQueueExpanded isJeffUrgent/isWithAgent):
+          // pending_jeff_action + review_needed with target jeff/null → Jeff's plate;
+          // review_needed handed back to an agent → with agent.
+          const needsJeff = jeffUrgent.filter(
+            t => t.status === 'pending_jeff_action' || (t.status === 'review_needed' && (!t.target || t.target === 'jeff'))
+          ).length
+          const withAgent = jeffUrgent.filter(
+            t => t.status === 'review_needed' && !!t.target && t.target !== 'jeff'
+          ).length
           setSummary({
             pending: recent.filter(t => t.status === 'pending').length,
             active: active.length,
             completed: summary24h['completed'] ?? 0,
             failed: problems.filter(t => t.status === 'failed').length,
             blocked: [...problems.filter(t => t.status === 'escalated'), ...waiting.filter(t => t.status === 'blocked')].length,
+            needsJeff,
+            withAgent,
             total: recent.length,
           })
         })
@@ -98,9 +110,14 @@ function TaskPill() {
     return () => clearInterval(id)
   }, [])
 
-  // Mockup grammar: "queue N open" — open = active + pending. Tone: failed > blocked > ok.
+  // Mockup grammar: "queue N open" — open = active + pending. Tone escalates:
+  // failed or needs-jeff → crit; blocked or with-agent → warn; else ok. "Needs
+  // Jeff" is an actionable-by-Jeff state so it lights the glyph like a problem.
   const open = summary ? summary.active + summary.pending : null
-  const tone: Tone = !summary ? 'idle' : summary.failed > 0 ? 'crit' : summary.blocked > 0 ? 'warn' : 'ok'
+  const tone: Tone = !summary ? 'idle'
+    : summary.failed > 0 || summary.needsJeff > 0 ? 'crit'
+    : summary.blocked > 0 || summary.withAgent > 0 ? 'warn'
+    : 'ok'
 
   return (
     <Link href="/lab/tasks" className={PILL}>
@@ -108,6 +125,8 @@ function TaskPill() {
         {summary ? (
           <>
             {open} open
+            {summary.needsJeff > 0 && <span className="text-rose-400 font-semibold ml-1.5">{summary.needsJeff} needs jeff</span>}
+            {summary.withAgent > 0 && <span className="text-blue-400 font-semibold ml-1.5">{summary.withAgent} with agent</span>}
             {summary.failed > 0 && <span className="text-red-400 font-semibold ml-1.5">{summary.failed} failed</span>}
             {summary.blocked > 0 && <span className="text-amber-400 font-semibold ml-1.5">{summary.blocked} blocked</span>}
           </>
