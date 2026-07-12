@@ -2706,9 +2706,30 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
   const descRef = useRef<HTMLTextAreaElement>(null)
 
+  // Has the user typed anything worth protecting?
+  const isDirty =
+    form.title.trim() !== '' ||
+    form.description.trim() !== '' ||
+    form.tags.trim() !== ''
+
+  // Guarded close: don't silently discard typed input on a stray click / Escape.
+  const requestClose = useCallback(() => {
+    if (isDirty && !window.confirm('Discard this task? Your unsaved input will be lost.')) return
+    onClose()
+  }, [isDirty, onClose])
+
   function handleBackdrop(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) onClose()
+    if (e.target === e.currentTarget) requestClose()
   }
+
+  // Close on Escape (also guarded), so keyboard users aren't stuck.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); requestClose() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [requestClose])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -2763,7 +2784,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-200">New Task</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
+          <button onClick={requestClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">
