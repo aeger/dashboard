@@ -133,7 +133,7 @@ function ActionBtn({ label, icon, onClick, disabled, color }: {
   )
 }
 
-function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, updateResult, onAction, onUpdateAction }: {
+function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, updateResult, onAction, onUpdateAction, onWrenFlag }: {
   c: Container
   update?: UpdateInfo
   metrics?: ContainerMetrics
@@ -144,6 +144,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
   updateResult: { name: string; ok: boolean; msg: string } | null
   onAction: (c: Container, action: string) => void
   onUpdateAction: (name: string, action: string) => void
+  onWrenFlag: (name: string, update: UpdateInfo | undefined, image: string) => void
 }) {
   const [showDetail, setShowDetail] = useState(false)
   const isRunning = c.state === 'running'
@@ -314,6 +315,9 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                 {update.user_status === 'requested' && (
                   <p className="text-xs text-blue-400 animate-pulse">Update queued — processing shortly</p>
                 )}
+                {update.user_status === 'wren_flagged' && (
+                  <p className="text-xs text-violet-400">🤖 Flagged for Wren</p>
+                )}
                 {update.user_status === 'scheduled' && update.scheduled_time && (() => {
                   const d = new Date(update.scheduled_time)
                   const local = d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
@@ -329,6 +333,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                     <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} title="Apply during nightly maintenance window (03:00–04:00 UTC)" className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule overnight</button>
                     <button onClick={() => onUpdateAction(c.name, 'skip')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors">Skip 30d</button>
                     <button onClick={() => onUpdateAction(c.name, 'ignore')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-600 hover:text-zinc-400 disabled:opacity-50 transition-colors">Ignore</button>
+                    <button onClick={() => onWrenFlag(c.name, update, c.image)} disabled={actionLoading === c.name} title="Create a task for Wren to handle this update" className="text-xs px-3 py-1.5 rounded bg-violet-700/70 hover:bg-violet-600 text-violet-100 disabled:opacity-50 transition-colors">🤖 Flag for Wren</button>
                   </>)}
                   {update.user_status === 'auto_approved' && (<>
                     <span className="text-xs text-blue-400 self-center" title="03:47 UTC = 8:47 PM MST / 11:47 PM EST">Auto-updates overnight (03:47 UTC)</span>
@@ -464,6 +469,38 @@ export default function ContainerListExpanded() {
         setUpdateResult({ name, ok: false, msg: 'Network error — update failed' })
         setTimeout(() => setUpdateResult(null), 10000)
       }
+    }
+    refreshUpdates()
+    setActionLoading(null)
+  }
+
+  // Flag a pending container update for Wren: creates a task_queue entry and marks
+  // the container wren_flagged (backend: /api/containers/updates/wren).
+  async function handleWrenFlag(name: string, update: UpdateInfo | undefined, image: string) {
+    setActionLoading(name)
+    setUpdateResult(null)
+    try {
+      const res = await fetch('/api/containers/updates/wren', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          container: name,
+          image,
+          risk: update?.risk,
+          currentVersion: update?.current_version,
+          latestVersion: update?.latest_version,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && (data.success || data.taskId)) {
+        setUpdateResult({ name, ok: true, msg: '🤖 Flagged for Wren' })
+      } else {
+        setUpdateResult({ name, ok: false, msg: data.error || `Flag failed (${res.status})` })
+      }
+      setTimeout(() => setUpdateResult(null), 10000)
+    } catch {
+      setUpdateResult({ name, ok: false, msg: 'Network error — flag failed' })
+      setTimeout(() => setUpdateResult(null), 10000)
     }
     refreshUpdates()
     setActionLoading(null)
@@ -729,6 +766,7 @@ export default function ContainerListExpanded() {
                     updateResult={updateResult}
                     onAction={handleAction}
                     onUpdateAction={handleUpdateAction}
+                    onWrenFlag={handleWrenFlag}
                   />
                 ))}
               </div>
