@@ -19,6 +19,10 @@ const STATUS_STYLE: Record<string, { tone: StatusTone; pulse: boolean; label: st
   healthy:     { tone: 'ok',   pulse: false, label: 'Running' },
   connected:   { tone: 'ok',   pulse: false, label: 'Connected' },
   active:      { tone: 'ok',   pulse: false, label: 'Active' },
+  // poll_queue.py writes exactly two statuses: 'active' when idle and 'busy'
+  // while a task is running. Without this entry 'busy' fell through to
+  // no_data, so the poller read "No data" precisely while it was working.
+  busy:        { tone: 'ok',   pulse: true,  label: 'Busy' },
   degraded:    { tone: 'warn', pulse: true,  label: 'Degraded' },
   restarting:  { tone: 'info', pulse: true,  label: 'Restarting' },
   critical:    { tone: 'crit', pulse: true,  label: 'Critical' },
