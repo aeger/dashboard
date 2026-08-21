@@ -390,6 +390,7 @@ export default function ContainerListExpanded() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [stackUpdating, setStackUpdating] = useState<string | null>(null)
   const [stackError, setStackError] = useState<string | null>(null)
+  const [stackResult, setStackResult] = useState<string | null>(null)
   const [updateResult, setUpdateResult] = useState<{ name: string; ok: boolean; msg: string } | null>(null)
   const [forceRestarting, setForceRestarting] = useState<string | null>(null)
   const [rollingRestart, setRollingRestart] = useState<string | null>(null)
@@ -509,16 +510,25 @@ export default function ContainerListExpanded() {
   async function handleStackUpdate(stackName: string) {
     setStackUpdating(stackName)
     setStackError(null)
+    setStackResult(null)
     try {
       const res = await fetch('/api/containers/stack-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackName }) })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        setStackError(data.error || `Stack update failed (${res.status})`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        // A failed container reports 500 WITH results, so prefer the summary.
+        setStackError(data.summary || data.error || `Stack update failed (${res.status})`)
+      } else {
+        // The API verifies by image ID, so this is what actually changed —
+        // not "the command exited 0".
+        setStackResult(data.detached ? (data.message ?? 'Update started') : (data.summary ?? 'Update complete'))
       }
     } catch {
       setStackError('Network error — stack update failed')
     }
-    setTimeout(() => { refresh(); setStackUpdating(null) }, 4000)
+    setStackUpdating(null)
+    refresh()
+    refreshUpdates()
+    setTimeout(() => { setStackResult(null); setStackError(null) }, 15000)
   }
 
   // Group action: restart/stop/start all containers in a stack
@@ -744,6 +754,9 @@ export default function ContainerListExpanded() {
                     </button>
                     {stackError && stackUpdating === null && (
                       <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={stackError}>{stackError}</span>
+                    )}
+                    {stackResult && stackUpdating === null && (
+                      <span className="text-[10px] text-emerald-400 max-w-[240px] truncate" title={stackResult}>{stackResult}</span>
                     )}
                   </>
                 )}
