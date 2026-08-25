@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { statusGlyph, type Tone } from '@/lib/colorThemes'
 
-interface ContainerSummary { up: number; down: number; total: number; updates: number; majorUpdates: number }
+interface ContainerSummary { up: number; down: number; idle: number; total: number; updates: number; majorUpdates: number }
 interface TaskSummary { pending: number; active: number; completed: number; failed: number; blocked: number; needsJeff: number; withAgent: number; total: number }
 interface SecuritySummary { score: number; critical: number; warning: number }
 interface BackupSummary { ok: number; overdue: number; failed: number; total: number }
@@ -36,11 +36,19 @@ function ContainerPill() {
       fetch('/api/containers/updates/state').then(r => r.json()).catch(() => ({ containers: [] })),
     ]).then(([cd, ud]) => {
       const containers: { state: string }[] = cd.containers ?? []
-      const up = containers.filter(c => c.state === 'running').length
+      // 'created' means the container has NEVER been started — ad-hoc scratch
+      // containers (e.g. Jeff's az-tei-probe-* A/B eval probes) sit here
+      // indefinitely by design: no restart policy, gone-but-not-removed after a
+      // reboot. Counting them as "down" turned the pill red and read as "TEI is
+      // broken" when production TEI was healthy the whole time. Only 'exited'/
+      // 'dead' — something that WAS running and isn't — is a real outage.
+      const idle = containers.filter(c => c.state === 'created').length
+      const active = containers.filter(c => c.state !== 'created')
+      const up = active.filter(c => c.state === 'running').length
       const updList: { has_update: boolean; user_status: string; risk?: string }[] = ud.containers ?? []
       const pending = updList.filter(u => u.has_update && u.user_status !== 'ignored' && u.user_status !== 'completed')
       setSummary({
-        up, down: containers.length - up, total: containers.length,
+        up, down: active.length - up, idle, total: active.length,
         updates: pending.length,
         majorUpdates: pending.filter(u => u.risk === 'major').length,
       })
@@ -60,6 +68,9 @@ function ContainerPill() {
           <>
             {summary.up}/{summary.total}
             {summary.down > 0 && <span className="text-red-400 font-semibold ml-1.5">↓{summary.down}</span>}
+            {summary.idle > 0 && (
+              <span className="ml-1.5" style={{ color: 'var(--t-txf)' }} title={`${summary.idle} never-started container(s) — ad-hoc/scratch, not an outage`}>○{summary.idle}</span>
+            )}
             {summary.updates > 0 && (
               <span className={`font-semibold ml-1.5 ${summary.majorUpdates > 0 ? 'text-red-400' : 'text-amber-400'}`}>↑{summary.updates}</span>
             )}
