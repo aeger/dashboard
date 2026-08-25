@@ -12,7 +12,7 @@ type NotifStatus = 'unread' | 'read' | 'dismissed'
 interface Notification {
   id: string
   source: string
-  category: string
+  category: string | null
   urgency: Urgency
   severity: string
   status: NotifStatus
@@ -64,7 +64,11 @@ const SOURCE_EMOJI: Record<string, string> = {
   containers: '🐳',
 }
 
-function categoryLabel(category: string): string {
+// sentinel-api can hand back a null category (6 rows as of 2026-08-25, mostly
+// task_queue alerts). It was typed non-nullable, so the bare .replace() threw
+// and took down the whole client render. Never trust this field to be present.
+function categoryLabel(category: string | null | undefined): string {
+  if (!category) return 'Uncategorized'
   return category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 

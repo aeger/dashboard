@@ -8,7 +8,9 @@ type NotifStatus = 'unread' | 'read' | 'dismissed' | 'archived'
 interface Notification {
   id: string
   source: string
-  category: string
+  // Nullable in sentinel-api's payload despite the old non-null typing — the
+  // mismatch is what crashed this page on 2026-08-25. Keep it honest.
+  category: string | null
   urgency: Urgency
   severity: string
   status: NotifStatus
@@ -327,7 +329,7 @@ export default function NotificationsPage() {
                         className="text-[10px] px-1.5 py-0.5 rounded"
                         style={{ background: 'rgba(255,255,255,0.04)', color: '#52525b' }}
                       >
-                        {n.category.replace(/_/g, ' ')}
+                        {n.category ? n.category.replace(/_/g, ' ') : 'uncategorized'}
                       </span>
                       <span className="text-zinc-800 text-[10px]">·</span>
                       <span className="text-[10px] text-zinc-700" title={formatDate(n.timestamp)}>
