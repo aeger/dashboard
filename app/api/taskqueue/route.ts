@@ -53,6 +53,8 @@ export interface TaskItem {
   parent_task_id: string | null
   context: TaskContext | null
   blocked_by_task_ids: string[] | null
+  not_before?: string | null
+  unblock_condition?: { type?: string; task_ids?: string[]; path?: string; after?: string } | null
   recurring?: boolean | null
   recurring_key?: string | null
   last_run_at?: string | null
@@ -74,11 +76,11 @@ export interface TaskQueueData {
 // Keep old export name for any existing imports
 export type TaskQueueStats = TaskQueueData
 
-const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids,recurring,recurring_key,last_run_at,run_count,runs'
+const SELECT = 'id,title,description,status,priority,source,target,claimed_by,claimed_at,created_at,updated_at,tags,result,error,blocked_reason,failure_mode,attempt_count,goal_id,parent_task_id,context,blocked_by_task_ids,not_before,unblock_condition,recurring,recurring_key,last_run_at,run_count,runs'
 
 // JeffLoop new statuses + legacy statuses all live as plain TEXT — no constraint change needed
 const JEFF_URGENT = ['pending_jeff_action', 'review_needed']
-const WAITING = ['blocked', 'delegated', 'pending_eval']
+const WAITING = ['blocked', 'delegated', 'pending_eval', 'waiting']
 const ACTIVE = ['claimed', 'in_progress_agent', 'in_progress_jeff']
 const PROBLEM = ['failed', 'escalated']
 

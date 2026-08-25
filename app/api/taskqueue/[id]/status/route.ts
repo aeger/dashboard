@@ -7,20 +7,23 @@ import type { TaskItem } from '@/app/api/taskqueue/route'
 const TRANSITIONS: Record<string, string[]> = {
   // New JeffLoop statuses
   backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval', 'paused'],
-  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval', 'paused'],
-  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed', 'paused'],
-  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval', 'paused'],
-  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready', 'paused'],
+  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval', 'paused', 'waiting'],
+  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed', 'paused', 'waiting'],
+  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval', 'paused', 'waiting'],
+  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready', 'paused', 'waiting'],
   review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled', 'pending_eval', 'ready', 'paused'],
-  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled', 'paused'],
+  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled', 'paused', 'waiting'],
   paused:               ['ready', 'in_progress_jeff', 'in_progress_agent', 'cancelled'],  // Resume → agent / Jeff / cancel
+  // waiting = gated (time/data) — released automatically by poll_queue.sweep_waiting_tasks
+  // when the gate opens, or manually here ("Release Now" → ready).
+  waiting:              ['ready', 'blocked', 'cancelled', 'paused', 'in_progress_jeff'],
   completed:            ['ready'],  // Reopen
   cancelled:            ['ready'],  // Restore
   archived:             [],         // Use restore endpoint
   // Legacy status compat
-  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed', 'pending_eval'],
+  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed', 'pending_eval', 'waiting'],
   claimed:              ['in_progress_agent', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
-  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'pending_eval'],
+  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'pending_eval', 'waiting'],
   escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'pending_eval'],
   delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval'],
   pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff'],
@@ -94,6 +97,22 @@ export async function POST(
   if (body.jeff_notes !== undefined) updatedContext.jeff_notes = body.jeff_notes
   if (body.context_summary !== undefined) updatedContext.context_summary = body.context_summary
   if (body.action_required !== undefined) updatedContext.action_required = body.action_required
+
+  // Leaving a Jeff-facing status for agent work means Jeff HAS acted — a stale
+  // action_required must not survive the hand-back. poll_queue's preflight
+  // blocks never-run tasks that carry one, and until 2026-08-25 a task Jeff
+  // approved (pending_jeff_action → ready) was re-blocked on the next poll:
+  // approve → ready → blocked → attention view, forever. Archive it to
+  // last_action_required so the history stays on the row.
+  const JEFF_FACING = new Set(['pending_jeff_action', 'review_needed', 'in_progress_jeff'])
+  const AGENT_BOUND = new Set(['ready', 'pending', 'in_progress_agent', 'pending_eval', 'waiting', 'backlog'])
+  if (
+    JEFF_FACING.has(currentStatus) && AGENT_BOUND.has(newStatus) &&
+    body.action_required === undefined && updatedContext.action_required
+  ) {
+    updatedContext.last_action_required = updatedContext.action_required
+    updatedContext.action_required = null
+  }
 
   // If moving to in_progress_jeff, ensure checklist exists (empty array default)
   if (newStatus === 'in_progress_jeff' && !updatedContext.checklist) {
