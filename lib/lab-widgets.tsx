@@ -3,6 +3,7 @@ import HostMetrics from '@/components/lab/HostMetrics'
 import LabMonitor, { MonitorDetail } from '@/components/lab/LabMonitor'
 import AgentHealthCard from '@/components/lab/AgentHealthCard'
 import ClaudeSpendWidget, { ClaudeSpendDetail } from '@/components/lab/ClaudeSpendWidget'
+import ClaudeUsageWidget, { ClaudeUsageDetail } from '@/components/lab/ClaudeUsageWidget'
 import SecurityWidget, { SecurityDetail } from '@/components/lab/SecurityWidget'
 import BackupsWidget from '@/components/lab/BackupsWidget'
 import StoragePools, { StorageDatasets } from '@/components/lab/StoragePools'
@@ -123,6 +124,17 @@ export const labWidgets: LabWidget[] = [
     span: 7,
     detail: ClaudeSpendDetail,
     detailLabel: 'by model',
+  },
+  {
+    id: 'claude-usage',
+    section: 'Agents & Spend',
+    title: 'Claude Usage · Limits',
+    component: ClaudeUsageWidget,
+    endpoint: '/api/claude-usage',
+    accent: 'text-sky-400/70',
+    span: 12,
+    detail: ClaudeUsageDetail,
+    detailLabel: 'reset times',
   },
   {
     id: 'security',

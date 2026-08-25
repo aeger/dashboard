@@ -72,6 +72,9 @@ services:
       # widget's headline is notional (API-equivalent); this is what Jeff is billed.
       - CLAUDE_PLAN_MONTHLY=100
       - CLAUDE_PLAN_LABEL=Max 5x
+      # Claude Code OAuth credentials — the usage-limits widget reads the access
+      # token to query Anthropic's oauth/usage endpoint (same data as /usage).
+      - CLAUDE_CREDENTIALS_FILE=/app/claude-home/.credentials.json
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data:rw
@@ -80,6 +83,9 @@ services:
       - /home/almty1/azlab/services/rustdesk/data:/app/rustdesk-data:ro
       - /home/almty1/.local/state/claude-spend:/app/spend:ro
       - /home/almty1/.claude/projects:/app/transcripts:ro
+      # Directory mount (not the file) — Claude Code replaces .credentials.json
+      # on token refresh, and a single-file bind mount would pin the old inode.
+      - /home/almty1/.claude:/app/claude-home:ro
     networks:
       - proxy
     labels:
