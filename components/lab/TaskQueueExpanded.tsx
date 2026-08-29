@@ -863,11 +863,13 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   function saveNotes(notes: string, summary: string) {
     if (notesTimer.current) clearTimeout(notesTimer.current)
     notesTimer.current = setTimeout(async () => {
-      await fetch(`/api/taskqueue/${task.id}/status`, {
+      // Notes-only endpoint — must never carry a status. Routing autosaves
+      // through /status wrote the pane's (possibly stale) status back to the
+      // row on every typing pause, silently flipping tasks agents had moved.
+      await fetch(`/api/taskqueue/${task.id}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: task.status,
           jeff_notes: notes,
           context_summary: summary,
         }),

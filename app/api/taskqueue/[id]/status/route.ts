@@ -62,7 +62,7 @@ export async function POST(
 
   // Fetch current task
   const fetchRes = await fetch(
-    `${url}/rest/v1/task_queue?id=eq.${id}&select=id,title,status,context`,
+    `${url}/rest/v1/task_queue?id=eq.${id}&select=id,title,status,context,tags,result`,
     { headers: SUPA_HEADERS(key), cache: 'no-store' }
   )
   if (!fetchRes.ok) return NextResponse.json({ error: 'Failed to fetch task' }, { status: 500 })
@@ -89,6 +89,52 @@ export async function POST(
         { status: 422 }
       )
     }
+  }
+
+  const taskRow = task as unknown as { tags?: string[] | null; result?: string | null }
+  const tags = taskRow.tags ?? []
+
+  // Premise-held rows (migrations 130/145): a bare status PATCH out of
+  // pending_jeff_action is refused by the DB guard, so route Jeff's click
+  // through the sanctioned exits instead. His click IS the exogenous verdict.
+  if (currentStatus === 'pending_jeff_action' && tags.includes('premise-hold') && newStatus !== currentStatus) {
+    const note = body.jeff_notes?.trim() || 'decided via dashboard'
+    let rpc: { fn: string; args: Record<string, unknown> } | null = null
+    if (newStatus === 'completed') {
+      rpc = { fn: 'premise_ack', args: { p_task: id, p_auditor: 'jeff', p_note: note } }
+    } else if (newStatus === 'ready' || newStatus === 'pending' || newStatus === 'in_progress_agent') {
+      rpc = { fn: 'premise_decide', args: { p_task: id, p_accept: true, p_auditor: 'jeff', p_note: note } }
+    } else if (newStatus === 'cancelled') {
+      rpc = { fn: 'premise_decide', args: { p_task: id, p_accept: false, p_auditor: 'jeff', p_note: note } }
+    } else {
+      return NextResponse.json(
+        {
+          error: `This task is premise-held: record a verdict first. "Mark Complete" acks finished work, ` +
+                 `"Return to Agent Queue" accepts the premise (agent will build it), "Cancel" rejects it. ` +
+                 `"${newStatus}" is not a valid exit while the premise verdict is pending.`,
+        },
+        { status: 422 }
+      )
+    }
+
+    const rpcRes = await fetch(`${url}/rest/v1/rpc/${rpc.fn}`, {
+      method: 'POST',
+      headers: SUPA_HEADERS(key),
+      body: JSON.stringify(rpc.args),
+    })
+    if (!rpcRes.ok) {
+      const err = await rpcRes.text()
+      return NextResponse.json({ error: `${rpc.fn} refused the transition`, detail: err }, { status: 422 })
+    }
+    logDashboardActivity(url, key, id, `dashboard: ${currentStatus} → ${newStatus} via ${rpc.fn} (jeff)`).catch(() => {})
+
+    // Persist any notes alongside the verdict, then return the fresh row.
+    const refetch = await fetch(
+      `${url}/rest/v1/task_queue?id=eq.${id}&select=*`,
+      { headers: SUPA_HEADERS(key), cache: 'no-store' }
+    )
+    const fresh: TaskItem[] = refetch.ok ? await refetch.json() : []
+    return NextResponse.json({ ok: true, task: fresh[0] ?? null, via: rpc.fn })
   }
 
   // Merge JeffLoop extras into context JSONB
@@ -122,6 +168,21 @@ export async function POST(
   const patch: Record<string, unknown> = {
     status: newStatus,
     context: updatedContext,
+  }
+
+  // Reopen semantics: sending a task that already has a result back to a
+  // claimable status is an explicit re-run request. The pollers' idempotency
+  // guard refuses to re-execute a non-recurring row that still carries a
+  // result, so stash it in context and clear the column — that IS the
+  // "reopened" marker. The prior result stays available to the next run.
+  const CLAIMABLE = new Set(['ready', 'pending'])
+  if (
+    newStatus !== currentStatus && CLAIMABLE.has(newStatus) &&
+    typeof taskRow.result === 'string' && taskRow.result.trim() !== ''
+  ) {
+    updatedContext.prior_result = taskRow.result
+    updatedContext.reopened_at = new Date().toISOString()
+    patch.result = null
   }
 
   // Set claimed_at when agent picks up a task
@@ -161,6 +222,13 @@ export async function POST(
     )
   }
 
+  // Attribute the write: dashboard transitions were previously invisible to
+  // agent_activity, which is exactly why agents spent four days hunting an
+  // "unlogged writer" that was this endpoint.
+  if (newStatus !== currentStatus) {
+    logDashboardActivity(url, key, id, `dashboard: ${currentStatus} → ${newStatus} (jeff)`).catch(() => {})
+  }
+
   // Auto-notify Jeff when task enters an attention-required status
   if (NOTIFY_STATUSES.has(newStatus)) {
     const ctx = updatedTask?.context ?? updatedContext
@@ -180,6 +248,20 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true, task: updatedTask })
+}
+
+async function logDashboardActivity(url: string, key: string, taskId: string, content: string): Promise<void> {
+  await fetch(`${url}/rest/v1/agent_activity`, {
+    method: 'POST',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent: 'jeff-dashboard',
+      task_id: taskId,
+      activity_type: 'status',
+      content,
+      metadata: { via: 'dashboard:/api/taskqueue/[id]/status' },
+    }),
+  })
 }
 
 async function syncGoalProgress(url: string, key: string, goalId: string): Promise<void> {
