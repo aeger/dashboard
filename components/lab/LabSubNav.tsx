@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const TOOLS = [
+  { href: '/lab/messages',  icon: '💬', label: 'Relay',     color: '#60a5fa', glow: 'rgba(96,165,250,0.25)',  border: 'rgba(96,165,250,0.35)',  dim: 'rgba(96,165,250,0.08)'  },
   { href: '/lab/terminal',  icon: '⌨️', label: 'Terminal',  color: '#22d3ee', glow: 'rgba(34,211,238,0.25)',  border: 'rgba(34,211,238,0.35)',  dim: 'rgba(34,211,238,0.08)'  },
   { href: '/lab/proxies',   icon: '🔀', label: 'Proxies',   color: '#a78bfa', glow: 'rgba(167,139,250,0.25)', border: 'rgba(167,139,250,0.35)', dim: 'rgba(167,139,250,0.08)' },
   { href: '/lab/rustdesk',  icon: '🖥️', label: 'RustDesk',  color: '#34d399', glow: 'rgba(52,211,153,0.25)',  border: 'rgba(52,211,153,0.35)',  dim: 'rgba(52,211,153,0.08)'  },
