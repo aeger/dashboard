@@ -20,12 +20,20 @@ const TRANSITIONS: Record<string, string[]> = {
   completed:            ['ready'],  // Reopen
   cancelled:            ['ready'],  // Restore
   archived:             [],         // Use restore endpoint
-  // Legacy status compat
-  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed', 'pending_eval', 'waiting'],
-  claimed:              ['in_progress_agent', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
-  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'pending_eval', 'waiting'],
-  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'pending_eval'],
-  delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval'],
+  // Legacy status compat.
+  // These all need 'in_progress_jeff' and 'completed': agents create rows at
+  // `pending` (and hand off via delegated/escalated/failed), so these are exactly
+  // the rows that land in front of Jeff — and without those two exits he could
+  // neither take one into his working queue nor close it. The dead end was
+  // reachable but not obvious: `pending → in_progress_agent → in_progress_jeff`
+  // works, so bouncing a task to the agent and back "fixed" it, which is what
+  // made this look like a flaky UI rather than a missing edge. Reported by Jeff
+  // 2026-08-29 on task bbbf9cb5 and reproduced as a 422 on the live endpoint.
+  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'in_progress_jeff', 'claimed', 'pending_eval', 'waiting', 'completed'],
+  claimed:              ['in_progress_agent', 'in_progress_jeff', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
+  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff', 'pending_eval', 'waiting', 'completed'],
+  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'in_progress_jeff', 'pending_eval', 'completed'],
+  delegated:            ['in_progress_agent', 'in_progress_jeff', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval', 'completed'],
   pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff'],
   expired:              ['ready', 'cancelled'],
 }
