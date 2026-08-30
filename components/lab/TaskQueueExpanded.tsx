@@ -1808,7 +1808,11 @@ interface ScheduledActivityRow {
   name: string
   display_name: string | null
   description: string | null
-  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring'
+  // Mirrors the scheduled_activity.kind CHECK constraint. `cowork_scheduled`
+  // came in with migration 129 and was never added here, so its row hit an
+  // undefined KIND_LABEL lookup and crashed the tab. The string fallback keeps
+  // a future migration from doing the same before the UI catches up.
+  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring' | 'cowork_scheduled' | (string & {})
   schedule: string
   schedule_tz: string
   enabled: boolean
@@ -1831,6 +1835,7 @@ const KIND_LABEL: Record<ScheduledActivityRow['kind'], { short: string; long: st
   ccr_trigger:          { short: 'ccr',      long: 'claude.ai trigger',      cls: 'bg-purple-950/30 border-purple-800/40 text-purple-300' },
   agent_loop:           { short: 'agent',    long: 'always-on agent loop',   cls: 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300' },
   task_queue_recurring: { short: 'task',     long: 'task_queue recurring',   cls: 'bg-cyan-950/30 border-cyan-800/40 text-cyan-300' },
+  cowork_scheduled:     { short: 'cowork',   long: 'Cowork scheduled task',  cls: 'bg-violet-950/30 border-violet-800/40 text-violet-300' },
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -1912,7 +1917,7 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
         >
           All ({rows.length})
         </button>
-        {(Object.keys(KIND_LABEL) as ScheduledActivityRow['kind'][]).map(k => {
+        {(Array.from(new Set([...Object.keys(KIND_LABEL), ...rows.map(r => r.kind)])) as ScheduledActivityRow['kind'][]).map(k => {
           const count = kindCounts[k] ?? 0
           if (count === 0) return null
           const isActive = kindFilter === k
@@ -1922,11 +1927,11 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
               onClick={() => setKindFilter(isActive ? null : k)}
               className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
                 isActive
-                  ? KIND_LABEL[k].cls + ' ring-1 ring-current'
+                  ? (KIND_LABEL[k]?.cls ?? 'bg-zinc-700 border-zinc-500 text-zinc-100') + ' ring-1 ring-current'
                   : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
               }`}
             >
-              {KIND_LABEL[k].short} ({count})
+              {KIND_LABEL[k]?.short ?? k} ({count})
             </button>
           )
         })}
@@ -1941,7 +1946,12 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
       {filtered.length === 0 ? (
         <div className="text-zinc-600 text-xs text-center py-8 italic">No matches.</div>
       ) : filtered.map(row => {
-        const kindCfg = KIND_LABEL[row.kind]
+        // A kind added by a migration but not yet known to this UI must not
+        // take the whole tab down (cowork_scheduled did exactly that).
+        const kindCfg = KIND_LABEL[row.kind] ?? {
+          short: row.kind, long: row.kind,
+          cls: 'bg-zinc-800/60 border-zinc-700/40 text-zinc-400',
+        }
         const expanded = expandedId === row.id
         const statusDot = STATUS_DOT[row.last_status ?? 'unknown'] ?? STATUS_DOT.unknown
         const sourceTitle = row.display_name ?? row.name
