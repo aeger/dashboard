@@ -182,6 +182,22 @@ def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str
     if r.returncode != 0:
         return False, old_digest, None, f'Pull failed: {(r.stderr or r.stdout).strip()[:300]}'
 
+    # Already-current guard. The digest comparison at the end of this function
+    # exists to catch podman-compose silently starting the OLD container, but by
+    # itself it cannot tell that failure apart from "there was simply no new
+    # image to move to" — and it reported the second as FAILED. qbittorrent hit
+    # this on 2026-08-18 and again on 2026-08-30 while already on the newest
+    # tag, each time recreating a healthy container for nothing before calling
+    # the result a failure.
+    #
+    # The pull above has just resolved the tag, so compare what it points at now
+    # against what the container is running. Equal means there is no work to do.
+    r = subprocess.run(['podman', 'inspect', '--format', '{{.Id}}', image],
+                       capture_output=True, text=True)
+    newest = (r.stdout.strip() or '')[:16]
+    if newest and newest == old_digest:
+        return True, old_digest, newest, None
+
     project = labels.get('com.docker.compose.project')
     deps = netns_dependents(container)
 
