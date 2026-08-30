@@ -30,6 +30,74 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def run(cmd: list[str], timeout: int, cwd: str | None = None):
+    """subprocess.run that turns a timeout into a normal non-zero result.
+
+    An uncaught subprocess.TimeoutExpired aborts the whole run mid-teardown:
+    the container is already stopped, nothing recreates it, and the state row
+    is never marked failed — so it stays 'requested' and re-fires on the next
+    unrelated update click. That is exactly how the downloads stack was left
+    down on 2026-08-29 and again on 2026-08-30.
+    """
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            cmd, 124, '', f'timed out after {timeout}s: {" ".join(cmd[:4])}')
+
+
+def unit_exists(unit: str) -> bool:
+    """True if this specific unit instance is loaded and up.
+
+    `systemctl cat compose-stack@anything.service` succeeds for ANY instance
+    name — it just resolves the template file — so it cannot tell a real stack
+    from a typo. LoadState/ActiveState describe the instance itself. The
+    compose-stack units are Type=oneshot and sit at 'active (exited)' once the
+    stack is up, so 'active' is the state we expect here.
+    """
+    r = subprocess.run(
+        ['systemctl', '--user', 'show', unit, '-p', 'LoadState', '-p', 'ActiveState'],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    props = dict(
+        line.split('=', 1) for line in r.stdout.splitlines() if '=' in line)
+    return props.get('LoadState') == 'loaded' and props.get('ActiveState') == 'active'
+
+
+def netns_dependents(container: str) -> list[str]:
+    """Containers sharing this container's network namespace.
+
+    The downloads stack runs qbittorrent/prowlarr/flaresolverr/shelfmark with
+    `network_mode: service:gluetun`. `podman rm -f --depend` is supposed to
+    handle that, but on this stack it wedges partway — it kills the first
+    dependent and then hangs, because podman will not remove the netns owner
+    while dependents still hold it. Detect the topology so we can take the
+    stack-restart path instead.
+    """
+    r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Id}}'],
+                       capture_output=True, text=True)
+    cid = r.stdout.strip() if r.returncode == 0 else ''
+    if not cid:
+        return []
+
+    r = subprocess.run(['podman', 'ps', '-a', '--format', '{{.Names}}'],
+                       capture_output=True, text=True)
+    names = [n for n in r.stdout.split() if n and n != container]
+    if not names:
+        return []
+
+    r = subprocess.run(
+        ['podman', 'inspect', '--format', '{{.Name}} {{.HostConfig.NetworkMode}}'] + names,
+        capture_output=True, text=True)
+    return [
+        parts[0]
+        for parts in (line.split() for line in r.stdout.splitlines())
+        if len(parts) == 2 and parts[1] == f'container:{cid}'
+    ]
+
+
 def in_maintenance_window(policy: dict) -> bool:
     now = utcnow()
     def parse(t): return list(map(int, t.split(':')))
@@ -110,28 +178,43 @@ def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str
     if not working_dir or not service:
         return False, old_digest, None, 'Container missing compose labels — cannot recreate'
 
-    r = subprocess.run(['podman-compose', 'pull', service],
-                       capture_output=True, text=True, timeout=300, cwd=working_dir)
+    r = run(['podman-compose', 'pull', service], timeout=300, cwd=working_dir)
     if r.returncode != 0:
         return False, old_digest, None, f'Pull failed: {(r.stderr or r.stdout).strip()[:300]}'
 
-    # podman-compose --force-recreate hits a "name already in use" conflict and
-    # silently falls back to `podman start` on the OLD container (image/digest
-    # unchanged). Remove the container (and anything that depends on it) and
-    # recreate the stack so the freshly-pulled image is actually used.
-    rm = subprocess.run(['podman', 'rm', '-f', '--depend', container],
-                        capture_output=True, text=True, timeout=120)
-    if rm.returncode != 0:
-        return False, old_digest, None, f'Remove failed: {rm.stderr.strip()[:300]}'
+    project = labels.get('com.docker.compose.project')
+    deps = netns_dependents(container)
 
-    # stderr ONLY in the error message — podman-compose echoes the full `podman run`
-    # (including -e env secrets) to STDOUT, which must never reach logs.
-    r = subprocess.run(
-        ['podman-compose', 'up', '-d'],
-        capture_output=True, text=True, timeout=600, cwd=working_dir,
-    )
-    if r.returncode != 0:
-        return False, old_digest, None, f'Recreate failed: {r.stderr.strip()[:300]}'
+    if deps and project and unit_exists(f'compose-stack@{project}.service'):
+        # This container owns a network namespace that other containers share
+        # (`network_mode: service:<this>`). `podman rm -f --depend` wedges on
+        # that topology: it kills the first dependent, then hangs because the
+        # netns owner cannot be removed while the rest still hold it, and the
+        # run dies on its own timeout with the stack half torn down.
+        #
+        # A full systemd down/up is the only thing that reliably recreates the
+        # owner AND re-joins every member to the NEW namespace. Restarting the
+        # members individually does not work — netns is fixed at create time.
+        r = run(['systemctl', '--user', 'restart', f'compose-stack@{project}.service'],
+                timeout=600)
+        if r.returncode != 0:
+            return False, old_digest, None, (
+                f'Stack restart failed ({project}, netns members: '
+                f'{", ".join(sorted(deps))}): {r.stderr.strip()[:250]}')
+    else:
+        # podman-compose --force-recreate hits a "name already in use" conflict and
+        # silently falls back to `podman start` on the OLD container (image/digest
+        # unchanged). Remove the container (and anything that depends on it) and
+        # recreate the stack so the freshly-pulled image is actually used.
+        rm = run(['podman', 'rm', '-f', '--depend', container], timeout=120)
+        if rm.returncode != 0:
+            return False, old_digest, None, f'Remove failed: {rm.stderr.strip()[:300]}'
+
+        # stderr ONLY in the error message — podman-compose echoes the full `podman run`
+        # (including -e env secrets) to STDOUT, which must never reach logs.
+        r = run(['podman-compose', 'up', '-d'], timeout=600, cwd=working_dir)
+        if r.returncode != 0:
+            return False, old_digest, None, f'Recreate failed: {r.stderr.strip()[:300]}'
 
     r = subprocess.run(['podman', 'inspect', container, '--format', '{{.Image}}'],
                        capture_output=True, text=True)
@@ -148,10 +231,13 @@ def apply_update(container: str, image: str) -> tuple[bool, str, str | None, str
     # force-recreate usually clears it. Re-verify after the retry.
     time.sleep(2)
     if not liveness_ok(container):
-        subprocess.run(['podman', 'rm', '-f', '--depend', container],
-                       capture_output=True, text=True, timeout=120)
-        subprocess.run(['podman-compose', 'up', '-d'],
-                       capture_output=True, text=True, timeout=600, cwd=working_dir)
+        # Same netns caveat as above — never rm --depend a namespace owner.
+        if deps and project and unit_exists(f'compose-stack@{project}.service'):
+            run(['systemctl', '--user', 'restart', f'compose-stack@{project}.service'],
+                timeout=600)
+        else:
+            run(['podman', 'rm', '-f', '--depend', container], timeout=120)
+            run(['podman-compose', 'up', '-d'], timeout=600, cwd=working_dir)
         time.sleep(4)
         r = subprocess.run(['podman', 'inspect', container, '--format', '{{.State.Status}}'],
                            capture_output=True, text=True)
