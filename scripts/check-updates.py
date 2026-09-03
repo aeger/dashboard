@@ -11,6 +11,7 @@ from pathlib import Path
 OUTPUT = Path('/home/almty1/dashboard/data/updates.json')
 STATE_FILE = Path('/home/almty1/dashboard/data/update_state.json')
 SSH_KEY_PROXMOX = Path.home() / '.ssh' / 'id_ed25519_proxmox'
+SSH_KEY_MIKROTIK = Path.home() / '.ssh' / 'id_ed25519_mikrotik'
 
 # Containers to skip (locally built, no registry to check)
 SKIP_PREFIXES = ('localhost/',)
@@ -124,76 +125,106 @@ def check_proxmox_firmware():
             'error': str(e)
         }
 
+def _ros_ssh(ip, command):
+    """Run one RouterOS command over SSH. Returns stdout, or None if it failed."""
+    result = subprocess.run(
+        ['ssh', '-i', str(SSH_KEY_MIKROTIK), '-o', 'ConnectTimeout=5',
+         '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
+         f'Claude@{ip}', command],
+        capture_output=True, text=True, timeout=20
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def _ros_field(text, key):
+    """Pull `key: value` out of RouterOS print output."""
+    for line in (text or '').splitlines():
+        if f'{key}:' in line:
+            return line.split(f'{key}:', 1)[1].strip()
+    return None
+
+
 def check_routeros_firmware():
-    """Attempt to read RouterOS firmware via API port 8728. Returns list of devices."""
+    """Read RouterOS firmware over SSH (key: id_ed25519_mikrotik).
+
+    Both MikroTiks accept the same ed25519 key. The previous implementation only
+    TCP-probed API port 8728 and reported 'unreachable' on BOTH branches, so a
+    healthy router and a dead one produced the same verdict and no version was
+    ever recovered. `/system/package/update/print` gives installed vs latest, so
+    the router does the upgrade-available comparison for us.
+    """
     devices = []
     for device_info in [
         {'device': 'RB5009UPr+S+in', 'ip': '192.168.1.1'},
         {'device': 'CRS309-1G-8S+in', 'ip': '192.168.99.248'},
     ]:
+        entry = {'device': device_info['device'], 'ip': device_info['ip']}
         try:
-            result = subprocess.run(
-                ['timeout', '3', 'bash', '-c',
-                 f'exec 3<>/dev/tcp/{device_info["ip"]}/8728 && echo "ok" && exec 3>&-'],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                devices.append({
-                    'device': device_info['device'],
-                    'ip': device_info['ip'],
-                    'status': 'unreachable',
-                    'error': 'API handshake timeout (auth required, credentials not accessible)'
-                })
+            upd = _ros_ssh(device_info['ip'], '/system/package/update/print')
+            if upd is None:
+                entry.update({'status': 'unreachable',
+                              'error': 'SSH failed (host down or key not authorized)'})
+                devices.append(entry)
+                continue
+
+            installed = _ros_field(upd, 'installed-version')
+            latest = _ros_field(upd, 'latest-version')
+
+            if not installed:
+                res = _ros_ssh(device_info['ip'], '/system/resource/print')
+                installed = (_ros_field(res, 'version') or '').split()[0] or None
+
+            if not installed:
+                entry.update({'status': 'error',
+                              'error': 'SSH ok but version not parsed from RouterOS output'})
             else:
-                devices.append({
-                    'device': device_info['device'],
-                    'ip': device_info['ip'],
-                    'status': 'unreachable',
-                    'error': 'Port 8728 not responding'
-                })
+                entry['current_version'] = installed
+                entry['method'] = 'ssh'
+                if latest and latest != installed:
+                    entry['latest_version'] = latest
+                    entry['status'] = 'update'
+                else:
+                    entry['status'] = 'current'
+            devices.append(entry)
+        except subprocess.TimeoutExpired:
+            entry.update({'status': 'unreachable', 'error': 'SSH timeout'})
+            devices.append(entry)
         except Exception as e:
-            devices.append({
-                'device': device_info['device'],
-                'ip': device_info['ip'],
-                'status': 'error',
-                'error': str(e)
-            })
+            entry.update({'status': 'error', 'error': str(e)})
+            devices.append(entry)
     return devices
 
 def check_unifi_firmware():
-    """Attempt to read UniFi device firmware. Returns list of devices."""
+    """Report UniFi device firmware state.
+
+    These APs expose only SSH (dropbear) to this host — 80/443/8443/8843 are all
+    closed, so the old `https://IP:8443/api/system` probe could never have
+    succeeded and its 'HTTPS API not responding' reason was misleading. UniFi
+    firmware is served by the Network controller, not by the AP itself, and no
+    controller credentials exist here. Distinguish "device down" from "device up,
+    no queryable API" so the reason stays true.
+    """
     devices = []
     for device_info in [
         {'device': 'U7 Pro XGS', 'ip': '192.168.1.246'},
         {'device': 'UniFi Express 7', 'ip': '192.168.1.194'},
     ]:
+        entry = {'device': device_info['device'], 'ip': device_info['ip']}
         try:
-            result = subprocess.run(
-                ['timeout', '3', 'curl', '-s', '-k',
-                 f'https://{device_info["ip"]}:8443/api/system'],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0 and result.stdout:
-                devices.append({
-                    'device': device_info['device'],
-                    'ip': device_info['ip'],
-                    'status': 'current',
-                    'method': 'unifi_controller'
+            up = subprocess.run(['ping', '-c', '1', '-W', '2', device_info['ip']],
+                                capture_output=True, text=True, timeout=8).returncode == 0
+            if up:
+                entry.update({
+                    'status': 'unknown',
+                    'error': 'Device reachable but exposes no queryable API '
+                             '(SSH only); firmware requires UniFi controller credentials',
                 })
             else:
-                devices.append({
-                    'device': device_info['device'],
-                    'ip': device_info['ip'],
-                    'status': 'unreachable',
-                    'error': 'HTTPS API not responding'
-                })
+                entry.update({'status': 'unreachable', 'error': 'No response to ping'})
+            devices.append(entry)
         except Exception as e:
-            devices.append({
-                'device': device_info['device'],
-                'ip': device_info['ip'],
-                'status': 'error',
-                'error': str(e)
-            })
+            entry.update({'status': 'error', 'error': str(e)})
+            devices.append(entry)
     return devices
 
 def check_all_devices():
@@ -299,9 +330,16 @@ def main():
 
     updates = [r for r in results if r['has_update']]
     print(f"\nDone. {len(updates)} container updates available: {[u['name'] for u in updates]}")
+    fw_updates = [d for d in device_results['devices'] if d['status'] == 'update']
+    if fw_updates:
+        print(f"  {len(fw_updates)} device firmware updates available: "
+              f"{[d['device'] for d in fw_updates]}")
     unreachable = [d for d in device_results['devices'] if d['status'] in ('unreachable', 'error')]
     if unreachable:
         print(f"  {len(unreachable)} devices unreachable for firmware check")
+    unknown = [d for d in device_results['devices'] if d['status'] == 'unknown']
+    if unknown:
+        print(f"  {len(unknown)} devices up but not queryable: {[d['device'] for d in unknown]}")
 
 if __name__ == '__main__':
     main()
