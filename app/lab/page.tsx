@@ -5,6 +5,7 @@ import GmailReauthBanner from '@/components/lab/GmailReauthBanner'
 import ToolPills from '@/components/lab/ToolPills'
 import StatusPills from '@/components/lab/StatusPills'
 import LabTile from '@/components/lab/LabTile'
+import Section from '@/components/ui/Section'
 import { labWidgets, labSectionOrder } from '@/lib/lab-widgets'
 
 export const dynamic = 'force-dynamic'
@@ -32,17 +33,12 @@ export default function LabPage() {
 
       {/* Tiles are driven entirely by the registry, grouped into sections —
           add a tile in lib/lab-widgets.tsx, not here. See docs/widgets.md. */}
-      {labSectionOrder.map((section) => {
+      {labSectionOrder.map((section, i) => {
         const widgets = labWidgets.filter((w) => w.enabled !== false && w.section === section)
         if (widgets.length === 0) return null
         return (
           <section key={section} className="mb-6">
-            <div className="flex items-center gap-3 mb-3 px-1">
-              <h2 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
-                {section}
-              </h2>
-              <hr className="flex-1 border-0 border-t border-zinc-800/50" />
-            </div>
+            <Section no={String(i + 1).padStart(2, '0')} title={section} className="px-1" />
             {/* 12-col grid at lg+; tiles declare their span in the registry and
                 stack full-width below lg. Default stretch alignment equalizes
                 card heights per row — short-next-to-tall reads intentional

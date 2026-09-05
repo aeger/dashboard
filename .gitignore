@@ -53,3 +53,14 @@ public/header-banner.png.bak-*
 # stale data backups (junk) — Wren 2026-06-28
 *.stale-bak-*
 data.stale-bak-*/
+
+# Claude Code local state — Wren 2026-08-22
+# Neither belongs in the repo, and the daily git-durability UNTRACKED finding on
+# `.claude/` had gone unactioned for 41 days because nobody looked at what was in it:
+#   settings.local.json  per-machine permission allowlist; embeds the dashboard
+#                        feeds API bearer token, so committing it leaks a secret.
+#   worktrees/           46M of LIVE registered git worktrees of this same repo
+#                        (git worktree list). Both branches are pushed to origin,
+#                        so ignoring them strands nothing.
+/.claude/settings.local.json
+/.claude/worktrees/

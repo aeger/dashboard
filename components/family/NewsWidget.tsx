@@ -18,6 +18,7 @@ export default function NewsWidget() {
   const [showEditor, setShowEditor] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<Record<string, 'saving' | 'saved' | 'error'>>({})
 
   async function load() {
     setLoading(true)
@@ -33,6 +34,21 @@ export default function NewsWidget() {
 
   function handleExpand(link: string) {
     setExpanded((prev) => (prev === link ? null : link))
+  }
+
+  // Save an article to the task queue ("read later") via the /api/save-article backend.
+  async function saveItem(item: NewsItem) {
+    setSaveState((s) => ({ ...s, [item.link]: 'saving' }))
+    try {
+      const res = await fetch('/api/save-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.link, title: item.title, excerpt: item.summary, source: item.source }),
+      })
+      setSaveState((s) => ({ ...s, [item.link]: res.ok ? 'saved' : 'error' }))
+    } catch {
+      setSaveState((s) => ({ ...s, [item.link]: 'error' }))
+    }
   }
 
   return (
@@ -94,14 +110,27 @@ export default function NewsWidget() {
                       ) : (
                         <p className="text-xs text-zinc-700 italic">No description available</p>
                       )}
-                      <a
-                        href={item.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 mt-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                      >
-                        Read article ↗
-                      </a>
+                      <div className="flex items-center gap-3 mt-2">
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          Read article ↗
+                        </a>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); saveItem(item) }}
+                          disabled={saveState[item.link] === 'saving' || saveState[item.link] === 'saved'}
+                          className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-60"
+                          title="Save to task queue (read later)"
+                        >
+                          {saveState[item.link] === 'saved' ? '🔖 Saved'
+                            : saveState[item.link] === 'saving' ? '🔖 …'
+                            : saveState[item.link] === 'error' ? '⚠ Retry'
+                            : '🔖 Save'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </li>

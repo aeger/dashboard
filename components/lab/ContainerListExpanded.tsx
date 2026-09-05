@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import StatusBadge from '@/components/shared/StatusBadge'
+import Bar from '@/components/ui/Bar'
 import type { Container } from '@/lib/portainer'
 
 interface UpdateInfo {
@@ -84,12 +85,10 @@ function MiniBar({ pct, color }: { pct: number; color: string }) {
 
 function HealthBar({ running, total }: { running: number; total: number }) {
   const pct = total > 0 ? (running / total) * 100 : 0
-  const color = pct === 100 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500'
+  const tone = pct === 100 ? 'ok' : pct >= 50 ? 'warn' : 'crit'
   return (
     <div className="flex items-center gap-2">
-      <div className="w-20 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
-      </div>
+      <Bar pct={pct} tone={tone} className="w-20" />
       <span className="text-[10px] text-zinc-500 tabular-nums">{running}/{total}</span>
     </div>
   )
@@ -134,7 +133,7 @@ function ActionBtn({ label, icon, onClick, disabled, color }: {
   )
 }
 
-function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, updateResult, onAction, onUpdateAction }: {
+function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting, actionLoading, updateResult, onAction, onUpdateAction, onWrenFlag }: {
   c: Container
   update?: UpdateInfo
   metrics?: ContainerMetrics
@@ -145,6 +144,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
   updateResult: { name: string; ok: boolean; msg: string } | null
   onAction: (c: Container, action: string) => void
   onUpdateAction: (name: string, action: string) => void
+  onWrenFlag: (name: string, update: UpdateInfo | undefined, image: string) => void
 }) {
   const [showDetail, setShowDetail] = useState(false)
   const isRunning = c.state === 'running'
@@ -315,6 +315,9 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                 {update.user_status === 'requested' && (
                   <p className="text-xs text-blue-400 animate-pulse">Update queued — processing shortly</p>
                 )}
+                {update.user_status === 'wren_flagged' && (
+                  <p className="text-xs text-violet-400">🤖 Flagged for Wren</p>
+                )}
                 {update.user_status === 'scheduled' && update.scheduled_time && (() => {
                   const d = new Date(update.scheduled_time)
                   const local = d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
@@ -330,6 +333,7 @@ function ContainerRow({ c, update, metrics, acting, rebuilding, forceRestarting,
                     <button onClick={() => onUpdateAction(c.name, 'schedule')} disabled={actionLoading === c.name} title="Apply during nightly maintenance window (03:00–04:00 UTC)" className="text-xs px-3 py-1.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50 transition-colors">Schedule overnight</button>
                     <button onClick={() => onUpdateAction(c.name, 'skip')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-500 disabled:opacity-50 transition-colors">Skip 30d</button>
                     <button onClick={() => onUpdateAction(c.name, 'ignore')} disabled={actionLoading === c.name} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-600 hover:text-zinc-400 disabled:opacity-50 transition-colors">Ignore</button>
+                    <button onClick={() => onWrenFlag(c.name, update, c.image)} disabled={actionLoading === c.name} title="Create a task for Wren to handle this update" className="text-xs px-3 py-1.5 rounded bg-violet-700/70 hover:bg-violet-600 text-violet-100 disabled:opacity-50 transition-colors">🤖 Flag for Wren</button>
                   </>)}
                   {update.user_status === 'auto_approved' && (<>
                     <span className="text-xs text-blue-400 self-center" title="03:47 UTC = 8:47 PM MST / 11:47 PM EST">Auto-updates overnight (03:47 UTC)</span>
@@ -386,6 +390,7 @@ export default function ContainerListExpanded() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [stackUpdating, setStackUpdating] = useState<string | null>(null)
   const [stackError, setStackError] = useState<string | null>(null)
+  const [stackResult, setStackResult] = useState<string | null>(null)
   const [updateResult, setUpdateResult] = useState<{ name: string; ok: boolean; msg: string } | null>(null)
   const [forceRestarting, setForceRestarting] = useState<string | null>(null)
   const [rollingRestart, setRollingRestart] = useState<string | null>(null)
@@ -470,19 +475,60 @@ export default function ContainerListExpanded() {
     setActionLoading(null)
   }
 
+  // Flag a pending container update for Wren: creates a task_queue entry and marks
+  // the container wren_flagged (backend: /api/containers/updates/wren).
+  async function handleWrenFlag(name: string, update: UpdateInfo | undefined, image: string) {
+    setActionLoading(name)
+    setUpdateResult(null)
+    try {
+      const res = await fetch('/api/containers/updates/wren', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          container: name,
+          image,
+          risk: update?.risk,
+          currentVersion: update?.current_version,
+          latestVersion: update?.latest_version,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && (data.success || data.taskId)) {
+        setUpdateResult({ name, ok: true, msg: '🤖 Flagged for Wren' })
+      } else {
+        setUpdateResult({ name, ok: false, msg: data.error || `Flag failed (${res.status})` })
+      }
+      setTimeout(() => setUpdateResult(null), 10000)
+    } catch {
+      setUpdateResult({ name, ok: false, msg: 'Network error — flag failed' })
+      setTimeout(() => setUpdateResult(null), 10000)
+    }
+    refreshUpdates()
+    setActionLoading(null)
+  }
+
   async function handleStackUpdate(stackName: string) {
     setStackUpdating(stackName)
     setStackError(null)
+    setStackResult(null)
     try {
       const res = await fetch('/api/containers/stack-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stackName }) })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        setStackError(data.error || `Stack update failed (${res.status})`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.error) {
+        // A failed container reports 500 WITH results, so prefer the summary.
+        setStackError(data.summary || data.error || `Stack update failed (${res.status})`)
+      } else {
+        // The API verifies by image ID, so this is what actually changed —
+        // not "the command exited 0".
+        setStackResult(data.detached ? (data.message ?? 'Update started') : (data.summary ?? 'Update complete'))
       }
     } catch {
       setStackError('Network error — stack update failed')
     }
-    setTimeout(() => { refresh(); setStackUpdating(null) }, 4000)
+    setStackUpdating(null)
+    refresh()
+    refreshUpdates()
+    setTimeout(() => { setStackResult(null); setStackError(null) }, 15000)
   }
 
   // Group action: restart/stop/start all containers in a stack
@@ -709,6 +755,9 @@ export default function ContainerListExpanded() {
                     {stackError && stackUpdating === null && (
                       <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={stackError}>{stackError}</span>
                     )}
+                    {stackResult && stackUpdating === null && (
+                      <span className="text-[10px] text-emerald-400 max-w-[240px] truncate" title={stackResult}>{stackResult}</span>
+                    )}
                   </>
                 )}
               </div>
@@ -730,6 +779,7 @@ export default function ContainerListExpanded() {
                     updateResult={updateResult}
                     onAction={handleAction}
                     onUpdateAction={handleUpdateAction}
+                    onWrenFlag={handleWrenFlag}
                   />
                 ))}
               </div>

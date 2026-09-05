@@ -90,6 +90,22 @@ export interface EndpointProbe {
 // probe_http_status_code, probe_duration_seconds and probe_ssl_earliest_cert_expiry
 // by the `instance` label (the probed URL). `job` names carry the scope
 // (blackbox-http-{public,internal,protected}).
+//
+// Debounced over a 5m window: blackbox runs rootless and hairpins to the host
+// LAN IP (192.168.1.181) to reach Traefik, which intermittently times out at 5s
+// on the odd scrape (~2/8 endpoints per scrape, rotating). Instantaneous
+// probe_success therefore flickered endpoints red when nothing was down. We take
+// max_over_time(probe_success[5m]) so a probe that succeeded even once in the
+// window reads UP, while a genuinely-down endpoint (fails every scrape for 5m)
+// still reads DOWN.
+//
+// status_code/duration report the value from the most recent SUCCESSFUL scrape —
+// last_over_time((metric and probe_success == 1)[5m]) — falling back to the
+// latest scrape (`or last_over_time(metric[5m])`) only when the endpoint was down
+// the whole window. This keeps a debounced-UP row from displaying the 0/5s a
+// transient timeout records, and (per PR #1 review) avoids max_over_time picking
+// a numerically-larger transient failure code — e.g. a lone 500 — over the real
+// 200 while the row still reads UP. cert uses max (last-known expiry).
 export async function fetchEndpointProbes(): Promise<EndpointProbe[]> {
   const baseUrl = process.env.PROMETHEUS_URL
   if (!baseUrl) return []
@@ -112,10 +128,10 @@ export async function fetchEndpointProbes(): Promise<EndpointProbe[]> {
   }
 
   const [success, status, duration, cert] = await Promise.all([
-    raw('probe_success'),
-    raw('probe_http_status_code'),
-    raw('probe_duration_seconds'),
-    raw('probe_ssl_earliest_cert_expiry'),
+    raw('max_over_time(probe_success[5m])'),
+    raw('last_over_time((probe_http_status_code and probe_success == 1)[5m:15s]) or last_over_time(probe_http_status_code[5m:15s])'),
+    raw('last_over_time((probe_duration_seconds and probe_success == 1)[5m:15s]) or last_over_time(probe_duration_seconds[5m:15s])'),
+    raw('max_over_time(probe_ssl_earliest_cert_expiry[5m])'),
   ])
 
   const byInstance = (rows: Array<{ metric: Record<string, string>; value: [number, string] }>) => {

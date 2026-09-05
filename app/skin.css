@@ -1,0 +1,241 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   AZ-Lab dashboard — SKIN primitive layer.
+
+   This is the single edit-point for the dashboard's *look* (chrome), built
+   entirely from the theme tokens in lib/colorThemes.ts (--t-*). It ports the
+   Claude prototype's design language (AZLabThemeLab.dc.html).
+
+   How the layers compose:
+     lib/colorThemes.ts   → palette   (add a theme = one --t-* block)
+     app/skin.css (here)  → chrome    (change the look = one class)
+     components/ui/*       → primitives (add a widget = compose <Card>/<Bar>/…)
+
+   Because every value below references a --t-* token, all three themes
+   (graphite / daylight / universal) recolor these primitives for free.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── Card / panel ─────────────────────────────────────────────────────────
+   The base surface. radius 11px, hairline border, soft theme shadow. */
+.az-card {
+  position: relative;
+  background: var(--t-surf);
+  border: 1px solid var(--t-bord);
+  border-radius: 11px;
+  padding: 15px;
+  box-shadow: var(--t-shadow);
+}
+
+/* Lift: subtle hover raise + accent border. Pair with .az-card. */
+.az-lift {
+  transition:
+    transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease;
+}
+.az-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--t-shadowh);
+  border-color: var(--t-accline);
+}
+
+/* Corner ticks: the L-bracket accents in TL + BR corners. Add class .az-ticks
+   to an .az-card (which is position:relative). Toggle off with .az-no-ticks. */
+.az-ticks::before,
+.az-ticks::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  opacity: 0.6;
+  z-index: 1;
+}
+.az-ticks::before {
+  top: 7px;
+  left: 7px;
+  border-top: 1.5px solid var(--t-accline);
+  border-left: 1.5px solid var(--t-accline);
+  border-top-left-radius: 2px;
+}
+.az-ticks::after {
+  bottom: 7px;
+  right: 7px;
+  border-bottom: 1.5px solid var(--t-accline);
+  border-right: 1.5px solid var(--t-accline);
+  border-bottom-right-radius: 2px;
+}
+.az-no-ticks.az-ticks::before,
+.az-no-ticks.az-ticks::after { display: none; }
+
+/* Flush variant — full-bleed content (e.g. photo slideshow), no inner padding. */
+.az-card--flush { padding: 0; overflow: hidden; }
+
+/* ── Inner tile (metric cell) ─────────────────────────────────────────────
+   Nested surface inside a card. */
+.az-tile {
+  background: var(--t-surf2);
+  border: 1px solid var(--t-bord2);
+  border-radius: 8px;
+  padding: 10px 11px;
+}
+
+/* ── Bars / meters (the signature look) ───────────────────────────────────
+   Structure:  <div class="az-bar"><div class="az-bar__fill" style="width:%"></div></div>
+   The segmented tick overlay is a ::after on the track so no extra element is
+   needed. Set the fill color via --az-fill (defaults to accent) or a tone
+   modifier class (.is-ok/.is-warn/.is-crit/.is-info). */
+.az-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--t-track);
+  overflow: hidden;
+}
+.az-bar__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 99px;
+  background: var(--az-fill, var(--t-acc));
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Segmented overlay — the dashed-tick texture that reads as "meter". */
+.az-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 10px,
+    var(--t-surf2) 10px 11px
+  );
+  opacity: 0.55;
+}
+.az-bar.is-thin { height: 7px; }
+.az-bar .is-ok,   .az-bar__fill.is-ok   { background: var(--t-ok); }
+.az-bar .is-warn, .az-bar__fill.is-warn { background: var(--t-warn); }
+.az-bar .is-crit, .az-bar__fill.is-crit { background: var(--t-crit); }
+.az-bar .is-info, .az-bar__fill.is-info { background: var(--t-info); }
+
+/* Optional threshold marker inside a bar container (position via left:%). */
+.az-bar__thresh {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--t-txd);
+  opacity: 0.7;
+  z-index: 2;
+}
+
+/* ── Section header ───────────────────────────────────────────────────────
+   <div class="az-section"><span class="az-section__no">01</span>
+     <span class="az-section__title">Infrastructure</span>
+     <span class="az-section__rule"></span></div> */
+.az-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 2px 12px;
+}
+.az-section__no {
+  font: 600 10px/1 var(--font-mono), monospace;
+  letter-spacing: 0.28em;
+  color: var(--t-txf);
+}
+.az-section__title {
+  font: 600 11px/1 var(--font-inter), sans-serif;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--t-txd);
+}
+.az-section__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--t-bord);
+}
+
+/* ── Signal pill (top KPI row) ────────────────────────────────────────────
+   <div class="az-pill"><span class="az-glyph is-ok">●</span>
+     <span class="az-pill__label">queue</span>
+     <span class="az-pill__val">3 open</span></div> */
+.az-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--t-surf);
+  border: 1px solid var(--t-bord);
+  box-shadow: var(--t-shadow);
+}
+.az-pill__label {
+  font: 600 9.5px/1 var(--font-inter), sans-serif;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--t-txf);
+}
+.az-pill__val {
+  margin-left: auto;
+  font: 500 12px/1 var(--font-mono), monospace;
+  color: var(--t-tx);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Typography atoms ─────────────────────────────────────────────────────
+   Reusable text roles from the prototype. */
+.az-label {
+  font: 600 9.5px/1 var(--font-mono), monospace;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--t-txf);
+}
+.az-metric {
+  font: 300 26px/0.85 var(--font-mono), monospace;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-tx);
+}
+.az-metric--sm { font-size: 20px; }
+.az-metric--lg { font-size: 32px; }
+.az-value {
+  font: 500 11px/1 var(--font-mono), monospace;
+  color: var(--t-tx);
+  font-variant-numeric: tabular-nums;
+}
+.az-meta {
+  font: 500 10px/1.3 var(--font-mono), monospace;
+  color: var(--t-txf);
+}
+
+/* ── Status glyph ─────────────────────────────────────────────────────────
+   Shape carries meaning (CVD-safe); color is the tone token. Shapes match
+   statusGlyph in lib/colorThemes.ts: ● UP ▲ WARN ■ DOWN ◆ INFO ○ IDLE. */
+.az-glyph { font-size: 9px; line-height: 1; }
+.az-glyph.is-ok   { color: var(--t-ok); }
+.az-glyph.is-warn { color: var(--t-warn); }
+.az-glyph.is-crit { color: var(--t-crit); }
+.az-glyph.is-info { color: var(--t-info); }
+.az-glyph.is-idle { color: var(--t-txf); }
+
+/* Soft status chip (label on a tinted background). */
+.az-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font: 600 9.5px/1 var(--font-mono), monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.az-chip.is-ok   { background: var(--t-oksoft);   color: var(--t-oktx); }
+.az-chip.is-warn { background: var(--t-warnsoft); color: var(--t-warntx); }
+.az-chip.is-crit { background: var(--t-critsoft); color: var(--t-crittx); }
+.az-chip.is-info { background: var(--t-infosoft); color: var(--t-infotx); }

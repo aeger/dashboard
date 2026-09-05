@@ -2,7 +2,16 @@
 
 import { useWidgetData } from '@/lib/hooks/useWidgetData'
 import { useTileMeta } from '@/components/lab/LabTile'
+import Bar, { type Tone } from '@/components/ui/Bar'
 import type { StoragePool } from '@/lib/prometheus'
+
+// Fill tone: accent for normal (keeps green/red meaningful), amber ≥70, red ≥85.
+function barTone(pct: number | null): Tone {
+  if (pct == null) return 'acc'
+  if (pct >= 85) return 'crit'
+  if (pct >= 70) return 'warn'
+  return 'acc'
+}
 
 // Same thresholds as the host stat cells: green <70, amber 70–85, red ≥85.
 // Marks validated against the zinc-900 surface; text one step brighter.
@@ -114,12 +123,7 @@ export default function StoragePools() {
                 <span className={`font-semibold ${t.text}`}>{pct.toFixed(1)}%</span>
               </span>
             </div>
-            <div className="h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${Math.min(100, pct)}%`, background: t.bar }}
-              />
-            </div>
+            <Bar pct={pct} tone={barTone(pct)} />
           </div>
         )
       })}

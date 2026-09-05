@@ -30,6 +30,8 @@ const STATUS_COLOR: Record<string, { bg: string; text: string; dot: string; acce
   delegated:           { bg: 'bg-purple-900/60',    text: 'text-purple-200',  dot: 'bg-purple-400',  accent: '#c084fc' },
   pending_eval:        { bg: 'bg-indigo-900/60',    text: 'text-indigo-200',  dot: 'bg-indigo-400',  accent: '#818cf8' },
   expired:             { bg: 'bg-zinc-800/40',      text: 'text-zinc-500',    dot: 'bg-zinc-600',    accent: '#52525b' },
+  // Gated: waiting on a time/data gate — auto-released by poll_queue.sweep_waiting_tasks
+  waiting:             { bg: 'bg-sky-900/60',       text: 'text-sky-200',     dot: 'bg-sky-400',     accent: '#38bdf8' },
 }
 
 const PRIORITY_LABEL: Record<number, { label: string; cls: string }> = {
@@ -44,6 +46,7 @@ const SECTIONS = [
   { key: 'review',        label: 'Review',        statuses: ['review_needed'],                headerCls: 'text-orange-400',  urgent: true  },
   { key: 'failed',        label: 'Failed',        statuses: ['failed', 'escalated'],          headerCls: 'text-red-400',     urgent: false },
   { key: 'blocked',       label: 'Blocked',       statuses: ['blocked'],                      headerCls: 'text-amber-400',   urgent: false },
+  { key: 'gated',         label: 'Scheduled',     statuses: ['waiting'],                      headerCls: 'text-sky-400',     urgent: false },
   { key: 'waiting',       label: 'Waiting',       statuses: ['delegated', 'pending_eval'],    headerCls: 'text-indigo-400',  urgent: false },
   { key: 'jeff_working',  label: 'Jeff Working',  statuses: ['in_progress_jeff'],             headerCls: 'text-cyan-400',    urgent: false },
   { key: 'agent_running', label: 'Agent Running', statuses: ['in_progress_agent', 'claimed'], headerCls: 'text-blue-400',    urgent: false },
@@ -82,6 +85,7 @@ const ACTION_DESC: Record<string, string> = {
   '▶ Run Now':                  'trigger the agent to run this immediately',
   'Queue for Agent':            'make it claimable by the agent',
   'Unblock → Back to Queue':    'dependency cleared — agent can retry',
+  '⏰ Release Now':              'skip the gate — agent can claim it on the next poll',
   'Reopen':                     'back into the queue as ready',
   'Archive':                    'hide from the board (kept in the Archived drawer)',
   '▶ Resume → Agent Queue':     'unpause — agent picks it up',
@@ -124,6 +128,34 @@ function humanizeSchedule(raw: string | null | undefined): string {
     if (c[0].startsWith('*/') && c.slice(1).every(x => x === '*')) return `every ${c[0].slice(2)} min`
   }
   return raw
+}
+
+// Absolute timestamp in Arizona time (MST, no DST) — for gate deadlines, where
+// "in 9 hours" is less useful than the actual clock time.
+function azStamp(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const az = new Date(d.getTime() - 7 * 3600_000)
+  const mon = az.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
+  return `${mon} ${az.getUTCDate()}, ${azTime(d.getUTCHours(), d.getUTCMinutes())}`
+}
+
+// One-line description of a waiting task's release gate (status='waiting',
+// migration 136). Mirrors poll_queue.sweep_waiting_tasks semantics: every part
+// listed must pass before the poller flips the task to ready.
+function gateSummary(task: TaskItem): string {
+  const parts: string[] = []
+  if (task.not_before) parts.push(`until ${azStamp(task.not_before)}`)
+  const cond = task.unblock_condition
+  if (cond?.type === 'tasks_complete' && cond.task_ids?.length) {
+    parts.push(`until ${cond.task_ids.length} gate task(s) complete`)
+  } else if (cond?.type === 'file_newer_than' && cond.path) {
+    parts.push(`until ${cond.path.split('/').pop()} updates`)
+  }
+  const deps = task.blocked_by_task_ids?.length ?? 0
+  if (deps > 0) parts.push(`until ${deps} ${deps === 1 ? 'dependency completes' : 'dependencies complete'}`)
+  if (!parts.length) return 'no gate set — will never auto-release'
+  return parts.join(' + ')
 }
 
 // Convenience: target for "agent takes over" buttons. claude-code is the canonical
@@ -180,6 +212,12 @@ const ACTIONS_FOR_STATUS: Record<string, ActionSpec[]> = {
     { label: '▶ Run Now',                 special: 'run',                                 cls: 'bg-violet-900/60 hover:bg-violet-800/80 text-violet-300' },
     { label: 'I\'ll Handle It (Jeff)',    status: 'in_progress_jeff',    target: T_JEFF,  cls: 'bg-cyan-900/60 hover:bg-cyan-800/80 text-cyan-300' },
     { label: 'Needs My Input First',      status: 'pending_jeff_action', target: T_JEFF,  cls: 'bg-rose-900/40 hover:bg-rose-800/60 text-rose-300' },
+    { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
+  ],
+  waiting: [
+    { label: '⏰ Release Now',            status: 'ready',               target: T_AGENT, cls: 'bg-sky-900/60 hover:bg-sky-800/80 text-sky-300' },
+    { label: 'Block',                     status: 'blocked',                              cls: 'bg-amber-900/40 hover:bg-amber-800/60 text-amber-300' },
+    { label: '⏸ Pause',                   status: 'paused',                               cls: 'bg-violet-900/40 hover:bg-violet-800/60 text-violet-300' },
     { label: 'Cancel',                    status: 'cancelled',                            cls: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400' },
   ],
   blocked: [
@@ -325,6 +363,7 @@ function StatsBar({ tasks }: { tasks: TaskItem[] }) {
     { key: 'running',     label: 'Running',     count: (statusCounts['in_progress_agent'] ?? 0) + (statusCounts['in_progress_jeff'] ?? 0) + (statusCounts['claimed'] ?? 0), accent: '#60a5fa' },
     { key: 'ready',       label: 'Ready',       count: (statusCounts['ready'] ?? 0) + (statusCounts['backlog'] ?? 0) + (statusCounts['pending'] ?? 0), accent: '#a1a1aa' },
     { key: 'blocked',     label: 'Blocked',     count: statusCounts['blocked'] ?? 0, accent: '#fbbf24' },
+    { key: 'gated',       label: 'Gated',       count: statusCounts['waiting'] ?? 0, accent: '#38bdf8' },
     { key: 'failed',      label: 'Failed',      count: (statusCounts['failed'] ?? 0) + (statusCounts['escalated'] ?? 0), accent: '#f87171' },
     { key: 'done',        label: 'Done',        count: statusCounts['completed'] ?? 0, accent: '#34d399' },
   ]
@@ -824,11 +863,13 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
   function saveNotes(notes: string, summary: string) {
     if (notesTimer.current) clearTimeout(notesTimer.current)
     notesTimer.current = setTimeout(async () => {
-      await fetch(`/api/taskqueue/${task.id}/status`, {
+      // Notes-only endpoint — must never carry a status. Routing autosaves
+      // through /status wrote the pane's (possibly stale) status back to the
+      // row on every typing pause, silently flipping tasks agents had moved.
+      await fetch(`/api/taskqueue/${task.id}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status: task.status,
           jeff_notes: notes,
           context_summary: summary,
         }),
@@ -1101,6 +1142,23 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           </div>
         )}
 
+        {/* Release gate (status=waiting) */}
+        {task.status === 'waiting' && (
+          <div>
+            <div className="text-[10px] text-sky-600/80 uppercase tracking-widest mb-1">Release Gate</div>
+            <p className="text-sky-300 leading-relaxed">{gateSummary(task)}</p>
+            {task.unblock_condition?.type === 'file_newer_than' && task.unblock_condition.path && (
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                watches {task.unblock_condition.path}
+                {task.unblock_condition.after ? ` (newer than ${task.unblock_condition.after})` : ''}
+              </p>
+            )}
+            <p className="text-[11px] text-zinc-500 mt-1">
+              Auto-released to Ready by the queue poller when the gate opens (checked every 5 min) — or use ⏰ Release Now.
+            </p>
+          </div>
+        )}
+
         {/* Blocked reason */}
         {task.blocked_reason && (
           <div>
@@ -1143,13 +1201,26 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           )}
         </div>
 
-        {/* Task ID */}
-        <div className="flex items-center justify-between pt-1 border-t border-zinc-800/40">
-          <span className="text-zinc-700 font-mono text-[10px] truncate">{task.id}</span>
+        {/* Task ID — agents quote the 8-char prefix ("filed as 4df95ca3"), so that
+            is what has to be readable at a glance. It used to render in zinc-700,
+            which is charcoal on a charcoal panel: present, but invisible. */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-zinc-800/40">
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-600 uppercase tracking-widest">Task ID</div>
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <span className="font-mono text-xs text-zinc-200 font-semibold flex-shrink-0">
+                {task.id.slice(0, 8)}
+              </span>
+              <span className="font-mono text-[10px] text-zinc-500 truncate">
+                {task.id.slice(8)}
+              </span>
+            </div>
+          </div>
           <button
             onClick={() => navigator.clipboard.writeText(task.id)}
-            className="text-[10px] text-zinc-600 hover:text-zinc-300 ml-2 flex-shrink-0"
-          >📋</button>
+            title="Copy full task ID"
+            className="text-[10px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 hover:border-zinc-500 rounded px-2 py-1 ml-2 flex-shrink-0 transition-colors"
+          >📋 Copy</button>
         </div>
       </div>
 
@@ -1301,6 +1372,12 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
           {task.source && task.target && (
             <span className="text-[10px] text-zinc-600">{task.source} → {task.target}</span>
           )}
+          {/* Short ID in the list too — agents refer to tasks as "filed as 4df95ca3",
+              and matching that to a row shouldn't mean opening every task. */}
+          <span
+            className="text-[10px] font-mono text-zinc-500 ml-auto flex-shrink-0"
+            title={task.id}
+          >{task.id.slice(0, 8)}</span>
         </div>
         <p className="text-sm text-zinc-200 leading-snug group-hover:text-white transition-colors">{task.title}</p>
         {urgent && (task.context?.action_required as string | undefined) ? (
@@ -1310,6 +1387,9 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
         ) : task.description ? (
           <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2 leading-relaxed">{task.description}</p>
         ) : null}
+        {task.status === 'waiting' && (
+          <p className="text-[11px] text-sky-300/90 mt-0.5 leading-relaxed">⏳ {gateSummary(task)}</p>
+        )}
         {/* Context summary if available */}
         {task.context?.context_summary ? (
           <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-1 italic">
@@ -1747,7 +1827,11 @@ interface ScheduledActivityRow {
   name: string
   display_name: string | null
   description: string | null
-  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring'
+  // Mirrors the scheduled_activity.kind CHECK constraint. `cowork_scheduled`
+  // came in with migration 129 and was never added here, so its row hit an
+  // undefined KIND_LABEL lookup and crashed the tab. The string fallback keeps
+  // a future migration from doing the same before the UI catches up.
+  kind: 'systemd' | 'cron' | 'ccr_trigger' | 'agent_loop' | 'task_queue_recurring' | 'cowork_scheduled' | (string & {})
   schedule: string
   schedule_tz: string
   enabled: boolean
@@ -1770,6 +1854,7 @@ const KIND_LABEL: Record<ScheduledActivityRow['kind'], { short: string; long: st
   ccr_trigger:          { short: 'ccr',      long: 'claude.ai trigger',      cls: 'bg-purple-950/30 border-purple-800/40 text-purple-300' },
   agent_loop:           { short: 'agent',    long: 'always-on agent loop',   cls: 'bg-emerald-950/30 border-emerald-800/40 text-emerald-300' },
   task_queue_recurring: { short: 'task',     long: 'task_queue recurring',   cls: 'bg-cyan-950/30 border-cyan-800/40 text-cyan-300' },
+  cowork_scheduled:     { short: 'cowork',   long: 'Cowork scheduled task',  cls: 'bg-violet-950/30 border-violet-800/40 text-violet-300' },
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -1851,7 +1936,7 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
         >
           All ({rows.length})
         </button>
-        {(Object.keys(KIND_LABEL) as ScheduledActivityRow['kind'][]).map(k => {
+        {(Array.from(new Set([...Object.keys(KIND_LABEL), ...rows.map(r => r.kind)])) as ScheduledActivityRow['kind'][]).map(k => {
           const count = kindCounts[k] ?? 0
           if (count === 0) return null
           const isActive = kindFilter === k
@@ -1861,11 +1946,11 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
               onClick={() => setKindFilter(isActive ? null : k)}
               className={`text-[10px] px-2 py-1 rounded-full border transition-colors ${
                 isActive
-                  ? KIND_LABEL[k].cls + ' ring-1 ring-current'
+                  ? (KIND_LABEL[k]?.cls ?? 'bg-zinc-700 border-zinc-500 text-zinc-100') + ' ring-1 ring-current'
                   : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:border-zinc-600'
               }`}
             >
-              {KIND_LABEL[k].short} ({count})
+              {KIND_LABEL[k]?.short ?? k} ({count})
             </button>
           )
         })}
@@ -1880,7 +1965,12 @@ function ScheduledActivityView({ onCount }: { onCount?: (n: number) => void }) {
       {filtered.length === 0 ? (
         <div className="text-zinc-600 text-xs text-center py-8 italic">No matches.</div>
       ) : filtered.map(row => {
-        const kindCfg = KIND_LABEL[row.kind]
+        // A kind added by a migration but not yet known to this UI must not
+        // take the whole tab down (cowork_scheduled did exactly that).
+        const kindCfg = KIND_LABEL[row.kind] ?? {
+          short: row.kind, long: row.kind,
+          cls: 'bg-zinc-800/60 border-zinc-700/40 text-zinc-400',
+        }
         const expanded = expandedId === row.id
         const statusDot = STATUS_DOT[row.last_status ?? 'unknown'] ?? STATUS_DOT.unknown
         const sourceTitle = row.display_name ?? row.name
@@ -2706,9 +2796,30 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
   const descRef = useRef<HTMLTextAreaElement>(null)
 
+  // Has the user typed anything worth protecting?
+  const isDirty =
+    form.title.trim() !== '' ||
+    form.description.trim() !== '' ||
+    form.tags.trim() !== ''
+
+  // Guarded close: don't silently discard typed input on a stray click / Escape.
+  const requestClose = useCallback(() => {
+    if (isDirty && !window.confirm('Discard this task? Your unsaved input will be lost.')) return
+    onClose()
+  }, [isDirty, onClose])
+
   function handleBackdrop(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) onClose()
+    if (e.target === e.currentTarget) requestClose()
   }
+
+  // Close on Escape (also guarded), so keyboard users aren't stuck.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); requestClose() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [requestClose])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -2763,7 +2874,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-200">New Task</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
+          <button onClick={requestClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">&times;</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4 overflow-y-auto">

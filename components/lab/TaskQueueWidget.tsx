@@ -25,6 +25,7 @@ const STATUS_BG: Record<string, string> = {
   delegated:           'bg-purple-900/60 text-purple-300',
   pending_eval:        'bg-indigo-900/60 text-indigo-300',
   expired:             'bg-zinc-800 text-zinc-500',
+  waiting:             'bg-sky-900/60 text-sky-300',
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -47,6 +48,7 @@ const STATUS_DOT: Record<string, string> = {
   delegated:           'bg-purple-400',
   pending_eval:        'bg-indigo-400',
   expired:             'bg-zinc-600',
+  waiting:             'bg-sky-400',
 }
 
 const PRIORITY_LABEL: Record<number, { label: string; cls: string }> = {
@@ -287,6 +289,7 @@ function SummaryBar({ summary }: { summary: Record<string, number> }) {
     { key: 'in_progress_agent',   label: 'agent',      cls: 'text-blue-400' },
     { key: 'in_progress_jeff',    label: 'jeff',       cls: 'text-cyan-400' },
     { key: 'blocked',             label: 'blocked',    cls: 'text-amber-400' },
+    { key: 'waiting',             label: 'gated',      cls: 'text-sky-400' },
     { key: 'pending',             label: 'pending',    cls: 'text-zinc-400' },
     { key: 'ready',               label: 'ready',      cls: 'text-zinc-400' },
   ]

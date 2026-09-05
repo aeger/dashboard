@@ -7,22 +7,33 @@ import type { TaskItem } from '@/app/api/taskqueue/route'
 const TRANSITIONS: Record<string, string[]> = {
   // New JeffLoop statuses
   backlog:              ['ready', 'cancelled', 'in_progress_jeff', 'pending_eval', 'paused'],
-  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval', 'paused'],
-  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed', 'paused'],
-  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval', 'paused'],
-  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready', 'paused'],
+  ready:                ['in_progress_agent', 'in_progress_jeff', 'backlog', 'cancelled', 'pending_eval', 'paused', 'waiting'],
+  in_progress_agent:    ['pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'ready', 'cancelled', 'failed', 'paused', 'waiting'],
+  in_progress_jeff:     ['review_needed', 'completed', 'blocked', 'ready', 'in_progress_agent', 'hand_back', 'pending_eval', 'paused', 'waiting'],
+  pending_jeff_action:  ['in_progress_jeff', 'in_progress_agent', 'completed', 'cancelled', 'blocked', 'pending_eval', 'ready', 'paused', 'waiting'],
   review_needed:        ['completed', 'in_progress_jeff', 'in_progress_agent', 'cancelled', 'pending_eval', 'ready', 'paused'],
-  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled', 'paused'],
+  blocked:              ['ready', 'in_progress_agent', 'in_progress_jeff', 'cancelled', 'paused', 'waiting'],
   paused:               ['ready', 'in_progress_jeff', 'in_progress_agent', 'cancelled'],  // Resume → agent / Jeff / cancel
+  // waiting = gated (time/data) — released automatically by poll_queue.sweep_waiting_tasks
+  // when the gate opens, or manually here ("Release Now" → ready).
+  waiting:              ['ready', 'blocked', 'cancelled', 'paused', 'in_progress_jeff'],
   completed:            ['ready'],  // Reopen
   cancelled:            ['ready'],  // Restore
   archived:             [],         // Use restore endpoint
-  // Legacy status compat
-  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'claimed', 'pending_eval'],
-  claimed:              ['in_progress_agent', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
-  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'pending_eval'],
-  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'pending_eval'],
-  delegated:            ['in_progress_agent', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval'],
+  // Legacy status compat.
+  // These all need 'in_progress_jeff' and 'completed': agents create rows at
+  // `pending` (and hand off via delegated/escalated/failed), so these are exactly
+  // the rows that land in front of Jeff — and without those two exits he could
+  // neither take one into his working queue nor close it. The dead end was
+  // reachable but not obvious: `pending → in_progress_agent → in_progress_jeff`
+  // works, so bouncing a task to the agent and back "fixed" it, which is what
+  // made this look like a flaky UI rather than a missing edge. Reported by Jeff
+  // 2026-08-29 on task bbbf9cb5 and reproduced as a 422 on the live endpoint.
+  pending:              ['ready', 'cancelled', 'backlog', 'in_progress_agent', 'in_progress_jeff', 'claimed', 'pending_eval', 'waiting', 'completed'],
+  claimed:              ['in_progress_agent', 'in_progress_jeff', 'pending_eval', 'pending_jeff_action', 'review_needed', 'blocked', 'completed', 'failed', 'ready'],
+  failed:               ['ready', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff', 'pending_eval', 'waiting', 'completed'],
+  escalated:            ['pending_jeff_action', 'review_needed', 'ready', 'cancelled', 'in_progress_jeff', 'pending_eval', 'completed'],
+  delegated:            ['in_progress_agent', 'in_progress_jeff', 'pending_jeff_action', 'review_needed', 'ready', 'pending_eval', 'completed'],
   pending_eval:         ['review_needed', 'ready', 'completed', 'cancelled', 'pending_jeff_action', 'in_progress_agent', 'in_progress_jeff'],
   expired:              ['ready', 'cancelled'],
 }
@@ -59,7 +70,7 @@ export async function POST(
 
   // Fetch current task
   const fetchRes = await fetch(
-    `${url}/rest/v1/task_queue?id=eq.${id}&select=id,title,status,context`,
+    `${url}/rest/v1/task_queue?id=eq.${id}&select=id,title,status,context,tags,result`,
     { headers: SUPA_HEADERS(key), cache: 'no-store' }
   )
   if (!fetchRes.ok) return NextResponse.json({ error: 'Failed to fetch task' }, { status: 500 })
@@ -88,12 +99,74 @@ export async function POST(
     }
   }
 
+  const taskRow = task as unknown as { tags?: string[] | null; result?: string | null }
+  const tags = taskRow.tags ?? []
+
+  // Premise-held rows (migrations 130/145): a bare status PATCH out of
+  // pending_jeff_action is refused by the DB guard, so route Jeff's click
+  // through the sanctioned exits instead. His click IS the exogenous verdict.
+  if (currentStatus === 'pending_jeff_action' && tags.includes('premise-hold') && newStatus !== currentStatus) {
+    const note = body.jeff_notes?.trim() || 'decided via dashboard'
+    let rpc: { fn: string; args: Record<string, unknown> } | null = null
+    if (newStatus === 'completed') {
+      rpc = { fn: 'premise_ack', args: { p_task: id, p_auditor: 'jeff', p_note: note } }
+    } else if (newStatus === 'ready' || newStatus === 'pending' || newStatus === 'in_progress_agent') {
+      rpc = { fn: 'premise_decide', args: { p_task: id, p_accept: true, p_auditor: 'jeff', p_note: note } }
+    } else if (newStatus === 'cancelled') {
+      rpc = { fn: 'premise_decide', args: { p_task: id, p_accept: false, p_auditor: 'jeff', p_note: note } }
+    } else {
+      return NextResponse.json(
+        {
+          error: `This task is premise-held: record a verdict first. "Mark Complete" acks finished work, ` +
+                 `"Return to Agent Queue" accepts the premise (agent will build it), "Cancel" rejects it. ` +
+                 `"${newStatus}" is not a valid exit while the premise verdict is pending.`,
+        },
+        { status: 422 }
+      )
+    }
+
+    const rpcRes = await fetch(`${url}/rest/v1/rpc/${rpc.fn}`, {
+      method: 'POST',
+      headers: SUPA_HEADERS(key),
+      body: JSON.stringify(rpc.args),
+    })
+    if (!rpcRes.ok) {
+      const err = await rpcRes.text()
+      return NextResponse.json({ error: `${rpc.fn} refused the transition`, detail: err }, { status: 422 })
+    }
+    logDashboardActivity(url, key, id, `dashboard: ${currentStatus} → ${newStatus} via ${rpc.fn} (jeff)`).catch(() => {})
+
+    // Persist any notes alongside the verdict, then return the fresh row.
+    const refetch = await fetch(
+      `${url}/rest/v1/task_queue?id=eq.${id}&select=*`,
+      { headers: SUPA_HEADERS(key), cache: 'no-store' }
+    )
+    const fresh: TaskItem[] = refetch.ok ? await refetch.json() : []
+    return NextResponse.json({ ok: true, task: fresh[0] ?? null, via: rpc.fn })
+  }
+
   // Merge JeffLoop extras into context JSONB
   const existingContext = (task.context ?? {}) as Record<string, unknown>
   const updatedContext: Record<string, unknown> = { ...existingContext }
   if (body.jeff_notes !== undefined) updatedContext.jeff_notes = body.jeff_notes
   if (body.context_summary !== undefined) updatedContext.context_summary = body.context_summary
   if (body.action_required !== undefined) updatedContext.action_required = body.action_required
+
+  // Leaving a Jeff-facing status for agent work means Jeff HAS acted — a stale
+  // action_required must not survive the hand-back. poll_queue's preflight
+  // blocks never-run tasks that carry one, and until 2026-08-25 a task Jeff
+  // approved (pending_jeff_action → ready) was re-blocked on the next poll:
+  // approve → ready → blocked → attention view, forever. Archive it to
+  // last_action_required so the history stays on the row.
+  const JEFF_FACING = new Set(['pending_jeff_action', 'review_needed', 'in_progress_jeff'])
+  const AGENT_BOUND = new Set(['ready', 'pending', 'in_progress_agent', 'pending_eval', 'waiting', 'backlog'])
+  if (
+    JEFF_FACING.has(currentStatus) && AGENT_BOUND.has(newStatus) &&
+    body.action_required === undefined && updatedContext.action_required
+  ) {
+    updatedContext.last_action_required = updatedContext.action_required
+    updatedContext.action_required = null
+  }
 
   // If moving to in_progress_jeff, ensure checklist exists (empty array default)
   if (newStatus === 'in_progress_jeff' && !updatedContext.checklist) {
@@ -103,6 +176,21 @@ export async function POST(
   const patch: Record<string, unknown> = {
     status: newStatus,
     context: updatedContext,
+  }
+
+  // Reopen semantics: sending a task that already has a result back to a
+  // claimable status is an explicit re-run request. The pollers' idempotency
+  // guard refuses to re-execute a non-recurring row that still carries a
+  // result, so stash it in context and clear the column — that IS the
+  // "reopened" marker. The prior result stays available to the next run.
+  const CLAIMABLE = new Set(['ready', 'pending'])
+  if (
+    newStatus !== currentStatus && CLAIMABLE.has(newStatus) &&
+    typeof taskRow.result === 'string' && taskRow.result.trim() !== ''
+  ) {
+    updatedContext.prior_result = taskRow.result
+    updatedContext.reopened_at = new Date().toISOString()
+    patch.result = null
   }
 
   // Set claimed_at when agent picks up a task
@@ -142,6 +230,13 @@ export async function POST(
     )
   }
 
+  // Attribute the write: dashboard transitions were previously invisible to
+  // agent_activity, which is exactly why agents spent four days hunting an
+  // "unlogged writer" that was this endpoint.
+  if (newStatus !== currentStatus) {
+    logDashboardActivity(url, key, id, `dashboard: ${currentStatus} → ${newStatus} (jeff)`).catch(() => {})
+  }
+
   // Auto-notify Jeff when task enters an attention-required status
   if (NOTIFY_STATUSES.has(newStatus)) {
     const ctx = updatedTask?.context ?? updatedContext
@@ -161,6 +256,20 @@ export async function POST(
   }
 
   return NextResponse.json({ ok: true, task: updatedTask })
+}
+
+async function logDashboardActivity(url: string, key: string, taskId: string, content: string): Promise<void> {
+  await fetch(`${url}/rest/v1/agent_activity`, {
+    method: 'POST',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agent: 'jeff-dashboard',
+      task_id: taskId,
+      activity_type: 'status',
+      content,
+      metadata: { via: 'dashboard:/api/taskqueue/[id]/status' },
+    }),
+  })
 }
 
 async function syncGoalProgress(url: string, key: string, goalId: string): Promise<void> {

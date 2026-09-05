@@ -73,11 +73,17 @@ export default function TaskDependencyGraph({ tasks, onTaskSelect }: TaskDepende
       }
     })
 
-    // Create edges (blocked_by means task -> blocking task)
+    // Create edges (blocked_by means task -> blocking task).
+    // Only if BOTH endpoints have nodes: a blocker that is archived or outside
+    // the fetched window gets no node above, and a dangling edge then made the
+    // layout do positions.get(edge.from)!.x on undefined — which crashed the
+    // whole tab with a client-side exception rather than dropping one edge.
     tasks.forEach(task => {
       if (task.blocked_by_task_ids) {
         task.blocked_by_task_ids.forEach(blockingId => {
-          edges.push({ from: blockingId, to: task.id })
+          if (nodes.has(blockingId) && nodes.has(task.id)) {
+            edges.push({ from: blockingId, to: task.id })
+          }
         })
       }
     })
