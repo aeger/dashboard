@@ -1201,13 +1201,26 @@ function DetailPanel({ task: initialTask, onClose, onRefresh, onEditDependencies
           )}
         </div>
 
-        {/* Task ID */}
-        <div className="flex items-center justify-between pt-1 border-t border-zinc-800/40">
-          <span className="text-zinc-700 font-mono text-[10px] truncate">{task.id}</span>
+        {/* Task ID — agents quote the 8-char prefix ("filed as 4df95ca3"), so that
+            is what has to be readable at a glance. It used to render in zinc-700,
+            which is charcoal on a charcoal panel: present, but invisible. */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-zinc-800/40">
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-600 uppercase tracking-widest">Task ID</div>
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <span className="font-mono text-xs text-zinc-200 font-semibold flex-shrink-0">
+                {task.id.slice(0, 8)}
+              </span>
+              <span className="font-mono text-[10px] text-zinc-500 truncate">
+                {task.id.slice(8)}
+              </span>
+            </div>
+          </div>
           <button
             onClick={() => navigator.clipboard.writeText(task.id)}
-            className="text-[10px] text-zinc-600 hover:text-zinc-300 ml-2 flex-shrink-0"
-          >📋</button>
+            title="Copy full task ID"
+            className="text-[10px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 hover:border-zinc-500 rounded px-2 py-1 ml-2 flex-shrink-0 transition-colors"
+          >📋 Copy</button>
         </div>
       </div>
 
@@ -1359,6 +1372,12 @@ function TaskRow({ task, selected, onClick, onContextMenu, onNeedsAction }: {
           {task.source && task.target && (
             <span className="text-[10px] text-zinc-600">{task.source} → {task.target}</span>
           )}
+          {/* Short ID in the list too — agents refer to tasks as "filed as 4df95ca3",
+              and matching that to a row shouldn't mean opening every task. */}
+          <span
+            className="text-[10px] font-mono text-zinc-500 ml-auto flex-shrink-0"
+            title={task.id}
+          >{task.id.slice(0, 8)}</span>
         </div>
         <p className="text-sm text-zinc-200 leading-snug group-hover:text-white transition-colors">{task.title}</p>
         {urgent && (task.context?.action_required as string | undefined) ? (
