@@ -253,7 +253,10 @@ export async function POST(req: NextRequest) {
         status: status ?? 'ready',
         priority: priority ?? 2,
         source: source?.trim() || 'dashboard',
-        target: target?.trim() || null,
+        // task_queue.target is NOT NULL with a CHECK constraint — an omitted/blank target
+        // means "unassigned", which is 'auto' (poll_queue.py routes it). Sending null here
+        // used to fail with 23502 and surface as a bare "Failed to create task".
+        target: target?.trim() || 'auto',
         tags: tags ?? [],
         context: Object.keys(taskContext).length ? taskContext : null,
       }),
@@ -261,7 +264,11 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const err = await res.text()
-      return NextResponse.json({ error: 'Failed to create task', detail: err }, { status: 500 })
+      // Surface the Postgres message (constraint name, offending column) instead of a bare
+      // "Failed to create task" — that opacity is what made the null-target bug hard to read.
+      let detail = err
+      try { detail = JSON.parse(err).message ?? err } catch { /* keep raw body */ }
+      return NextResponse.json({ error: `Failed to create task: ${detail}`, detail: err }, { status: 500 })
     }
 
     const rows = await res.json()

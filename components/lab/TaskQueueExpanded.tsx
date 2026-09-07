@@ -2860,7 +2860,18 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     { value: 2, label: '2 — Normal' },
     { value: 3, label: '3 — Low' },
   ]
-  const AGENTS = ['claude-code', 'cowork', 'atlas', 'forge', 'volt', 'hermes', '']
+  // Must stay in sync with the task_queue_target_check constraint (migration 151).
+  // 'auto' = unassigned: poll_queue.py's route_auto_tasks() classifies it to a real agent.
+  const AGENTS = [
+    { value: 'claude-code', label: 'claude-code (Wren)' },
+    { value: 'wren', label: 'wren' },
+    { value: 'cowork', label: 'cowork (Iris)' },
+    { value: 'iris', label: 'iris' },
+    { value: 'atlas', label: 'atlas' },
+    { value: 'desktop', label: 'desktop' },
+    { value: 'jeff', label: 'jeff' },
+    { value: 'auto', label: '\u2014 unassigned (auto-route) \u2014' },
+  ]
 
   return (
     <div
@@ -2897,7 +2908,7 @@ function NewTaskModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 onChange={e => setForm(f => ({ ...f, target: e.target.value }))}
                 className={inputCls}
               >
-                {AGENTS.map(a => <option key={a} value={a}>{a || '— unassigned —'}</option>)}
+                {AGENTS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
               </select>
             </div>
           </div>

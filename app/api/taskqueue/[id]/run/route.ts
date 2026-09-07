@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sshExec } from '@/lib/ssh-exec'
 
 const SUPA_HEADERS = (key: string) => ({
   apikey: key,
@@ -37,14 +36,22 @@ export async function POST(
     )
   }
 
-  try {
-    await sshExec('systemctl --user start --no-block claude-queue-poll.service', 15_000)
-    return NextResponse.json({ ok: true, message: 'Poller triggered' })
-  } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err)
-    return NextResponse.json(
-      { error: 'Failed to trigger poller', detail },
-      { status: 500 }
-    )
-  }
+  // This used to run `systemctl --user start claude-queue-poll.service`.
+  //
+  // That unit was retired and MASKED on 2026-09-07: it and argus.service both
+  // claimed from the same queue and double-dispatched (task bd2eecfe went out
+  // twice, 71s apart, one row per daemon). Starting a masked unit fails, so the
+  // old call would now 500 on every click.
+  //
+  // It also made this endpoint a queue dispatcher in its own right -- an HTTP
+  // route that could start a second claimer was almost certainly the unexplained
+  // poller run at 09:19Z that survived two rounds of "the timer is retired".
+  //
+  // Argus polls every POLL_INTERVAL (60s) and claims anything in ready/pending,
+  // so a runnable task needs no kick: confirm it is runnable and say when it will
+  // be picked up. Nothing here starts a second dispatcher.
+  return NextResponse.json({
+    ok: true,
+    message: 'Task is runnable — Argus will claim it within ~60s.',
+  })
 }
