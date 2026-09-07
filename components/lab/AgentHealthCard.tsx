@@ -35,7 +35,6 @@ const STATUS_STYLE: Record<string, { tone: StatusTone; pulse: boolean; label: st
 const AGENT_STATUS_LABEL: Record<string, Partial<Record<string, string>>> = {
   wren:        { healthy: 'Running'   },
   discord_bot: { healthy: 'Connected' },
-  task_poller: { healthy: 'Active'    },
   gmail_mcp:   { healthy: 'Active'    },
   argus:       { healthy: 'Active', active: 'Active' },
 }
@@ -43,13 +42,16 @@ const AGENT_STATUS_LABEL: Record<string, Partial<Record<string, string>>> = {
 const AGENT_DISPLAY: Record<string, string> = {
   wren:        'Wren (Claude Code)',
   discord_bot: 'Discord bot',
-  task_poller: 'Task queue poller',
   gmail_mcp:   'Gmail MCP',
   argus:       'Argus (orchestrator)',
 }
 
-// Known interesting agents in display order
-const AGENT_ORDER = ['wren', 'argus', 'discord_bot', 'task_poller', 'gmail_mcp']
+// Known interesting agents in display order.
+// `task_poller` removed 2026-09-07: claude-queue-poll.timer was retired (it and
+// argus both claimed from the same queue and double-dispatched), so nothing
+// writes that heartbeat any more. Left in the list it would have shown as a
+// permanently stale agent for a process that no longer exists.
+const AGENT_ORDER = ['wren', 'argus', 'discord_bot', 'gmail_mcp']
 
 function formatAge(iso: string | null): string {
   if (!iso) return 'never'
