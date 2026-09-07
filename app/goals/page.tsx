@@ -530,7 +530,7 @@ function GoalEditForm({ goal, flat = [], onClose, onSaved }: { goal: Goal; flat?
           <option value="claude-code">Wren (Claude Code)</option>
           <option value="iris">Iris (Cowork)</option>
           <option value="atlas">Atlas (Desktop)</option>
-          <option value="forge">Forge</option>
+          <option value="auto">Auto-route</option>
         </select>
         <button onClick={handleSave} disabled={saving || !canSave}
                 className="flex-1 py-1.5 rounded text-xs bg-sky-900/60 text-sky-300 hover:bg-sky-800/80 disabled:opacity-40">
